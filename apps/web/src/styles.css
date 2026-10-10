@@ -287,7 +287,8 @@ code.chip { font-size: 11px; }
 .code { margin: 0; font: 12.5px/1.65 var(--mono); min-width: max-content; padding: 10px 0; }
 .ln { display: flex; padding-right: 16px; }
 .ln .gutter { width: 52px; flex: none; text-align: right; padding-right: 16px; color: var(--fg-3); user-select: none; }
-.code.diff .gutter { width: 20px; }
+.code.diff .gutter { width: 28px; padding-right: 10px; }
+.ln.add .gutter { color: var(--add); } .ln.del .gutter { color: var(--del); }
 .ln.add { background: color-mix(in srgb, var(--add) 9%, transparent); }
 .ln.del { background: color-mix(in srgb, var(--del) 9%, transparent); }
 .ln.hunk, .ln.meta { color: var(--fg-3); }

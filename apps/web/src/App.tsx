@@ -12,6 +12,8 @@ import {
   type TranscriptItem,
 } from "@perzian/protocol";
 import { fetchText, isDemo, useDaemon } from "./daemon.ts";
+import { tokenize } from "./highlight.ts";
+import type { ThemedToken } from "shiki/core";
 import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, ago, churn, useTick } from "./bits.tsx";
 
 type Send = (c: Command) => void;
@@ -466,17 +468,54 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
 
 /* ───────────── Read-only code ───────────── */
 
+type LineKind = "" | "add" | "del" | "hunk" | "meta";
+function classify(l: string, diff: boolean): LineKind {
+  if (!diff) return "";
+  if (l.startsWith("@@")) return "hunk";
+  if (/^(diff |index |--- |\+\+\+ |new file|deleted file|similarity|rename |old mode|new mode|\\ No newline)/.test(l)) return "meta";
+  if (l.startsWith("+")) return "add";
+  if (l.startsWith("-")) return "del";
+  return "";
+}
+
 function FileViewer({ session, path, onClose }: { session: string; path: string; onClose: () => void }) {
   const [tab, setTab] = useState<"diff" | "file">("diff");
   const [text, setText] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [tokens, setTokens] = useState<Map<number, ThemedToken[]> | null>(null);
   useEffect(() => {
     setText(null);
     setErr(null);
+    setTokens(null);
     fetchText(tab, session, path).then(setText, (e) => setErr(String(e.message ?? e)));
   }, [tab, session, path]);
 
-  const lines = (text ?? "").replace(/\n$/, "").split("\n");
+  const diff = tab === "diff";
+  const lines = useMemo(() => (text ?? "").replace(/\n$/, "").split("\n"), [text]);
+  const kinds = useMemo(() => lines.map((l) => classify(l, diff)), [lines, diff]);
+
+  // Highlight only code lines; in a diff, strip the +/-/space prefix first and map tokens back by index.
+  useEffect(() => {
+    if (text === null) return;
+    let cancelled = false;
+    const idx: number[] = [];
+    const code: string[] = [];
+    lines.forEach((l, i) => {
+      if (kinds[i] === "hunk" || kinds[i] === "meta") return;
+      idx.push(i);
+      code.push(diff ? l.slice(1) : l);
+    });
+    tokenize(code, path).then((t) => {
+      if (cancelled || !t) return;
+      const m = new Map<number, ThemedToken[]>();
+      t.forEach((line, j) => m.set(idx[j], line));
+      setTokens(m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [text, lines, kinds, diff, path]);
+
   return (
     <div className="modal" onClick={onClose}>
       <div className="viewer" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={path}>
@@ -495,11 +534,18 @@ function FileViewer({ session, path, onClose }: { session: string; path: string;
           {text !== null && (
             <pre className={`code ${tab}`}>
               {lines.map((l, i) => {
-                const cls = tab !== "diff" ? "" : l.startsWith("@@") ? "hunk" : l.startsWith("+") && !l.startsWith("+++") ? "add" : l.startsWith("-") && !l.startsWith("---") ? "del" : /^(diff|index|---|\+\+\+|new file|deleted file)/.test(l) ? "meta" : "";
+                const k = kinds[i];
+                const toks = tokens?.get(i);
                 return (
-                  <div key={i} className={`ln ${cls}`}>
-                    <span className="gutter">{tab === "file" ? i + 1 : ""}</span>
-                    <span>{l || " "}</span>
+                  <div key={i} className={`ln ${k}`}>
+                    <span className="gutter">{diff ? (k === "add" ? "+" : k === "del" ? "−" : "") : i + 1}</span>
+                    <span>
+                      {toks
+                        ? toks.length
+                          ? toks.map((t, j) => <span key={j} style={{ color: t.color }}>{t.content}</span>)
+                          : " "
+                        : (diff && k !== "hunk" && k !== "meta" ? l.slice(1) : l) || " "}
+                    </span>
                   </div>
                 );
               })}
