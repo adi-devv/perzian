@@ -1,0 +1,13 @@
+{
+  "name": "@perzian/desktop",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^38.2.0"
+  }
+}
