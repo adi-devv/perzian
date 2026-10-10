@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "web", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev", "--workspace=@perzian/web"], "port": 4318 }
+  ]
+}

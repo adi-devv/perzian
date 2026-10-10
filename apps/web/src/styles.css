@@ -100,7 +100,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* tower */
 .tower { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 22px; }
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
-.tile { --c: var(--idle); position: relative; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 12px 12px 15px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; transition: border-color .12s, transform .12s; }
+.tile { position: relative; text-align: left; background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 12px 12px 15px; display: flex; flex-direction: column; gap: 8px; overflow: hidden; transition: border-color .12s, transform .12s; }
 .tile::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--c); }
 .tile:hover { border-color: var(--fg-3); }
 .tile.active { border-color: var(--c); }
