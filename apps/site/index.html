@@ -23,7 +23,6 @@
     <div class="wrap nav-inner">
       <a class="brand" href="#top" aria-label="Perzian home"><span class="mark" aria-hidden="true"></span>Perzian</a>
       <nav class="nav-links" aria-label="Primary">
-        <a href="#how">How it works</a>
         <a href="#features">Features</a>
         <a href="demo/?demo">Demo</a>
         <a href="https://github.com/adi-devv/perzian">GitHub</a>
@@ -33,12 +32,11 @@
   </header>
 
   <main id="top">
-    <!-- Hero -->
     <section class="hero">
       <div class="wrap">
-        <p class="eyebrow"><span class="dot s-working" aria-hidden="true"></span>Open source · macOS · Claude Code, Codex</p>
+        <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Open source · macOS · Claude Code, Codex</p>
         <h1>Run a crew of coding agents.<br /><span class="muted">See what they did at a glance.</span></h1>
-        <p class="lede">Perzian is a desktop workspace for parallel coding agents. You talk to one lead agent. It splits the work into sessions, each in its own git worktree, and brings back status, decisions and verified results instead of walls of text.</p>
+        <p class="lede">One lead agent splits your work into parallel sessions, each in its own git worktree. You get status, decisions and verified results, not transcripts.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="https://github.com/adi-devv/perzian#quick-start">Get Perzian for macOS</a>
           <a class="btn" href="demo/?demo">Try the live demo <span aria-hidden="true">→</span></a>
@@ -48,20 +46,17 @@
           <button class="copy" type="button" data-copy="install-cmd" aria-label="Copy install command">Copy</button>
         </div>
       </div>
-
       <figure class="shot wrap-wide">
         <div class="window">
           <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="assets/app.png" width="1494" height="812" alt="Perzian app: a sessions list on the left, the lead agent's conversation with two decision cards in the middle, and a session's change map listing added and removed functions on the right." />
+          <img src="assets/app.png" width="1494" height="812" alt="Perzian app: sessions on the left, the lead agent and two decision cards in the middle, and a session's function-level change map on the right." />
         </div>
-        <figcaption>The real app, running in demo mode. Left: every session. Middle: your lead agent and what needs you. Right: one session's change map, down to the function.</figcaption>
       </figure>
     </section>
 
-    <!-- Works with -->
     <section class="strip">
       <div class="wrap strip-inner">
-        <span class="strip-label">Drives the agents you already use</span>
+        <span class="strip-label">Works with</span>
         <ul class="agents">
           <li>Claude Code</li>
           <li>Codex <em>experimental</em></li>
@@ -70,67 +65,20 @@
       </div>
     </section>
 
-    <!-- Problem -->
-    <section class="problem">
-      <div class="wrap">
-        <h2 class="section-title">Agents got fast. Keeping up with them didn't.</h2>
-        <div class="cols3">
-          <div>
-            <h3>Too many tabs</h3>
-            <p>Five sessions across three repos means five terminals to poll and a context switch every time one of them stops.</p>
-          </div>
-          <div>
-            <h3>Too much text</h3>
-            <p>Figuring out what an agent did, or why it is stuck, means scrolling through pages of transcript and diff.</p>
-          </div>
-          <div>
-            <h3>Claims you can't check</h3>
-            <p>"All tests pass" is only as good as the agent saying it. In our own testing, an agent reported a command that exited with code 3 as passed.</p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- How it works -->
-    <section class="how" id="how">
-      <div class="wrap">
-        <h2 class="section-title">How it works</h2>
-        <ol class="steps">
-          <li>
-            <span class="step-n">1</span>
-            <h3>Tell Perzian what to build</h3>
-            <p>Describe the work in one message. The lead agent splits independent tasks into separate coding sessions.</p>
-          </li>
-          <li>
-            <span class="step-n">2</span>
-            <h3>Sessions run in parallel</h3>
-            <p>Each session gets its own git worktree and branch, on the agent and model you pick. Nothing steps on anything else.</p>
-          </li>
-          <li>
-            <span class="step-n">3</span>
-            <h3>You decide and verify</h3>
-            <p>Choices arrive as one-click cards. Finished work arrives as an outcome with the changed functions and checks that actually ran.</p>
-          </li>
-        </ol>
-      </div>
-    </section>
-
-    <!-- Features -->
     <section class="features" id="features">
       <div class="wrap">
         <article class="feature">
           <div class="feature-copy">
             <p class="kicker">Verified, not claimed</p>
-            <h2>Proof comes from what ran, not what the agent says.</h2>
-            <p>Perzian watches the test, build and typecheck commands each agent runs and records the real exit code. Checks it observed read as facts. Anything the agent only reported is marked as a claim.</p>
+            <h2>Proof from what actually ran.</h2>
+            <p>Perzian records the real exit code of every test, build and typecheck an agent runs. Anything the agent only claims is marked as a claim.</p>
           </div>
           <div class="feature-visual" aria-label="Example outcome with verified and claimed checks">
             <div class="ui-card">
               <div class="ui-row"><span class="dot s-done"></span><b>Dark mode tokens</b><span class="ui-age">Done</span></div>
-              <p class="ui-title">Move colors to semantic tokens with dark variants</p>
               <ul class="ui-proofs">
-                <li class="ok"><span>✓</span> npm test · 142 passed <em>exit 0 · 8.4s</em></li>
-                <li class="ok"><span>✓</span> vite build <em>exit 0 · 2.1s</em></li>
+                <li class="ok"><span>✓</span> npm test · 142 passed <em>exit 0</em></li>
+                <li class="ok"><span>✓</span> vite build <em>exit 0</em></li>
                 <li class="bad"><span>✕</span> playwright test checkout · 2 failed <em>exit 1</em></li>
                 <li class="claimed"><span>✓</span> Light and dark snapshots <em>claimed</em></li>
               </ul>
@@ -140,9 +88,9 @@
 
         <article class="feature flip">
           <div class="feature-copy">
-            <p class="kicker">Changes at the function level</p>
-            <h2>Know what changed before you open a diff.</h2>
-            <p>The change map is built from git and tree-sitter, not from the model's summary. Every file shows its size of change and the functions and classes that were added, modified or removed. Click any file for a read-only, highlighted diff.</p>
+            <p class="kicker">Function-level changes</p>
+            <h2>Know what changed without reading the diff.</h2>
+            <p>Built from git and tree-sitter: every file, its size of change, and the functions added, changed or removed. The diff is one click away.</p>
           </div>
           <div class="feature-visual" aria-label="Example change map">
             <div class="ui-card mono">
@@ -151,94 +99,42 @@
               <div class="ui-sym"><span class="a">+ issue()</span><span class="a">+ revoke()</span><span class="a">+ SessionStore</span></div>
               <div class="ui-file"><b class="d">−</b>jwt.ts<span class="ui-bar"><i style="width:62%" class="d"></i></span><span class="n"><em class="a">+0</em> <em class="d">−61</em></span></div>
               <div class="ui-sym"><span class="d">− sign()</span><span class="d">− verify()</span></div>
-              <div class="ui-dir">src/middleware/</div>
-              <div class="ui-file"><b>~</b>auth.ts<span class="ui-bar"><i style="width:22%" class="a"></i><i style="width:17%" class="d"></i></span><span class="n"><em class="a">+22</em> <em class="d">−17</em></span></div>
-              <div class="ui-sym"><span>~ requireUser()</span><span class="a">+ readSessionCookie()</span></div>
             </div>
           </div>
         </article>
 
         <article class="feature">
           <div class="feature-copy">
-            <p class="kicker">Decisions, not paragraphs</p>
-            <h2>When an agent needs you, it asks with a card.</h2>
-            <p>Questions arrive with two or three options and a one-line tradeoff each. Permission prompts become Allow, Always or Deny. Answer with a click, or press 1, 2 or 3 without leaving the keyboard.</p>
+            <p class="kicker">Decisions as cards</p>
+            <h2>Answer agents in one click.</h2>
+            <p>Questions arrive with options and a one-line tradeoff. Permissions become Allow, Always or Deny. Or just press 1, 2 or 3.</p>
           </div>
           <div class="feature-visual" aria-label="Example decision card">
             <div class="ui-card">
               <div class="ui-row"><span class="dot s-needs_you"></span><span class="ui-src">Webhook retries</span><span class="ui-age">5m</span></div>
               <p class="ui-title">How should failed webhooks retry?</p>
-              <div class="ui-opt rec"><b>Exponential backoff</b><kbd>1</kbd><span>Standard, 6 tries over about an hour</span></div>
+              <div class="ui-opt rec"><b>Exponential backoff</b><kbd>1</kbd><span>Standard, 6 tries over an hour</span></div>
               <div class="ui-opt"><b>Dead-letter queue</b><kbd>2</kbd><span>Durable, needs a new table</span></div>
-              <div class="ui-opt"><b>Rely on Stripe</b><kbd>3</kbd><span>No code, 3-day retry window</span></div>
             </div>
           </div>
         </article>
 
         <div class="grid">
-          <div class="cell">
-            <h3>A worktree per session</h3>
-            <p>Parallel sessions on the same repo get their own branch and folder. Your checkout stays clean.</p>
-          </div>
-          <div class="cell">
-            <h3>Any model, per session</h3>
-            <p>Pick the agent, model and permission mode for each session and for the lead agent.</p>
-          </div>
-          <div class="cell">
-            <h3>Picks up where you left off</h3>
-            <p>Restart the app and sessions reattach to their conversations. A strip shows what finished while you were away.</p>
-          </div>
-          <div class="cell">
-            <h3>Bring your Claude Code sessions</h3>
-            <p>Import recent sessions from Claude Code and continue them in Perzian.</p>
-          </div>
-          <div class="cell">
-            <h3>Cues outside the window</h3>
-            <p>A dock badge counts what needs you, and notifications fire when a session finishes or asks something.</p>
-          </div>
-          <div class="cell">
-            <h3>Read-only code, on purpose</h3>
-            <p>Perzian is not another editor. Code is there to inspect; changes go through agents or your own editor.</p>
-          </div>
+          <div class="cell"><h3>A worktree per session</h3><p>Parallel work, clean checkout.</p></div>
+          <div class="cell"><h3>Any model, per session</h3><p>Pick agent, model and permissions.</p></div>
+          <div class="cell"><h3>Resume and import</h3><p>Reattach after restarts. Bring in Claude Code sessions.</p></div>
         </div>
       </div>
     </section>
 
-    <!-- Second shot -->
-    <section class="shot-2">
-      <figure class="shot wrap-wide">
-        <div class="window">
-          <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="assets/app-proof.png" width="1494" height="812" loading="lazy" alt="Perzian app showing a finished session's outcome with verified test and build checks, a claimed snapshot check, a risk note and the file change map." />
-        </div>
-        <figcaption>A finished session: verified checks, the one claim it couldn't verify, a risk, and what changed.</figcaption>
-      </figure>
-    </section>
-
-    <!-- Open source -->
-    <section class="oss">
-      <div class="wrap oss-inner">
-        <div>
-          <h2 class="section-title">Open source, and built to wrap, not replace.</h2>
-          <p>Perzian drives existing agents over the <a href="https://agentclientprotocol.com">Agent Client Protocol</a> and uses your own subscriptions. It doesn't resell compute or run its own agent loop. MIT licensed.</p>
-        </div>
-        <div class="oss-arch" aria-label="Architecture">
-          <code>web UI ⇄ daemon ⇄ ACP ⇄ Claude Code · Codex</code>
-          <code>agents → report tools → progress · decisions · outcomes</code>
-          <code>git + tree-sitter → change map · test runs → verified proof</code>
-        </div>
-      </div>
-    </section>
-
-    <!-- Final CTA -->
     <section class="final">
       <div class="wrap">
-        <h2>Spend your attention on decisions, not transcripts.</h2>
+        <h2>Decisions, not transcripts.</h2>
         <div class="cta-row center">
           <a class="btn btn-primary" href="https://github.com/adi-devv/perzian#quick-start">Get Perzian for macOS</a>
           <a class="btn" href="https://github.com/adi-devv/perzian">Star on GitHub</a>
         </div>
-        <p class="fine">Requires macOS on Apple Silicon and a Claude Code login. Windows and Linux are on the roadmap.</p>
+        <p class="fine">Free and open source (MIT). macOS on Apple Silicon. Uses your own Claude Code login.</p>
       </div>
     </section>
   </main>
