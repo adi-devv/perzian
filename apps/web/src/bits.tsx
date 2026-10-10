@@ -48,13 +48,19 @@ export function StatusGlyph({ s }: { s: SessionInfo }) {
   return <span className="dot" />;
 }
 
+// Observed proofs (the daemon saw the command run) read as facts; self-reported ones are marked as claims.
 export function ProofPills({ o }: { o: Outcome }) {
-  if (!o.proof.length) return o.derived ? <span className="pill muted">no proof reported</span> : null;
+  if (!o.proof.length) return o.derived ? <span className="pill muted">no checks run</span> : null;
   return (
     <span className="pills">
       {o.proof.map((p, i) => (
-        <span key={i} className={`pill ${p.passed ? "ok" : "bad"}`} title={p.detail}>
-          {p.passed ? "✓" : "✕"} {p.label}
+        <span
+          key={i}
+          className={`pill ${p.passed ? "ok" : "bad"} ${p.observed ? "observed" : "claimed"}`}
+          title={[p.command && `$ ${p.command}`, p.exitCode !== undefined && `exit ${p.exitCode}`, p.durationMs !== undefined && `${(p.durationMs / 1000).toFixed(1)}s`, p.detail, p.observed ? "Verified by Perzian" : "Reported by the agent"].filter(Boolean).join("\n")}
+        >
+          {p.passed ? "✓" : "✕"} {p.summary ? `${p.label} · ${p.summary}` : p.label}
+          {!p.observed && <em className="claim">claimed</em>}
         </span>
       ))}
     </span>

@@ -76,10 +76,16 @@ export interface SymbolChange {
 }
 
 export interface Proof {
-  kind: "tests" | "build" | "screenshot" | "command" | "manual";
+  kind: "tests" | "build" | "typecheck" | "lint" | "screenshot" | "command" | "manual";
   label: string;
   passed: boolean;
   detail?: string;
+  // Set when the daemon watched the command run (vs. the agent's own claim).
+  observed?: boolean;
+  command?: string;
+  exitCode?: number;
+  durationMs?: number;
+  summary?: string; // e.g. "45 passed", "3 failed, 42 passed", "2 errors"
 }
 
 export interface Outcome {

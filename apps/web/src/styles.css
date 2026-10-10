@@ -161,6 +161,8 @@ em.a { color: var(--add); font-style: normal; font-family: var(--mono); font-siz
 .pill.ok::first-letter { color: var(--done); }
 .pill.bad::first-letter { color: var(--failed); }
 .pill.muted { color: var(--fg-3); }
+.pill.claimed { color: var(--fg-3); }
+.pill .claim { font-style: normal; font-size: 10px; color: var(--fg-3); margin-left: 5px; letter-spacing: 0.02em; }
 
 .since { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 0 0 6px; border-bottom: 1px solid var(--line-soft); }
 .since .eyebrow { margin: 0; }

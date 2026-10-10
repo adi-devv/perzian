@@ -74,8 +74,8 @@ export const demoEvents: PerzianEvent[] = [
     outcome: {
       sessionId: "d", intent: "Move colors to semantic tokens with dark variants", status: "success", createdAt: t - 1_000_000,
       changed: [], proof: [
-        { kind: "tests", label: "142 unit tests", passed: true },
-        { kind: "build", label: "vite build", passed: true },
+        { kind: "tests", label: "npm test", summary: "142 passed", passed: true, observed: true, command: "npm test", exitCode: 0, durationMs: 8400 },
+        { kind: "build", label: "vite build", passed: true, observed: true, command: "npx vite build", exitCode: 0, durationMs: 2100 },
         { kind: "screenshot", label: "Light + dark snapshots", passed: true },
       ],
       risks: ["Date picker still hardcodes #fff"], followups: ["Theme the date picker"],
@@ -85,7 +85,7 @@ export const demoEvents: PerzianEvent[] = [
     type: "outcome.reported",
     outcome: {
       sessionId: "c", intent: "Stabilize checkout e2e", status: "failed", createdAt: t - 500_000, changed: [],
-      proof: [{ kind: "tests", label: "checkout.spec 3/5 runs", passed: false, detail: "Timeout waiting for #pay-button" }],
+      proof: [{ kind: "tests", label: "playwright test checkout", summary: "2 failed", passed: false, observed: true, command: "npx playwright test e2e/checkout.spec.ts", exitCode: 1, durationMs: 41000, detail: "Timeout waiting for #pay-button" }],
       risks: ["Race in the payment iframe load, not the test"], followups: ["Investigate iframe load event"],
     },
   },
