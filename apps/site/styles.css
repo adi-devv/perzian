@@ -1,38 +1,41 @@
 /* perzian.dev — same quiet instrument-panel language as the app: monochrome, hairlines, type-led.
    Color only marks status (dots, ✓/✕, +/−). Dark by default, light follows the OS. */
+/* Single deliberate look (ignores OS light/dark): Persian blue hero, indigo-ink body, porcelain type,
+   one light porcelain band for the feature details. Flat colors only. */
 :root {
-  --bg: #0c0d0f;
-  --bg-2: #111214;
-  --raised: #16171a;
-  --hover: #1c1d21;
-  --line: #222327;
-  --line-soft: #1a1b1e;
-  --fg: #ededef;
-  --fg-2: #a0a1a7;
-  --fg-3: #66676e;
-  --working: #7aa7d6;
-  --needs: #d6a453;
-  --failed: #d26a63;
-  --done: #78b48f;
+  --persian: #1c39bb;
+  --persian-deep: #152c93;
+  --bg: #0a0f2e;
+  --bg-2: #0e1438;
+  --raised: #121a45;
+  --hover: #1a2356;
+  --line: #222c61;
+  --line-soft: #19214f;
+  --fg: #f3f4fb;
+  --fg-2: #b4b9d8;
+  --fg-3: #7c83ad;
+  --working: #8fb4ff;
+  --needs: #f0b35a;
+  --failed: #ff7a6e;
+  --done: #7fd6a2;
   --font: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --wrap: 1080px;
   --wrap-wide: 1240px;
   color-scheme: dark;
 }
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg: #fafaf8; --bg-2: #f3f3f1; --raised: #ffffff; --hover: #eeeeec; --line: #e2e2df; --line-soft: #ebebe8;
-    --fg: #141518; --fg-2: #5f6067; --fg-3: #95969c;
-    --working: #3f78b5; --needs: #b07b1f; --failed: #b8443d; --done: #3d8a5c;
-    color-scheme: light;
-  }
+/* Light porcelain band */
+.band-light {
+  --bg: #f4f2ec; --bg-2: #ebe8df; --raised: #ffffff; --hover: #efece4; --line: #dcd8cc; --line-soft: #e4e0d5;
+  --fg: #0d1335; --fg-2: #4a5078; --fg-3: #8a8fae;
+  --done: #23855a; --failed: #c4473c; --needs: #a8741c; --working: #1c39bb;
+  background: var(--bg); color: var(--fg); color-scheme: light;
 }
-:root[data-theme="light"] {
-  --bg: #fafaf8; --bg-2: #f3f3f1; --raised: #ffffff; --hover: #eeeeec; --line: #e2e2df; --line-soft: #ebebe8;
-  --fg: #141518; --fg-2: #5f6067; --fg-3: #95969c;
-  --working: #3f78b5; --needs: #b07b1f; --failed: #b8443d; --done: #3d8a5c;
-  color-scheme: light;
+/* Persian blue band */
+.band-blue {
+  --bg: var(--persian); --bg-2: var(--persian-deep); --line: rgba(255,255,255,0.18); --line-soft: rgba(255,255,255,0.12);
+  --hover: rgba(255,255,255,0.08); --fg: #ffffff; --fg-2: #d5dcff; --fg-3: #a9b5f2;
+  background: var(--persian); color: var(--fg);
 }
 
 * { box-sizing: border-box; }
@@ -62,12 +65,13 @@ code, kbd { font-family: var(--mono); }
 /* buttons */
 .btn { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 18px; border-radius: 9px; border: 1px solid var(--line); text-decoration: none; font-size: 15px; font-weight: 500; color: var(--fg); background: transparent; transition: background 0.15s, border-color 0.15s, opacity 0.15s; white-space: nowrap; }
 .btn:hover { background: var(--hover); border-color: color-mix(in srgb, var(--fg) 18%, var(--line)); }
-.btn-primary { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+.btn-primary { background: var(--fg); color: var(--persian); border-color: var(--fg); }
+.band-light .btn-primary { color: #fff; background: var(--persian); border-color: var(--persian); }
 .btn-primary:hover { background: var(--fg); opacity: 0.88; }
 .btn-sm { height: 34px; padding: 0 14px; font-size: 14px; border-radius: 8px; }
 
 /* nav */
-.nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: saturate(1.4) blur(10px); -webkit-backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid var(--line-soft); }
+.nav { position: sticky; top: 0; z-index: 10; background: color-mix(in srgb, var(--persian) 88%, transparent); color: #fff; --fg: #fff; --fg-2: #d5dcff; --bg: var(--persian); backdrop-filter: saturate(1.4) blur(10px); -webkit-backdrop-filter: saturate(1.4) blur(10px); border-bottom: 1px solid rgba(255,255,255,0.12); }
 .nav-inner { display: flex; align-items: center; gap: 28px; height: 60px; }
 .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 600; font-size: 16px; letter-spacing: -0.015em; text-decoration: none; }
 .brand.small { font-size: 14px; }
@@ -76,7 +80,9 @@ code, kbd { font-family: var(--mono); }
 .nav-links a:hover { color: var(--fg); }
 
 /* hero */
-.hero { padding: 96px 0 40px; }
+.hero { padding: 96px 0 0; }
+.hero .shot { margin-bottom: -180px; position: relative; }
+.after-hero { padding-top: 220px; }
 .eyebrow { display: inline-flex; align-items: center; gap: 9px; margin: 0 0 28px; font-size: 13px; color: var(--fg-2); border: 1px solid var(--line); border-radius: 999px; padding: 5px 12px 5px 10px; }
 h1 { margin: 0; font-size: clamp(38px, 5.6vw, 68px); line-height: 1.03; letter-spacing: -0.045em; font-weight: 600; text-wrap: balance; max-width: 19ch; }
 .lede { margin: 28px 0 0; max-width: 60ch; font-size: clamp(17px, 1.6vw, 19px); line-height: 1.6; color: var(--fg-2); text-wrap: pretty; }
@@ -90,10 +96,11 @@ h1 { margin: 0; font-size: clamp(38px, 5.6vw, 68px); line-height: 1.03; letter-s
 
 /* screenshots */
 .shot { margin: 72px auto 0; }
-.window { border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: var(--bg-2); box-shadow: 0 40px 120px -40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.02) inset; }
+.window { border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.14); background: #0f1012; box-shadow: 0 50px 120px -30px rgba(5, 10, 40, 0.75); }
+.window-bar { background: #141518; }
 .window-bar { display: flex; gap: 7px; padding: 12px 14px; border-bottom: 1px solid var(--line-soft); }
-.window-bar i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); }
-.shot figcaption { margin: 16px auto 0; max-width: 70ch; text-align: center; font-size: 14px; color: var(--fg-3); text-wrap: balance; }
+.window-bar i { width: 11px; height: 11px; border-radius: 50%; background: #2a2b30; }
+.shot figcaption { margin: 18px auto 0; max-width: 70ch; text-align: center; font-size: 14px; color: var(--fg-3); text-wrap: balance; }
 
 /* strip */
 .strip { padding: 56px 0; }
@@ -118,7 +125,8 @@ p { margin: 0; }
 .step-n { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); font: 500 12px var(--mono); color: var(--fg-2); margin-bottom: 18px; }
 
 /* features */
-.features { padding: 48px 0 24px; }
+.features { padding: 24px 0 72px; }
+.features .feature:first-child { border-top: 0; }
 .feature { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 64px; align-items: center; padding: 72px 0; border-top: 1px solid var(--line-soft); }
 .feature.flip .feature-copy { order: 2; }
 .kicker { font-size: 13px; color: var(--fg-3); margin-bottom: 14px; font-weight: 500; }
@@ -126,7 +134,7 @@ p { margin: 0; }
 .feature-copy p:not(.kicker) { color: var(--fg-2); font-size: 16px; line-height: 1.65; max-width: 48ch; }
 
 /* UI replicas (match the app) */
-.ui-card { background: var(--raised); border: 1px solid var(--line); border-radius: 14px; padding: 22px; font-size: 14px; box-shadow: 0 30px 80px -40px rgba(0, 0, 0, 0.5); }
+.ui-card { background: #0f1012; color: #ececee; border: 1px solid #232428; border-radius: 14px; padding: 22px; font-size: 14px; box-shadow: 0 30px 80px -30px rgba(13, 19, 53, 0.45); --fg: #ececee; --fg-2: #9c9da3; --fg-3: #63646b; --line: #232428; --hover: #1d1e22; --done: #78b48f; --failed: #d26a63; --needs: #d6a453; }
 .ui-row { display: flex; align-items: center; gap: 10px; }
 .ui-row b { font-weight: 500; }
 .ui-src { color: var(--fg-3); font-size: 13px; }
@@ -173,7 +181,7 @@ p { margin: 0; }
 .oss-arch code { display: block; font-size: 13px; color: var(--fg-2); background: var(--bg-2); border: 1px solid var(--line-soft); border-radius: 9px; padding: 12px 14px; overflow-x: auto; white-space: nowrap; }
 
 /* final */
-.final { padding: 96px 0 120px; text-align: center; border-top: 1px solid var(--line-soft); }
+.final { padding: 112px 0 128px; text-align: center; }
 .final h2 { margin: 0 auto; font-size: clamp(30px, 4vw, 48px); line-height: 1.08; letter-spacing: -0.04em; font-weight: 600; max-width: 18ch; text-wrap: balance; }
 .final .fine { margin-top: 22px; }
 
