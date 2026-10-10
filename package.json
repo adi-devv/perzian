@@ -27,5 +27,7 @@
     "esbuild": "^0.28.2",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
-  }
+  },
+  "author": "Aadit Singal",
+  "license": "MIT"
 }

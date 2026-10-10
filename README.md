@@ -46,6 +46,10 @@ Agents report structured data through a small MCP server, so the UI draws state 
 The change map comes from `git diff` against the session's starting commit.
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Why: [docs/VISION.md](docs/VISION.md)
 
+## Author
+
+Created by **Aadit Singal** ([@adi-devv](https://github.com/adi-devv)).
+
 ## License
 
-MIT
+MIT © 2026 Aadit Singal
