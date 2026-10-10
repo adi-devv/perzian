@@ -9,7 +9,7 @@ export class EventStore {
   private listeners = new Set<(e: PerzianEvent) => void>();
   private file: string;
 
-  constructor(dir = join(homedir(), ".perzian")) {
+  constructor(dir = process.env.PERZIAN_HOME ?? join(homedir(), ".perzian")) {
     mkdirSync(dir, { recursive: true });
     this.file = join(dir, "events.jsonl");
     if (existsSync(this.file)) {

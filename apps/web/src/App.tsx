@@ -63,7 +63,7 @@ export function App() {
 
   return (
     <div className={`app ${sel ? "with-drawer" : ""}`}>
-      <Sidebar state={state} main={main} workers={workers} selected={selected} onSelect={open} onNew={() => setCreating(true)} connected={connected} />
+      <Sidebar state={state} main={main} workers={workers} selected={selected} onSelect={open} onNew={() => setCreating(true)} onImport={() => send({ type: "sessions.import" })} connected={connected} />
 
       <Thread state={state} main={main} send={send} onOpen={open} decisions={decisions} />
 
@@ -82,7 +82,7 @@ export function App() {
 
 /* ───────────── Sidebar: every session at a glance ───────────── */
 
-function Sidebar({ state, main, workers, selected, onSelect, onNew, connected }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; connected: boolean }) {
+function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, connected }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; connected: boolean }) {
   const counts = { needs_you: 0, working: 0, failed: 0, done: 0, idle: 0 };
   for (const s of workers) counts[s.status]++;
   const groups = new Map<string, SessionInfo[]>();
@@ -132,9 +132,14 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, connected }:
         {workers.length === 0 && <p className="quiet side-empty">Sessions you or Perzian start show up here.</p>}
       </div>
 
-      <button className="btn new" onClick={onNew}>
-        New session <kbd>N</kbd>
-      </button>
+      <div className="side-foot">
+        <button className="btn new" onClick={onNew}>
+          New session <kbd>N</kbd>
+        </button>
+        <button className="link-btn" onClick={onImport} title="Show your recent Claude Code sessions here; open one to continue it">
+          Import recent Claude Code sessions
+        </button>
+      </div>
     </nav>
   );
 }

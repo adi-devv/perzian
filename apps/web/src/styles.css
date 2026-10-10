@@ -111,7 +111,10 @@ kbd { font-size: 10px; color: var(--fg-3); padding: 0 3px; }
 .side-group { margin-bottom: 18px; }
 .side-group .eyebrow { padding: 0 10px; margin-bottom: 4px; }
 .side-empty { padding: 8px 10px; font-size: 12px; }
-.btn.new { margin: 12px; justify-content: space-between; color: var(--fg-2); }
+.side-foot { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.btn.new { justify-content: space-between; color: var(--fg-2); }
+.link-btn { border: 0; background: transparent; color: var(--fg-3); font-size: 11px; text-align: left; padding: 0 2px; }
+.link-btn:hover { color: var(--fg); }
 .btn.new:hover { color: var(--fg); }
 .churn { display: inline-flex; align-items: center; gap: 4px; flex: none; }
 .churn em { font-size: 10px; opacity: 0.85; }
@@ -135,6 +138,7 @@ kbd { font-size: 10px; color: var(--fg-3); padding: 0 3px; }
 .act.k-edit, .act.k-delete, .act.k-move { background: var(--fg-2); }
 .act.k-execute { background: var(--fg-3); }
 .act.st-failed { background: var(--failed); }
+.act.st-cancelled { opacity: 0.35; }
 .act.st-in_progress, .act.st-pending { animation: breathe 1.4s ease-in-out infinite; }
 
 /* spawned session, inline: a quiet row, not a card */

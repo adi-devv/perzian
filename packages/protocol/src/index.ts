@@ -140,6 +140,7 @@ export type Command =
   | { type: "session.seen"; sessionId: string }
   | { type: "session.archive"; sessionId: string }
   | { type: "main.start"; model?: string; agent?: AgentKind; prompt?: string }
+  | { type: "sessions.import"; sinceDays?: number; limit?: number }
   | { type: "decision.answer"; decisionId: string; optionId: string | null };
 
 // daemon -> UI envelope
