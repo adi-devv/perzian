@@ -31,19 +31,14 @@ export function churn(files: FileChange[]) {
   return files.reduce((a, f) => ({ add: a.add + f.additions, del: a.del + f.deletions }), { add: 0, del: 0 });
 }
 
-// Tiny +/- bar: total width ~ log(churn), split green/red.
+// Compact +/− counts, colored only in the digits.
 export function ChurnBar({ files }: { files: FileChange[] }) {
   const { add, del } = churn(files);
   if (!files.length) return null;
-  const total = add + del;
-  const w = Math.min(64, 14 + Math.log2(total + 1) * 6);
   return (
     <span className="churn" title={`${files.length} files · +${add} −${del}`}>
-      <span className="churn-bar" style={{ width: w }}>
-        <i className="add" style={{ flex: add || 0.0001 }} />
-        <i className="del" style={{ flex: del || 0.0001 }} />
-      </span>
-      <span className="churn-n">{files.length}</span>
+      <em className="a">+{add}</em>
+      <em className="d">−{del}</em>
     </span>
   );
 }
@@ -100,7 +95,8 @@ export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decis
 
 const GLYPH = { added: "+", modified: "~", deleted: "−", renamed: "→" } as const;
 
-// Change map: files grouped by directory, each block sized by churn and split by +/−. Click opens the diff.
+// Change map: files grouped by directory; each row shows a magnitude bar and, when known,
+// the functions/classes that changed. Click a row for the read-only diff.
 export function ChangeMap({ files, onOpen }: { files: FileChange[]; onOpen: (path: string) => void }) {
   if (!files.length) return <p className="quiet">No file changes yet.</p>;
   const groups = new Map<string, FileChange[]>();
@@ -114,24 +110,38 @@ export function ChangeMap({ files, onOpen }: { files: FileChange[]; onOpen: (pat
     <div className="changemap">
       {[...groups.entries()].map(([dir, list]) => (
         <div key={dir} className="cm-group">
-          <span className="cm-dir">{dir}/</span>
+          <span className="cm-dir">{dir === "." ? "./" : `${dir}/`}</span>
           <div className="cm-files">
             {list.map((f) => {
               const n = f.additions + f.deletions;
-              const grow = 1 + Math.sqrt(n / max) * 3;
+              const width = `${Math.max(6, Math.sqrt(n / max) * 100)}%`;
+              const symbols = (f as FileChange & { symbols?: { name: string; kind: string; change: string }[] }).symbols ?? [];
               return (
-                <button key={f.path} className={`cm-file c-${f.kind}`} style={{ flexGrow: grow }} onClick={() => onOpen(f.path)} title={`${f.path}  +${f.additions} −${f.deletions}`}>
+                <button key={f.path} className={`cm-file c-${f.kind}`} onClick={() => onOpen(f.path)} title={`${f.path}  +${f.additions} −${f.deletions}`}>
                   <span className="cm-name">
                     <b>{GLYPH[f.kind]}</b>
-                    {f.path.slice(f.path.lastIndexOf("/") + 1)}
+                    <span className="cm-fname">{f.path.slice(f.path.lastIndexOf("/") + 1)}</span>
                   </span>
                   <span className="cm-split">
-                    <i className="add" style={{ flex: f.additions || 0.0001 }} />
-                    <i className="del" style={{ flex: f.deletions || 0.0001 }} />
+                    <span className="cm-mag" style={{ width }}>
+                      <i className="add" style={{ flex: f.additions || 0.0001 }} />
+                      <i className="del" style={{ flex: f.deletions || 0.0001 }} />
+                    </span>
                   </span>
                   <span className="cm-n">
                     <em className="a">+{f.additions}</em> <em className="d">−{f.deletions}</em>
                   </span>
+                  {symbols.length > 0 && (
+                    <span className="cm-sym">
+                      {symbols.slice(0, 12).map((sym, i) => (
+                        <span key={i} className={`sym-${sym.change}`} title={sym.kind}>
+                          {sym.name}
+                          {sym.kind === "function" || sym.kind === "method" ? "()" : ""}
+                        </span>
+                      ))}
+                      {symbols.length > 12 && <span>+{symbols.length - 12} more</span>}
+                    </span>
+                  )}
                 </button>
               );
             })}

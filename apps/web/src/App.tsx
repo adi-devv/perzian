@@ -158,6 +158,7 @@ function Thread({ state, main, send, onOpen, decisions }: { state: State; main?:
 
       <div className="thread-scroll">
         {!main && <Welcome />}
+        <SinceYouLeft state={state} onOpen={onOpen} />
         <ThreadItems items={items} state={state} onOpen={onOpen} />
         <div ref={end} />
       </div>
@@ -185,6 +186,30 @@ function Thread({ state, main, send, onOpen, decisions }: { state: State; main?:
         />
       </div>
     </main>
+  );
+}
+
+// "Where was I": results that landed while you weren't looking, one click each.
+function SinceYouLeft({ state, onOpen }: { state: State; onOpen: (id: string) => void }) {
+  const unseen = Object.values(state.sessions)
+    .filter((s) => s.role === "worker" && !s.archived && isUnseen(s))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  if (!unseen.length) return null;
+  return (
+    <div className="since">
+      <span className="eyebrow">New results</span>
+      {unseen.map((s) => (
+        <button key={s.id} className={`since-chip s-${s.status}`} onClick={() => onOpen(s.id)}>
+          <span className="dot" />
+          {s.title}
+          {state.outcomes[s.id]?.proof.length ? (
+            <span className="since-proof">
+              {state.outcomes[s.id].proof.filter((p) => p.passed).length}/{state.outcomes[s.id].proof.length}
+            </span>
+          ) : null}
+        </button>
+      ))}
+    </div>
   );
 }
 
