@@ -7,8 +7,11 @@
   --hover: #1b1e2a;
   --line: #232634;
   --line-soft: #1a1d28;
-  --accent: #6b86ff;
-  --accent-soft: rgba(107, 134, 255, 0.14);
+  --accent: #7d8fff;
+  --accent-soft: rgba(125, 143, 255, 0.14);
+  --persian: #2a46d1;
+  --violet: #a48cf2;
+  --violet-soft: rgba(164, 140, 242, 0.14);
   --fg: #ededef;
   --fg-2: #a0a1a7;
   --fg-3: #66676e;
@@ -26,14 +29,14 @@
   :root:not([data-theme="dark"]) {
     --bg: #fafaf8; --bg-2: #f3f3f1; --raised: #ffffff; --hover: #eeeeec; --line: #e2e2df; --line-soft: #ebebe8;
     --fg: #141518; --fg-2: #5f6067; --fg-3: #95969c;
-    --working: #3f78b5; --needs: #b07b1f; --failed: #b8443d; --done: #3d8a5c; --accent: #1c39bb; --accent-soft: rgba(28, 57, 187, 0.08);
+    --working: #3f78b5; --needs: #b07b1f; --failed: #b8443d; --done: #3d8a5c; --accent: #1c39bb; --accent-soft: rgba(28, 57, 187, 0.08); --persian: #1c39bb; --violet: #5b3fc4; --violet-soft: rgba(91, 63, 196, 0.08);
     color-scheme: light;
   }
 }
 :root[data-theme="light"] {
   --bg: #fafaf8; --bg-2: #f3f3f1; --raised: #ffffff; --hover: #eeeeec; --line: #e2e2df; --line-soft: #ebebe8;
   --fg: #141518; --fg-2: #5f6067; --fg-3: #95969c;
-  --working: #3f78b5; --needs: #b07b1f; --failed: #b8443d; --done: #3d8a5c; --accent: #1c39bb; --accent-soft: rgba(28, 57, 187, 0.08);
+  --working: #3f78b5; --needs: #b07b1f; --failed: #b8443d; --done: #3d8a5c; --accent: #1c39bb; --accent-soft: rgba(28, 57, 187, 0.08); --persian: #1c39bb; --violet: #5b3fc4; --violet-soft: rgba(91, 63, 196, 0.08);
   color-scheme: light;
 }
 
@@ -206,13 +209,18 @@ p { margin: 0; }
   .footer nav { margin-left: 0; }
 }
 
-/* Accent: Persian blue, used sparingly */
-.eyebrow { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
-.eyebrow .dot { background: var(--accent); }
-.kicker { color: var(--accent); }
-.step-n { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); background: var(--accent-soft); }
+/* Accents: Persian blue for actions and structure, Persian violet for highlights. Flat, never blended. */
+::selection { background: color-mix(in srgb, var(--persian) 45%, transparent); }
+.btn-primary { background: var(--persian); color: #fff; border-color: var(--persian); }
+.btn-primary:hover { background: var(--persian); opacity: 0.9; }
+h1 .muted { color: var(--violet); }
+.eyebrow { border-color: color-mix(in srgb, var(--violet) 35%, var(--line)); }
+.eyebrow .dot { background: var(--violet); animation: none; }
+.kicker { color: var(--violet); }
+.step-n { border-color: color-mix(in srgb, var(--violet) 45%, var(--line)); color: var(--violet); background: var(--violet-soft); }
 .install code::before { color: var(--accent); }
 .mark::after { background: var(--accent); }
-.window { border-color: color-mix(in srgb, var(--accent) 22%, var(--line)); }
+.window { border-color: color-mix(in srgb, var(--persian) 35%, var(--line)); }
 a:not(.btn):not(.brand):hover { color: var(--accent); }
 .oss-inner p a, .strip a { text-decoration-color: color-mix(in srgb, var(--accent) 60%, transparent); text-underline-offset: 3px; }
+.nav .btn-primary { background: var(--persian); }
