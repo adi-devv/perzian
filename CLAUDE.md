@@ -15,10 +15,12 @@ Visual-first agentic development environment. Read `docs/VISION.md` (why), `docs
 - `packages/report-mcp` — MCP server agents use to report structured progress/decisions/outcomes.
 - `apps/daemon` — Node daemon: ACP sessions, worktrees, event store, WebSocket on :4317.
 - `apps/web` — React + Vite UI.
+- `apps/desktop` — Electron shell; spawns the daemon and loads the web build.
 
 ## Commands
 - `npm install` at root (npm workspaces; no pnpm).
-- `npm run dev` — daemon + web.
+- `npm run dev` — daemon + web (browser). `npm run app` / `npm run app:dev` — desktop.
+- `npm test` — node:test unit tests (`packages/*/test`, `apps/*/test`).
 - `npm run typecheck`
 
 ## Conventions

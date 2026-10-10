@@ -5,33 +5,42 @@
 
 ## Phase 1 — Core (Claude Code via ACP)
 - [x] Repo, docs, monorepo scaffold
-- [x] `packages/protocol` event + state types
-- [x] `packages/report-mcp` skeleton
+- [x] `packages/protocol` event + state types, shared fold
+- [x] `packages/report-mcp`: progress / decisions / outcomes
 - [x] Daemon: ACP session spawn, event normalization, WS server
-- [ ] Daemon: worktree per session
-- [ ] Daemon: persistent event store + replay
-- [ ] Web: control tower tiles + attention queue (live)
-- [ ] Web: decision cards (permissions + `ask_decision`)
-- [ ] Web: transcript deep dive
+- [x] Daemon: worktree per session (`perzian/<slug>-<id6>`)
+- [x] Daemon: persistent event store + replay
+- [x] Daemon: session resume via ACP `loadSession` after restart
+- [x] Web: sessions list + attention ordering (live)
+- [x] Web: decision cards (permissions + `ask_decision`) in the needs-you dock
+- [x] Web: transcript deep dive
+- [x] Unit tests (`npm test`): protocol fold, git helpers
 
 ## Phase 2 — Main agent
-- [ ] Main agent session with model picker
-- [ ] Orchestration MCP: spawn / list / message / get_outcome
-- [ ] Main agent summarizes into decisions
+- [x] Main agent "Perzian" session with model picker
+- [x] Orchestration MCP: `list_sessions` / `get_session` / `spawn_session` / `send_to_session`
+- [x] Main thread of live cards (spawned mini-tiles, outcomes)
+- [x] Permission modes: ask / edits / plan / auto
+- [ ] Main agent summarizes crew state into decisions
 
 ## Phase 3 — Visuals
-- [ ] Change map: git diff + tree-sitter → React Flow + ELK
+- [x] Change map data: git diff vs `baseSha` (+ untracked), live
+- [x] Read-only diff / file viewer
+- [ ] Change map graph: tree-sitter → React Flow + ELK
 - [ ] Outcome cards with proof (tests, screenshots)
-- [ ] Read-only code view (Shiki)
+- [ ] Syntax-highlighted code view (Shiki)
 
 ## Phase 4 — Multi-model
-- [ ] Codex adapter
-- [ ] Per-session agent/model picker
-- [ ] Transcript-summary fallback for agents that skip report tools
+- [x] Codex adapter wired (`@agentclientprotocol/codex-acp`)
+- [ ] Codex adapter tested end to end
+- [x] Per-session agent/model picker
+- [x] Derived outcomes when agents skip `report_outcome`
+- [ ] Transcript-summary fallback (cheap model) for richer derived outcomes
 
 ## Phase 5 — Polish
+- [x] Desktop shell (Electron, `apps/desktop`)
 - [ ] Semantic zoom: system → module → file → function
 - [ ] "Where was I" cards
 - [ ] Phone access
-- [ ] Desktop shell
+- [ ] Desktop packaging (signed builds, bundled daemon)
 - [ ] Import existing Claude Code sessions from `~/.claude/projects`

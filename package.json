@@ -2,13 +2,22 @@
   "name": "perzian",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
+    "app": "npm run build --workspace=@perzian/web && electron apps/desktop",
+    "app:dev": "npm run dev --workspace=@perzian/web & PERZIAN_WEB_URL=http://localhost:4318 electron apps/desktop",
     "dev": "npm run dev --workspace=@perzian/daemon & npm run dev --workspace=@perzian/web",
     "build": "npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "e2e": "tsx scripts/e2e.ts",
+    "test": "tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts"
   },
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "devDependencies": {
     "typescript": "^5.6.3",
     "tsx": "^4.19.2",
