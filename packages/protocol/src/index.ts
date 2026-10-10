@@ -62,6 +62,17 @@ export interface FileChange {
   kind: ChangeKind;
   additions: number;
   deletions: number;
+  /** Changed declarations in this file (from tree-sitter + diff hunks). Absent = language not analyzed. */
+  symbols?: SymbolChange[];
+}
+
+/** A declaration that changed between base and the working tree. `name` is qualified for members ("Class.method"). */
+export interface SymbolChange {
+  name: string;
+  kind: "function" | "class" | "method" | "type" | "interface" | "variable" | "component";
+  change: "added" | "modified" | "deleted";
+  /** 1-based start line: in the new file, or in the base file when deleted. */
+  line: number;
 }
 
 export interface Proof {

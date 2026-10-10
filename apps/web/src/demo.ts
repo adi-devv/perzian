@@ -6,7 +6,10 @@ const s = (id: string, title: string, project: string, branch: string, status: S
   id, role: "worker", title, project, cwd: project, branch, agent, status, createdAt: t - ago, updatedAt: t - ago / 3, live: true,
   model: agent === "codex" ? undefined : "claude-sonnet-5-5", mode: "ask", worktree: true, parentId: "main", ...extra,
 });
-const f = (path: string, kind: FileChange["kind"], additions: number, deletions: number): FileChange => ({ path, kind, additions, deletions });
+type Sym = NonNullable<FileChange["symbols"]>[number];
+const f = (path: string, kind: FileChange["kind"], additions: number, deletions: number, symbols?: [string, Sym["kind"], Sym["change"]][]): FileChange => ({
+  path, kind, additions, deletions, symbols: symbols?.map(([name, k, change], i) => ({ name, kind: k, change, line: i * 10 + 1 })),
+});
 
 export const demoEvents: PerzianEvent[] = [
   { type: "session.created", session: { ...s("main", "Perzian", "~/.perzian/main", "", "done", "claude-code", 3_600_000), role: "main", parentId: undefined, model: "claude-opus-5-5", worktree: false } },
@@ -55,7 +58,13 @@ export const demoEvents: PerzianEvent[] = [
     },
   },
 
-  { type: "session.changes", sessionId: "b", at: t, files: [f("src/auth/session.ts", "added", 48, 0), f("src/auth/jwt.ts", "deleted", 0, 61), f("src/middleware/auth.ts", "modified", 22, 17), f("src/routes/login.ts", "modified", 9, 4), f("test/auth.test.ts", "modified", 31, 8)] },
+  { type: "session.changes", sessionId: "b", at: t, files: [
+    f("src/auth/session.ts", "added", 48, 0, [["issue", "function", "added"], ["revoke", "function", "added"], ["SessionStore", "class", "added"]]),
+    f("src/auth/jwt.ts", "deleted", 0, 61, [["sign", "function", "deleted"], ["verify", "function", "deleted"]]),
+    f("src/middleware/auth.ts", "modified", 22, 17, [["requireUser", "function", "modified"], ["readSessionCookie", "function", "added"]]),
+    f("src/routes/login.ts", "modified", 9, 4, [["LoginRoute.post", "method", "modified"]]),
+    f("test/auth.test.ts", "modified", 31, 8, [["describe:sessions", "function", "added"]]),
+  ] },
   { type: "session.changes", sessionId: "e", at: t, files: [f("src/routes/search.ts", "modified", 6, 1), f("src/middleware/rateLimit.ts", "added", 24, 0)] },
   { type: "session.changes", sessionId: "c", at: t, files: [f("e2e/checkout.spec.ts", "modified", 14, 6)] },
   { type: "session.changes", sessionId: "d", at: t, files: [f("src/styles/tokens.css", "added", 88, 0), f("src/styles/global.css", "modified", 12, 40), f("src/components/Button.tsx", "modified", 6, 6), f("src/components/Card.tsx", "modified", 4, 4), f("src/legacy/colors.ts", "deleted", 0, 32)] },
