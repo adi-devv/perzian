@@ -18,11 +18,17 @@ import {
 import type { EventStore } from "./store.ts";
 import * as git from "./git.ts";
 import { symbolChanges } from "./symbols.ts";
+import { ProofTracker, mergeProofs } from "./proof.ts";
+import { existsSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
 const reportMcpEntry = join(here, "../../../packages/report-mcp/src/index.ts");
 const tsxCli = join(here, "../../../node_modules/tsx/dist/cli.mjs");
+const bundledReportMcp = join(here, "report-mcp.mjs");
+// Packaged app: a prebuilt report-mcp next to the bundle (or PERZIAN_REPORT_MCP); dev: run the TS source via tsx.
+const reportMcpArgs = (): string[] =>
+  process.env.PERZIAN_REPORT_MCP ? [process.env.PERZIAN_REPORT_MCP] : existsSync(bundledReportMcp) ? [bundledReportMcp] : [tsxCli, reportMcpEntry];
 
 const ADAPTERS: Record<AgentKind, string> = {
   "claude-code": "@agentclientprotocol/claude-agent-acp/dist/index.js",
@@ -70,6 +76,8 @@ export class AgentSession {
   private tools = new Map<string, { title: string; kind?: string; status: string; own: boolean; hidden: boolean }>();
   private inflight = 0;
   private outcomeThisTurn = false;
+  // Verification commands the agent actually ran this turn, with real exit codes.
+  readonly proofs = new ProofTracker();
   private changeTimer?: ReturnType<typeof setTimeout>;
   private modelOptionId?: string;
   private availableModes: string[] = [];
@@ -192,7 +200,7 @@ export class AgentSession {
         name: "perzian",
         // process.execPath is node, or Electron running as node inside the desktop app.
         command: process.execPath,
-        args: [tsxCli, reportMcpEntry],
+        args: reportMcpArgs(),
         env: [
           ...(process.env.ELECTRON_RUN_AS_NODE ? [{ name: "ELECTRON_RUN_AS_NODE", value: "1" }] : []),
           { name: "PERZIAN_SESSION_ID", value: this.info.id },
@@ -324,7 +332,10 @@ export class AgentSession {
     // A prompt sent while a turn is running is queued by the agent; the session stays "working" until
     // the last one returns.
     const first = this.inflight++ === 0;
-    if (first) this.outcomeThisTurn = false;
+    if (first) {
+      this.outcomeThisTurn = false;
+      this.proofs.reset();
+    }
     this.setStatus("working");
     try {
       await this.ensureStarted();
@@ -366,15 +377,28 @@ export class AgentSession {
     const files = await this.refreshChanges();
     // Only derive an outcome when this turn actually touched files (not for a follow-up question).
     const changedThisTurn = files.length > 0 && JSON.stringify(files) !== this.turnBaseline;
-    if (this.info.role === "worker" && !this.outcomeThisTurn && changedThisTurn && stopReason === "end_turn") {
+    const observed = this.proofs.proofs();
+    const failedCheck = observed.some((p) => !p.passed);
+    if (this.info.role === "worker" && this.outcomeThisTurn && observed.length) {
+      // Checks that ran after the agent's report_outcome still belong in it.
+      const reported = this.store.state().outcomes[this.info.id];
+      if (reported && !reported.derived) {
+        const proof = mergeProofs(observed, reported.proof.filter((p) => !p.observed));
+        if (JSON.stringify(proof) !== JSON.stringify(reported.proof)) {
+          const status = reported.status === "success" && failedCheck ? "partial" : reported.status;
+          this.store.emit({ type: "outcome.reported", outcome: { ...reported, proof, status } });
+        }
+      }
+    }
+    if (this.info.role === "worker" && !this.outcomeThisTurn && (changedThisTurn || observed.length > 0) && stopReason === "end_turn") {
       this.store.emit({
         type: "outcome.reported",
         outcome: {
           sessionId: this.info.id,
           intent: prompt.split("\n")[0].slice(0, 140),
-          status: "success",
+          status: failedCheck ? "partial" : "success",
           changed: files.map((f) => ({ path: f.path, kind: f.kind })),
-          proof: [],
+          proof: observed,
           risks: [],
           followups: [],
           derived: true,
@@ -489,6 +513,7 @@ export class AgentSession {
             if (update.content.type === "text") this.agentText += update.content.text;
             break;
           case "tool_call": {
+            this.proofs.onToolCall(update);
             this.flushAgentText();
             const name = toolName(update) ?? update.title;
             const own = OWN_TOOL.test(name) || OWN_TOOL.test(update.title);
@@ -504,6 +529,7 @@ export class AgentSession {
             break;
           }
           case "tool_call_update": {
+            this.proofs.onToolUpdate(update);
             const known = this.tools.get(update.toolCallId);
             // Once a call is closed (by the agent, or by us on cancel) later updates can't reopen or re-close it.
             if (known && isTerminal(known.status)) break;

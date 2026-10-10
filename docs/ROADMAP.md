@@ -11,6 +11,7 @@
 - [x] Daemon: worktree per session (`perzian/<slug>-<id6>`)
 - [x] Daemon: persistent event store + replay
 - [x] Daemon: session resume via ACP `loadSession` after restart
+- [x] Daemon: live in-memory state, bounded snapshots, log compaction
 - [x] Web: sessions list + attention ordering (live)
 - [x] Web: decision cards (permissions + `ask_decision`) in the needs-you dock
 - [x] Web: transcript deep dive
@@ -26,9 +27,10 @@
 ## Phase 3 — Visuals
 - [x] Change map data: git diff vs `baseSha` (+ untracked), live
 - [x] Read-only diff / file viewer
-- [ ] Change map graph: tree-sitter → React Flow + ELK
-- [ ] Outcome cards with proof (tests, screenshots)
-- [ ] Syntax-highlighted code view (Shiki)
+- [x] Symbol-level change map (tree-sitter: TS/JS/Python/Go)
+- [ ] ~~Change map graph (React Flow + ELK)~~ deprioritized: the symbol list carries the signal without hairball risk
+- [x] Observed proof: daemon records real pass/fail of test/build/typecheck commands; agent claims marked
+- [x] Syntax-highlighted read-only viewer (Shiki, lazy-loaded)
 
 ## Phase 4 — Multi-model
 - [x] Codex adapter wired (`@agentclientprotocol/codex-acp`)
@@ -40,7 +42,8 @@
 ## Phase 5 — Polish
 - [x] Desktop shell (Electron, `apps/desktop`)
 - [ ] Semantic zoom: system → module → file → function
-- [ ] "Where was I" cards
+- [x] "Where was I": since-you-left strip
 - [ ] Phone access
-- [ ] Desktop packaging (signed builds, bundled daemon)
-- [ ] Import existing Claude Code sessions from `~/.claude/projects`
+- [x] Packaged app: `npm run dist` → ad-hoc signed Perzian.app (bundled daemon)
+- [ ] Notarized builds; use installed agent CLIs instead of bundling (~928 MB today)
+- [x] Import existing Claude Code sessions from `~/.claude/projects`

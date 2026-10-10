@@ -8,6 +8,7 @@ import { EventStore } from "./store.ts";
 import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps } from "./session.ts";
 import * as git from "./git.ts";
 import { listClaudeSessions, toEvents } from "./importer.ts";
+import { mergeProofs } from "./proof.ts";
 
 const port = Number(process.env.PERZIAN_PORT ?? DAEMON_PORT);
 const home = resolve(process.env.PERZIAN_HOME ?? join(homedir(), ".perzian"));
@@ -164,10 +165,14 @@ async function handleReport(call: ReportCall): Promise<unknown> {
       });
       return optionId ?? "dismissed";
     }
-    case "report_outcome":
+    case "report_outcome": {
       s.markOutcome();
-      store.emit({ type: "outcome.reported", outcome: { ...call.args, sessionId: s.info.id, createdAt: Date.now() } });
+      // What the daemon saw run outranks what the agent says it ran.
+      const proof = mergeProofs(s.proofs.proofs(), call.args.proof);
+      const status = call.args.status === "success" && proof.some((p) => p.observed && !p.passed) ? "partial" : call.args.status;
+      store.emit({ type: "outcome.reported", outcome: { ...call.args, status, proof, sessionId: s.info.id, createdAt: Date.now() } });
       return "ok";
+    }
     case "list_sessions":
       return [...sessions.values()].filter((x) => x.info.role === "worker" && !x.info.archived).map((x) => brief(x.info));
     case "get_session": {
