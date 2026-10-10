@@ -1,12 +1,14 @@
 /* perzian.dev — same quiet instrument-panel language as the app: monochrome, hairlines, type-led.
    Color only marks status (dots, ✓/✕, +/−). Dark by default, light follows the OS. */
 :root {
-  --bg: #0c0d0f;
-  --bg-2: #111214;
-  --raised: #16171a;
-  --hover: #1c1d21;
-  --line: #222327;
-  --line-soft: #1a1b1e;
+  --bg: #0b0c11;
+  --bg-2: #10121a;
+  --raised: #151721;
+  --hover: #1b1e2a;
+  --line: #232634;
+  --line-soft: #1a1d28;
+  --accent: #6b86ff;
+  --accent-soft: rgba(107, 134, 255, 0.14);
   --fg: #ededef;
   --fg-2: #a0a1a7;
   --fg-3: #66676e;
@@ -24,14 +26,14 @@
   :root:not([data-theme="dark"]) {
     --bg: #fafaf8; --bg-2: #f3f3f1; --raised: #ffffff; --hover: #eeeeec; --line: #e2e2df; --line-soft: #ebebe8;
     --fg: #141518; --fg-2: #5f6067; --fg-3: #95969c;
-    --working: #3f78b5; --needs: #b07b1f; --failed: #b8443d; --done: #3d8a5c;
+    --working: #3f78b5; --needs: #b07b1f; --failed: #b8443d; --done: #3d8a5c; --accent: #1c39bb; --accent-soft: rgba(28, 57, 187, 0.08);
     color-scheme: light;
   }
 }
 :root[data-theme="light"] {
   --bg: #fafaf8; --bg-2: #f3f3f1; --raised: #ffffff; --hover: #eeeeec; --line: #e2e2df; --line-soft: #ebebe8;
   --fg: #141518; --fg-2: #5f6067; --fg-3: #95969c;
-  --working: #3f78b5; --needs: #b07b1f; --failed: #b8443d; --done: #3d8a5c;
+  --working: #3f78b5; --needs: #b07b1f; --failed: #b8443d; --done: #3d8a5c; --accent: #1c39bb; --accent-soft: rgba(28, 57, 187, 0.08);
   color-scheme: light;
 }
 
@@ -203,3 +205,14 @@ p { margin: 0; }
   .ui-file .ui-bar { display: none; }
   .footer nav { margin-left: 0; }
 }
+
+/* Accent: Persian blue, used sparingly */
+.eyebrow { border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.eyebrow .dot { background: var(--accent); }
+.kicker { color: var(--accent); }
+.step-n { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); color: var(--accent); background: var(--accent-soft); }
+.install code::before { color: var(--accent); }
+.mark::after { background: var(--accent); }
+.window { border-color: color-mix(in srgb, var(--accent) 22%, var(--line)); }
+a:not(.btn):not(.brand):hover { color: var(--accent); }
+.oss-inner p a, .strip a { text-decoration-color: color-mix(in srgb, var(--accent) 60%, transparent); text-underline-offset: 3px; }
