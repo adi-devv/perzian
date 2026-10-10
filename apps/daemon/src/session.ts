@@ -47,6 +47,7 @@ function toolName(update: { _meta?: Record<string, unknown> | null }): string | 
   return typeof n === "string" ? n : undefined;
 }
 const OWN_TOOL = /^mcp__perzian__|^perzian[_.]/;
+const isTerminal = (status: string) => status === "completed" || status === "failed" || status === "cancelled";
 
 export interface PendingDecision {
   decision: Decision;
@@ -77,7 +78,14 @@ export class AgentSession {
   private disposing = false;
   private turnBaseline?: string;
 
-  constructor(public info: SessionInfo, private deps: SessionDeps) {}
+  constructor(public info: SessionInfo, private deps: SessionDeps) {
+    // A restored session starts from what the log already has, so reattaching doesn't re-emit it.
+    const st = deps.store.state();
+    const config = st.configs[info.id];
+    if (config) this.config = config;
+    const files = st.changes[info.id];
+    if (files) this.lastChanges = JSON.stringify(files);
+  }
 
   static create(
     opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; id?: string },
@@ -326,6 +334,9 @@ export class AgentSession {
       const body = this.turn++ === 0 ? `${preamble}\n\n---\n\n${text}` : text;
       const res = await this.conn.prompt({ sessionId: this.info.acpSessionId, prompt: [{ type: "text", text: body }] });
       this.flushAgentText();
+      // Close the cancelled turn's tools now, even if a newer prompt is already queued behind it;
+      // otherwise that prompt's end_turn would close them as "completed".
+      if (res.stopReason === "cancelled") this.closeOpenTools("cancelled");
       if (this.inflight === 1) await this.finishTurn(text, res.stopReason);
     } catch (err) {
       this.flushAgentText();
@@ -343,7 +354,7 @@ export class AgentSession {
   // Tool calls the agent never closed (cancelled turn, crash) would spin forever in the UI.
   private closeOpenTools(status: string): void {
     for (const [toolCallId, t] of this.tools) {
-      if (t.hidden || t.status === "completed" || t.status === "failed" || t.status === "cancelled") continue;
+      if (t.hidden || isTerminal(t.status)) continue;
       t.status = status;
       this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "tool", toolCallId, title: t.title, status, toolKind: t.kind, at: Date.now() } });
     }
@@ -396,6 +407,9 @@ export class AgentSession {
 
   async cancel(): Promise<void> {
     this.dropDecisions();
+    // Everything still running belongs to the turn being cancelled; a late "completed" from the agent
+    // won't reopen it (terminal tool states are sticky, see tool_call_update).
+    this.closeOpenTools("cancelled");
     if (this.conn && this.info.acpSessionId) await this.conn.cancel({ sessionId: this.info.acpSessionId });
   }
 
@@ -491,6 +505,8 @@ export class AgentSession {
           }
           case "tool_call_update": {
             const known = this.tools.get(update.toolCallId);
+            // Once a call is closed (by the agent, or by us on cancel) later updates can't reopen or re-close it.
+            if (known && isTerminal(known.status)) break;
             if (update.title && known && !known.hidden) known.title = update.title;
             if (update.status && known) known.status = update.status;
             if (known?.hidden) break;

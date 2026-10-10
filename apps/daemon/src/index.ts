@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DAEMON_PORT, fold, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
+import { DAEMON_PORT, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
 import { EventStore } from "./store.ts";
 import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps } from "./session.ts";
 import * as git from "./git.ts";
@@ -13,20 +13,34 @@ const port = Number(process.env.PERZIAN_PORT ?? DAEMON_PORT);
 const home = resolve(process.env.PERZIAN_HOME ?? join(homedir(), ".perzian"));
 const daemonUrl = `http://127.0.0.1:${port}`;
 const store = new EventStore(home);
+{
+  const b = store.boot;
+  const c = b.compacted ? `, compacted to ${b.compacted.events} events (${(b.compacted.bytes / 1e6).toFixed(2)} MB; previous log in events.jsonl.bak)` : "";
+  console.log(`[store] loaded ${b.events} events (${(b.bytes / 1e6).toFixed(2)} MB) in ${b.ms.toFixed(0)} ms${c}`);
+}
 const sessions = new Map<string, AgentSession>();
 const decisions = new Map<string, PendingDecision>();
 const deps: SessionDeps = { store, daemonUrl, decisions };
 
-// Restore sessions from the log as dormant; anything that was mid-flight is now idle.
+// Restore sessions from the log as dormant; anything that was mid-flight (the daemon was stopped or
+// crashed during a turn) is now idle, with no open decisions and no tool calls left spinning.
+const OPEN_TOOL = (status: string) => status !== "completed" && status !== "failed" && status !== "cancelled";
 {
-  const state = fold(store.all());
+  const state = store.state();
   for (const d of Object.values(state.decisions)) store.emit({ type: "decision.resolved", decisionId: d.id, sessionId: d.sessionId, optionId: null });
   for (const info of Object.values(state.sessions)) {
     if (info.archived) continue;
     const s = new AgentSession({ ...info, live: false }, deps);
     sessions.set(info.id, s);
     if (info.live) store.emit({ type: "session.updated", sessionId: info.id, patch: { live: false } });
-    if (info.status === "working" || info.status === "needs_you") s.setStatus("idle");
+    const at = Date.now();
+    for (const t of state.transcripts[info.id] ?? []) {
+      if (t.kind === "tool" && OPEN_TOOL(t.status)) store.emit({ type: "session.transcript", sessionId: info.id, item: { ...t, status: "cancelled", at } });
+    }
+    if (info.status === "working" || info.status === "needs_you") {
+      s.notice("Interrupted: the daemon restarted during this turn");
+      s.setStatus("idle");
+    }
   }
 }
 
@@ -99,8 +113,8 @@ async function handleCommand(cmd: Command): Promise<void> {
         const id = crypto.randomUUID();
         const events = toEvents(imp, id, { baseSha: await git.head(imp.cwd) });
         for (const e of events) store.emit(e);
-        const info = fold(events).sessions[id];
-        if (info) sessions.set(id, new AgentSession(info, deps));
+        const info = store.state().sessions[id];
+        if (info) sessions.set(id, new AgentSession({ ...info }, deps));
       }
       break;
     }
@@ -115,10 +129,11 @@ async function handleCommand(cmd: Command): Promise<void> {
 }
 
 function brief(info: SessionInfo) {
-  const state = fold(store.all());
+  const state = store.state();
   const outcome = state.outcomes[info.id];
   const transcript = state.transcripts[info.id] ?? [];
-  const lastAgent = [...transcript].reverse().find((t) => t.kind === "agent");
+  let lastAgent: (typeof transcript)[number] | undefined;
+  for (let i = transcript.length - 1; i >= 0 && !lastAgent; i--) if (transcript[i].kind === "agent") lastAgent = transcript[i];
   return {
     id: info.id,
     title: info.title,
@@ -205,7 +220,7 @@ const wss = new WebSocketServer({ server: http, path: "/ws" });
 const send = (ws: WebSocket, msg: ServerMessage) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
 
 wss.on("connection", (ws) => {
-  send(ws, { type: "snapshot", events: store.all() });
+  send(ws, { type: "snapshot", events: store.snapshot() });
   const unsubscribe = store.subscribe((event) => send(ws, { type: "event", event }));
   ws.on("message", (raw) => {
     Promise.resolve()
