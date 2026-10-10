@@ -1,0 +1,17 @@
+{
+  "name": "@perzian/daemon",
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^1.8.0",
+    "@agentclientprotocol/claude-agent-acp": "^0.89.1",
+    "@perzian/protocol": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": { "@types/ws": "^8.5.13" }
+}

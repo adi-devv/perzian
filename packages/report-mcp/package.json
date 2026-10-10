@@ -1,0 +1,12 @@
+{
+  "name": "@perzian/report-mcp",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": { "perzian-report-mcp": "./src/index.ts" },
+  "scripts": { "typecheck": "tsc --noEmit" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@perzian/protocol": "*",
+    "zod": "^4.0.0"
+  }
+}
