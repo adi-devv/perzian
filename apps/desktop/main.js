@@ -2,15 +2,23 @@
 // state into native cues (dock badge, window title, notifications) so you know what needs you
 // without looking at the window.
 import { app, BrowserWindow, Menu, Notification, shell } from "electron";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { createWriteStream, mkdirSync } from "node:fs";
 import { createConnection } from "node:net";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { attentionCount, subscribe } from "./tower.js";
 import { makeIcon } from "./icon.js";
 
-const root = join(dirname(fileURLToPath(import.meta.url)), "../..");
-const PORT = Number(process.env.PERZIAN_PORT ?? 4317);
+// Packaged (.app): the bundled daemon (dist/daemon) and UI (dist/web) sit in Contents/Resources and
+// run on Electron itself (ELECTRON_RUN_AS_NODE), so no repo, node or tsx is needed at runtime.
+// Dev: the daemon runs from source via tsx and the UI from apps/web/dist (or PERZIAN_WEB_URL).
+const packaged = app.isPackaged;
+const here = dirname(fileURLToPath(import.meta.url));
+const root = join(here, "../..");
+const DEFAULT_PORT = 4317; // what the web UI dials when loaded from file://
+const PORT = Number(process.env.PERZIAN_PORT ?? DEFAULT_PORT);
 const WS_URL = `ws://127.0.0.1:${PORT}/ws`;
 const WEB_URL = process.env.PERZIAN_WEB_URL; // set in dev to the Vite server
 const MAX_RESTARTS = 3;
@@ -42,16 +50,73 @@ const waitForPort = async (ms = 10_000) => {
   return false;
 };
 
-function spawnDaemon() {
-  const startedAt = Date.now();
+function daemonCommand() {
+  if (packaged) {
+    const dir = join(process.resourcesPath, "daemon");
+    return {
+      args: [join(dir, "daemon.mjs")],
+      cwd: homedir(),
+      // Read by the daemon to launch the report MCP server (bundled next to it).
+      env: { PERZIAN_REPORT_MCP: join(dir, "report-mcp.mjs") },
+    };
+  }
   // Load tsx as an in-process loader (not its CLI, which forks a second process that would be
   // orphaned if ours is killed) so the pid we supervise is the daemon itself.
   const tsx = pathToFileURL(join(root, "node_modules/tsx/dist/loader.mjs")).href;
-  const child = spawn(process.execPath, ["--import", tsx, join(root, "apps/daemon/src/index.ts")], {
-    cwd: root,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-    stdio: "inherit",
+  return { args: ["--import", tsx, join(root, "apps/daemon/src/index.ts")], cwd: root, env: {} };
+}
+
+// Apps launched from Finder/Dock get launchd's bare PATH (/usr/bin:/bin:/usr/sbin:/sbin), so agents
+// couldn't find brew/npm/etc. Take the PATH the user's login shell would have, once, before the
+// daemon (and through it every agent) inherits our environment.
+let shellPathDone;
+function adoptLoginShellPath() {
+  if (!packaged) return Promise.resolve(); // launched from a terminal: PATH is already right
+  shellPathDone ??= new Promise((resolve) => {
+    const shellBin = process.env.SHELL || "/bin/zsh";
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    execFile(shellBin, ["-ilc", 'printf "\n__PZ_PATH__%s__PZ_PATH__\n" "$PATH"'], { env, timeout: 3000 }, (_err, stdout) => {
+      const fromShell = /__PZ_PATH__(.*)__PZ_PATH__/.exec(String(stdout ?? ""))?.[1] ?? "";
+      const parts = [...fromShell.split(delimiter), ...(process.env.PATH ?? "").split(delimiter), "/opt/homebrew/bin", "/usr/local/bin"];
+      process.env.PATH = [...new Set(parts.filter(Boolean))].join(delimiter);
+      resolve();
+    });
   });
+  return shellPathDone;
+}
+
+// Packaged builds have no terminal: keep the daemon's output in <PERZIAN_HOME>/logs/daemon.log too.
+let daemonLog;
+function daemonLogStream() {
+  if (!packaged) return undefined;
+  if (!daemonLog) {
+    const dir = join(process.env.PERZIAN_HOME ?? join(homedir(), ".perzian"), "logs");
+    try {
+      mkdirSync(dir, { recursive: true });
+      daemonLog = createWriteStream(join(dir, "daemon.log"), { flags: "a" });
+      daemonLog.on("error", () => {});
+    } catch {
+      return undefined;
+    }
+  }
+  return daemonLog;
+}
+
+function spawnDaemon() {
+  const startedAt = Date.now();
+  const cmd = daemonCommand();
+  const log = daemonLogStream();
+  const child = spawn(process.execPath, cmd.args, {
+    cwd: cmd.cwd,
+    env: { ...process.env, ...cmd.env, ELECTRON_RUN_AS_NODE: "1" },
+    stdio: log ? ["ignore", "pipe", "pipe"] : "inherit",
+  });
+  if (log) {
+    log.write(`--- ${new Date().toISOString()} daemon start (pid ${child.pid}, port ${PORT})\n`);
+    child.stdout.on("data", (d) => (process.stdout.write(d), log.write(d)));
+    child.stderr.on("data", (d) => (process.stderr.write(d), log.write(d)));
+  }
   daemon = child;
   console.log(`[desktop] daemon started (pid ${child.pid}, port ${PORT})`);
   child.on("error", (err) => console.error("[desktop] daemon spawn error:", err));
@@ -79,6 +144,7 @@ async function ensureDaemon() {
     console.log(`[desktop] reusing daemon already on port ${PORT}`);
     return; // e.g. started by `npm run dev`
   }
+  await adoptLoginShellPath();
   spawnDaemon();
   if (!(await waitForPort())) console.error("[desktop] daemon did not open its port in time");
 }
@@ -243,7 +309,7 @@ async function createWindow() {
     titleBarStyle: "hiddenInset",
     trafficLightPosition: { x: 14, y: 16 },
     backgroundColor: "#0b0d11",
-    webPreferences: { contextIsolation: true, sandbox: true },
+    webPreferences: { contextIsolation: true, sandbox: true, preload: join(here, "preload.cjs") },
   });
   win.on("page-title-updated", (e) => e.preventDefault()); // the title carries the attention count
   win.on("closed", () => (win = undefined));
@@ -257,16 +323,24 @@ async function createWindow() {
     onStatus: (up) => console.log(`[desktop] daemon stream ${up ? "connected" : "disconnected"}`),
   });
   if (WEB_URL) await win.loadURL(WEB_URL);
-  else await win.loadFile(join(root, "apps/web/dist/index.html"));
+  else {
+    const index = packaged ? join(process.resourcesPath, "web/index.html") : join(root, "apps/web/dist/index.html");
+    // ?port= tells the UI which daemon to dial (preload.cjs applies it until the UI reads it itself).
+    await win.loadFile(index, { query: { port: String(PORT) } });
+  }
 }
+
 
 app.setName("Perzian");
 app.whenReady().then(() => {
   buildMenu();
-  try {
-    app.dock?.setIcon(makeIcon(512));
-  } catch (err) {
-    console.error("[desktop] icon failed:", err);
+  // Packaged builds carry the same mark as the bundle's .icns; dev runs inside Electron.app and need it set.
+  if (!packaged) {
+    try {
+      app.dock?.setIcon(makeIcon(512));
+    } catch (err) {
+      console.error("[desktop] icon failed:", err);
+    }
   }
   return createWindow();
 }).catch((err) => console.error("[desktop] startup failed:", err));

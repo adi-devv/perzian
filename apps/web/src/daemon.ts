@@ -4,8 +4,9 @@ import { demoEvents } from "./demo.ts";
 
 // In the desktop app (file://) talk to the daemon directly; in dev go through the Vite proxy.
 const direct = location.protocol === "file:";
-export const API_BASE = direct ? "http://127.0.0.1:4317" : "";
-const WS_URL = direct ? "ws://127.0.0.1:4317/ws" : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+const port = new URLSearchParams(location.search).get("port") ?? "4317";
+export const API_BASE = direct ? `http://127.0.0.1:${port}` : "";
+const WS_URL = direct ? `ws://127.0.0.1:${port}/ws` : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 export const isDemo = new URLSearchParams(location.search).has("demo");
 
 type Action = { kind: "event"; event: PerzianEvent } | { kind: "reset"; events: PerzianEvent[] };
