@@ -356,10 +356,12 @@ export function explainFailure(text: string): { title: string; reason: string; f
   reason = reason.split("\n")[0];
   if (reason.length > 160) reason = `${reason.slice(0, 157)}…`;
   const fix =
-    /CLI not found|ENOENT|command not found|not an executable/i.test(text)
+    /codex CLI not found/i.test(text)
+      ? "Install Codex (npm install -g @openai/codex), then Retry."
+      : /CLI not found|ENOENT|command not found|not an executable/i.test(text)
       ? "Install Claude Code (curl -fsSL https://claude.ai/install.sh | bash), then Retry."
       : /log ?in|logged in|authenticat|\b401\b|api key|\/login|credential/i.test(text)
-        ? "Sign in with `claude auth login` in a terminal, then Retry."
+        ? "Sign in to this agent (claude auth login or codex login in a terminal), or add an API key under Accounts & API keys, then Retry."
         : /rate.?limit|\b429\b|overloaded|\b529\b|quota|usage limit/i.test(text)
           ? "The model is busy or you hit a usage limit. Wait a moment, then Retry."
           : /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|network|fetch failed|socket/i.test(text)
@@ -396,8 +398,9 @@ export function friendlyError(msg: string): { what: string; fix: string } {
   const nf = /Project folder not found: (.*)/.exec(msg);
   if (nf) return { what: `Folder not found: ${nf[1]}`, fix: "Check the path and try again." };
   if (/unknown session|no such session/i.test(msg)) return { what: "That session is gone from the daemon.", fix: "Reload the page to resync." };
-  if (/CLI not found/i.test(msg)) return { what: "The agent CLI isn't installed.", fix: "Install Claude Code (curl -fsSL https://claude.ai/install.sh | bash), then try again." };
-  if (/agent exited/i.test(msg)) return { what: "The agent stopped while starting.", fix: "Check Claude Code is installed and signed in (claude auth status), then try again." };
+  if (/codex CLI not found/i.test(msg)) return { what: "Codex isn't installed.", fix: "Install it from Accounts & API keys, or run npm install -g @openai/codex, then try again." };
+  if (/CLI not found/i.test(msg)) return { what: "Claude Code isn't installed.", fix: "Install it from Accounts & API keys, or run curl -fsSL https://claude.ai/install.sh | bash, then try again." };
+  if (/agent exited/i.test(msg)) return { what: "The agent stopped while starting.", fix: "Check it's installed and signed in under Accounts & API keys, then try again." };
   if (/not a git repo|worktree/i.test(msg)) return { what: msg.replace(/\.$/, "") + ".", fix: "Turn off “own git worktree” or pick a git repo." };
   return { what: msg.replace(/\.$/, "") + ".", fix: "Try again; if it keeps happening, check the daemon's terminal output." };
 }
