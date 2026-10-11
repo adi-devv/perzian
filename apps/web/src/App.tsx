@@ -138,7 +138,7 @@ export function App() {
 
   // A phone that isn't paired yet, or any window under 600px: the attention queue, nothing else.
   if (link === "unpaired") return <PairScreen />;
-  if (narrow) return <PhoneHome state={state} send={send} link={link} />;
+  if (narrow) return <PhoneHome state={state} send={send} link={link} error={error} />;
 
   return (
     <div className="app">

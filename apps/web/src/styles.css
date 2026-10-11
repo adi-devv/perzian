@@ -692,3 +692,50 @@ a.mchip { text-decoration: none; }
 /* header rows line up with the crew column: one 48px band */
 .d-head { padding-top: 0; }
 .d-head > .d-row:first-child { min-height: 48px; }
+
+/* ── phone inbox: everything that needs you first, big targets, then the crew ── */
+.phone .decision header .dot { display: inline-block; }
+.phone .decision { padding: 14px; }
+.phone .decision-src { font-size: 13px; color: var(--fg-2); min-height: 32px; }
+.decision-where { color: var(--fg-3); font-weight: 400; }
+.decision-where::before { content: "·"; margin-right: 6px; }
+.phone .decision-q, .phone .perm-tool { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.phone .perm-body code { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.phone .opt { min-height: 44px; justify-content: center; }
+.phone .options:not(.row) .opt { padding: 10px 12px; }
+.opt:disabled { opacity: 0.45; cursor: default; }
+.opt.chosen:disabled { opacity: 1; box-shadow: inset 0 0 0 1px var(--fg-2); }
+.inbox-failed { border-color: color-mix(in srgb, var(--failed) 40%, var(--line)); }
+.inbox-empty { display: flex; align-items: center; gap: 10px; padding: 28px 4px; color: var(--fg-2); font-size: 15px; }
+.inbox-empty .chk { stroke: var(--fg-3); }
+.phone-reconnect { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--raised); font-size: 14px; }
+.phone-reconnect .dot { margin-top: 7px; background: var(--fg-3); animation: breathe 1.4s ease-in-out infinite; }
+.phone-reconnect small { display: block; color: var(--fg-3); font-size: 12px; }
+.phone-back { min-height: 40px; padding: 4px 12px 4px 8px; font-size: 14px; }
+.swipe { position: relative; touch-action: pan-y; }
+.swipe-hint { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); color: var(--fg-2); font-size: 13px; opacity: var(--swipe, 0); }
+.swipe-card { position: relative; background: var(--bg); border-radius: var(--r-md); }
+.crew-counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.ccount { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 4px 12px 4px 8px; border: 1px solid var(--btn-line); border-radius: 999px; background: transparent; font-size: 13px; color: var(--fg-2); }
+.ccount b { font-weight: 600; color: var(--fg); font-variant-numeric: tabular-nums; }
+.ccount.on { background: var(--hover); border-color: var(--btn-line-hi); color: var(--fg); }
+/* calm color: only needs-you and failed keep their hue in the counts */
+.ccount.s-working, .ccount.s-done, .ccount.s-paused { --c: var(--fg-3); }
+.ccount.s-working .dot { animation: none; }
+.phone .tiles .tile { width: 100%; background: transparent; border: 0; border-bottom: 1px solid var(--line-soft); text-align: left; min-height: 56px; }
+.phone .tiles .tile:active { background: var(--hover); }
+.ps-head { display: flex; flex-direction: column; gap: 4px; }
+.ps-head h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.015em; }
+.ps-status { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--fg-2); margin-top: 6px; }
+.ps-status.s-needs_you, .ps-status.s-failed { color: var(--c); }
+.ps-why { margin: 0; font-size: 14px; color: var(--fg-2); }
+.ps-said { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; }
+.ps-intent { margin: 0 0 6px; font-size: 14px; }
+.ps-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--fg-2); }
+.ps-list li { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; min-width: 0; }
+.ps-list li code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ps-list li.bad { color: var(--failed); justify-content: flex-start; }
+.ps-actions { display: flex; gap: 8px; }
+.ps-actions .btn { min-height: 44px; flex: 1; font-size: 15px; }
+.ps-actions:empty { display: none; }
+.ps-foot { font-size: 12px; }

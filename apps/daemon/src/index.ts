@@ -19,6 +19,7 @@ import { spawnBlocker } from "./observe.ts";
 import { ResumeQueue } from "./resume.ts";
 import { loadDesktopToken, trustedOrigin } from "./origin.ts";
 import { Devices, PairingCodes, PhoneAccess } from "./phone.ts";
+import { answerDecision } from "./decisions.ts";
 import { fileURLToPath } from "node:url";
 import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
 
@@ -283,7 +284,7 @@ async function handleCommand(cmd: Command): Promise<void> {
       s?.archive();
       break;
     case "decision.answer":
-      decisions.get(cmd.decisionId)?.resolve(cmd.optionId);
+      answerDecision(decisions, cmd.decisionId, cmd.optionId);
       break;
   }
 }

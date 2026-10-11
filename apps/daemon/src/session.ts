@@ -936,9 +936,13 @@ export class AgentSession {
     this.setStatus("needs_you");
     this.store.emit({ type: "decision.requested", decision: d });
     return new Promise((resolve) => {
+      let settled = false;
       this.deps.decisions.set(d.id, {
         decision: d,
         resolve: (optionId) => {
+          // Once only: a late second answer (or a drop racing an answer) must not resolve it again.
+          if (settled) return;
+          settled = true;
           this.deps.decisions.delete(d.id);
           this.store.emit({ type: "decision.resolved", decisionId: d.id, sessionId: this.info.id, optionId });
           const stillWaiting = [...this.deps.decisions.values()].some((p) => p.decision.sessionId === this.info.id);

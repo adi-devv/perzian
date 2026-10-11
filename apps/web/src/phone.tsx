@@ -2,10 +2,8 @@
 // phone sees, and the phone's own layout (attention queue, decision cards, compact tiles; nothing else).
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
-import { byAttention, type PhonePairing, type PhoneStatus, type State } from "@perzian/protocol";
-import { api, isDemo, isPhone, pairPhone, type Link } from "./daemon.ts";
-import { DecisionCard, StatusGlyph, ago, statusText, useTick } from "./bits.tsx";
-import type { Command } from "@perzian/protocol";
+import type { PhonePairing, PhoneStatus } from "@perzian/protocol";
+import { api, isDemo, isPhone, pairPhone } from "./daemon.ts";
 
 /** True below 600px: the phone layout. */
 export function useNarrow(): boolean {
@@ -197,58 +195,5 @@ export function PairScreen() {
   );
 }
 
-/** Under 600px: what needs you, answerable, and one compact tile per session. No composer, no drawers. */
-export function PhoneHome({ state, send, link }: { state: State; send: (c: Command) => void; link: Link }) {
-  useTick();
-  const workers = Object.values(state.sessions)
-    .filter((s) => !s.archived && s.role === "worker")
-    .sort(byAttention);
-  const decisions = Object.values(state.decisions).sort((a, b) => a.createdAt - b.createdAt);
-  return (
-    <div className="phone">
-      <header className="phone-head">
-        <span className="brand">
-          <span className="mark" aria-hidden />
-          Perzian
-        </span>
-        <span className={`conn ${link === "online" ? "on" : "off"}`} title={link === "online" ? "Connected" : "Can't reach your Mac"} />
-      </header>
-      {link !== "online" && <p className="quiet phone-note">{link === "connecting" ? "Connecting…" : "Can't reach your Mac. Is Perzian running and awake?"}</p>}
-      {decisions.length > 0 && (
-        <section aria-label="Needs you">
-          <h2 className="eyebrow s-needs_you">
-            <span className="dot" /> Needs you <b>{decisions.length}</b>
-          </h2>
-          <div className="needs-list">
-            {decisions.map((d) => (
-              <DecisionCard key={d.id} d={d} session={state.sessions[d.sessionId]} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: d.id, optionId })} />
-            ))}
-          </div>
-        </section>
-      )}
-      <section aria-label="Sessions">
-        <h2 className="eyebrow">Sessions</h2>
-        {workers.length === 0 && <p className="quiet">Nothing running.</p>}
-        <div className="tiles">
-          {workers.map((s) => {
-            const files = (state.changes[s.id] ?? []).length;
-            return (
-              <article key={s.id} className={`tile s-${s.status}`}>
-                <StatusGlyph s={s} />
-                <div className="tile-main">
-                  <span className="tile-title">{s.title}</span>
-                  <span className="tile-sub">
-                    {statusText(s)}
-                    {s.progress && s.status === "working" ? ` · ${s.progress.phase} ${s.progress.step}/${s.progress.of}` : ""}
-                    {files ? ` · ${files} files` : ""}
-                  </span>
-                </div>
-                <span className="age">{ago(s.updatedAt)}</span>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-    </div>
-  );
-}
+/** Under 600px: the decision inbox, then the crew (phoneInbox.tsx). */
+export { PhoneHome } from "./phoneInbox.tsx";
