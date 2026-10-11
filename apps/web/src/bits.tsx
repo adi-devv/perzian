@@ -120,7 +120,8 @@ export function useFocusOnMount(on: boolean | undefined) {
 /** The option that says no: what a destructive request focuses by default. */
 export const denyOption = (d: Decision) => d.options.find((o) => o.kind === "reject_once") ?? d.options.find((o) => o.kind === "reject_always");
 
-export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decision; session?: SessionInfo; onAnswer: (id: string | null) => void; onOpen?: () => void; index?: number }) {
+/** `where`: the project, for lists across projects. `disabled`: answers are off (offline, or one is already on its way; `chosen` marks it). */
+export function DecisionCard({ d, session, onAnswer, onOpen, index, where, disabled, chosen }: { d: Decision; session?: SessionInfo; onAnswer: (id: string | null) => void; onOpen?: () => void; index?: number; where?: string; disabled?: boolean; chosen?: string }) {
   const perm = d.source === "permission";
   const deny = d.destructive ? denyOption(d) : undefined;
   const denyRef = useFocusOnMount(!!deny);
@@ -130,6 +131,7 @@ export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decis
         <button className="decision-src" onClick={onOpen} title="Open session">
           <span className="dot" />
           {session?.title ?? "Session"}
+          {where && <span className="decision-where">{where}</span>}
         </button>
         {index !== undefined && index < 9 && <kbd>{index + 1}</kbd>}
         <span className="age">{ago(d.createdAt)}</span>
@@ -146,7 +148,7 @@ export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decis
       )}
       <div className={`options ${perm ? "row" : ""}`}>
         {d.options.map((o) => (
-          <button key={o.id} ref={deny?.id === o.id ? denyRef : undefined} className={`opt k-${o.kind ?? "choice"} ${d.recommended === o.id ? "rec" : ""} ${deny?.id === o.id ? "deny-default" : ""}`} onClick={() => onAnswer(o.id)}>
+          <button key={o.id} ref={deny?.id === o.id ? denyRef : undefined} className={`opt k-${o.kind ?? "choice"} ${d.recommended === o.id ? "rec" : ""} ${deny?.id === o.id ? "deny-default" : ""} ${chosen === o.id ? "chosen" : ""}`} disabled={disabled} onClick={() => onAnswer(o.id)}>
             <span className="opt-label">{o.label}</span>
             {o.tradeoff && <span className="opt-trade">{o.tradeoff}</span>}
           </button>
