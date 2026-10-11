@@ -3,6 +3,7 @@ import { mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "no
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { ChangeKind, FileChange, LeftoverWorktree, SessionInfo } from "@perzian/protocol";
+import { PR_FIELDS, parsePrView, type PrView } from "./prstatus.ts";
 
 const exec = promisify(execFile);
 
@@ -44,24 +45,184 @@ export async function currentBranch(cwd: string): Promise<string | undefined> {
 }
 
 /** Why a worktree can't be cut from `project` right now, or undefined when it can. */
-export async function worktreeBlocker(project: string): Promise<string | undefined> {
+export async function worktreeBlocker(project: string, base?: string): Promise<string | undefined> {
   if (!(await head(project))) return `This repo has no commits yet, so there's nothing to branch from. Make a first commit (git add -A && git commit -m "Initial commit"), then start the session.`;
-  if (!(await currentBranch(project))) return "Your checkout is on a detached HEAD, so there's no branch to merge the work back into. Check out a branch (git switch <branch>), then start the session.";
+  // A detached checkout is fine as long as there's a branch to start from (and to merge or PR back into).
+  if (!base?.trim() && !(await defaultBranch(project)))
+    return "Your checkout is on a detached HEAD and there's no main or master branch to start from. Pick a base branch, or check out a branch (git switch <branch>), then start the session.";
   return undefined;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Base branches. A worktree session starts from a base branch (default: the repo's default branch),
+// freshly fetched from origin when there is one. The developer's own checkout is never touched: fetch
+// only moves origin/<base>, and the worktree is cut from that commit.
+
+export const FETCH_TIMEOUT_MS = 15_000;
+
+async function refExists(cwd: string, ref: string): Promise<boolean> {
+  try {
+    await git(cwd, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function hasOrigin(cwd: string): Promise<boolean> {
+  try {
+    return !!(await git(cwd, ["remote", "get-url", "origin"])).trim();
+  } catch {
+    return false;
+  }
+}
+
+/** The repo's default branch: origin/HEAD, else main or master (local or on origin), else the checked-out branch. */
+export async function defaultBranch(project: string): Promise<string | undefined> {
+  try {
+    const ref = (await git(project, ["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"])).trim();
+    if (ref.startsWith("origin/") && ref !== "origin/HEAD") return ref.slice("origin/".length);
+  } catch {}
+  for (const name of ["main", "master"]) {
+    if ((await refExists(project, `refs/heads/${name}`)) || (await refExists(project, `refs/remotes/origin/${name}`))) return name;
+  }
+  return currentBranch(project);
+}
+
+const MAX_BRANCHES = 1000;
+
+/** Local and origin branches by name, `origin/x` and `x` once: the default branch first, then most recently committed. */
+export async function listBranches(project: string): Promise<{ repo: boolean; branches: string[]; default?: string }> {
+  if (!(await isRepo(project))) return { repo: false, branches: [] };
+  const out = await git(project, ["for-each-ref", "--sort=-committerdate", "--format=%(refname)", "refs/heads", "refs/remotes/origin"]).catch(() => "");
+  const names = new Set<string>();
+  for (const ref of out.split("\n")) {
+    const name = ref.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : ref.startsWith("refs/remotes/origin/") ? ref.slice("refs/remotes/origin/".length) : "";
+    if (name && name !== "HEAD") names.add(name);
+  }
+  const def = await defaultBranch(project);
+  const branches = [...names];
+  if (def && names.has(def)) branches.splice(branches.indexOf(def), 1), branches.unshift(def);
+  return { repo: true, branches: branches.slice(0, MAX_BRANCHES), ...(def ? { default: def } : {}) };
+}
+
+async function validBranchName(cwd: string, name: string): Promise<boolean> {
+  if (!name || name.startsWith("-") || name.includes("@{")) return false;
+  try {
+    await git(cwd, ["check-ref-format", `refs/heads/${name}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** git fetch origin <base>, updating only origin/<base>. Never prompts; gives up after `timeoutMs`. */
+async function fetchBase(project: string, base: string, timeoutMs: number): Promise<{ ok: true } | { ok: false; missing: boolean }> {
+  try {
+    await exec("git", ["fetch", "--quiet", "--no-tags", "origin", `+refs/heads/${base}:refs/remotes/origin/${base}`], {
+      cwd: project,
+      timeout: timeoutMs,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, missing: /couldn't find remote ref/i.test((e as { stderr?: string }).stderr ?? "") };
+  }
+}
+
+export interface BaseStart {
+  /** Branch name the session is based on ("main"); PRs target it and Merge lands into it. */
+  base: string;
+  /** The commit the worktree starts from. */
+  sha: string;
+  /** What that commit was read from: "origin/main" or "main". */
+  from: string;
+  /** Set when the fresh fetch didn't happen, e.g. "Couldn't fetch origin; started from your local main." */
+  notice?: string;
+}
+
+/** Resolves where a new worktree starts: fetch origin <base>, then origin/<base> when it exists, else local <base>. */
+export async function resolveBase(project: string, requested?: string, opts: { fetchTimeoutMs?: number } = {}): Promise<BaseStart> {
+  let base = requested?.trim() || (await defaultBranch(project));
+  if (!base) throw new Error("There's no branch to start from: your checkout is on a detached HEAD and there's no main or master. Pick a base branch.");
+  if (base.startsWith("refs/heads/")) base = base.slice("refs/heads/".length);
+  else if (base.startsWith("origin/") && !(await refExists(project, `refs/heads/${base}`))) base = base.slice("origin/".length);
+  if (!(await validBranchName(project, base))) throw new Error(`"${base}" isn't a valid branch name. Pick a base branch from the list.`);
+
+  const remote = `refs/remotes/origin/${base}`;
+  const local = `refs/heads/${base}`;
+  // Another session's branch (stacking): the local branch is the truth, it may not be pushed at all.
+  const stacked = isSessionBranch(base) && (await refExists(project, local));
+  const fetched = !stacked && (await hasOrigin(project)) ? await fetchBase(project, base, opts.fetchTimeoutMs ?? FETCH_TIMEOUT_MS) : undefined;
+  let ref: string | undefined;
+  if (stacked) ref = local;
+  else if (fetched?.ok && (await refExists(project, remote))) ref = remote;
+  else if (await refExists(project, local)) ref = local;
+  else if (await refExists(project, remote)) ref = remote;
+  if (!ref) throw new Error(`There's no branch named ${base}, locally or on origin. Pick another base branch.`);
+
+  const from = ref === remote ? `origin/${base}` : base;
+  let notice: string | undefined;
+  if (fetched && !fetched.ok) {
+    notice = fetched.missing
+      ? `${base} isn't on origin; started from your local ${base}.`
+      : ref === local
+        ? `Couldn't fetch origin; started from your local ${base}.`
+        : `Couldn't fetch origin; started from origin/${base} as last fetched.`;
+  }
+  const sha = (await git(project, ["rev-parse", "--verify", `${ref}^{commit}`])).trim();
+  return { base, sha, from, ...(notice ? { notice } : {}) };
+}
+
+/** A branch Perzian made for a session (perzian/<slug>-<id>): a base that is another session's work. */
+export const isSessionBranch = (name: string): boolean => name.startsWith("perzian/");
+
+/** The ref a session's base lives at now: the parent session's local branch when stacked, else origin/<base> when it exists, else local <base>. */
+async function baseRef(cwd: string, base: string): Promise<string | undefined> {
+  const candidates = isSessionBranch(base) ? [`refs/heads/${base}`] : [`refs/remotes/origin/${base}`, `refs/heads/${base}`];
+  for (const ref of candidates) if (await refExists(cwd, ref)) return ref;
+  return undefined;
+}
+
+/** `git rev-list --count` output as a number; undefined for anything else. */
+export function parseBehind(out: string): number | undefined {
+  const t = out.trim();
+  return /^\d+$/.test(t) ? Number(t) : undefined;
+}
+
+/** Moves origin/<base> forward (a fetch of just that branch); false when it can't (offline, no origin, no such branch). Never prompts. */
+export async function refreshBase(cwd: string, base: string, timeoutMs = FETCH_TIMEOUT_MS): Promise<boolean> {
+  if (isSessionBranch(base) || !(await hasOrigin(cwd))) return false;
+  return (await fetchBase(cwd, base, timeoutMs)).ok;
+}
+
+/** How far the base has moved: commits on it that HEAD doesn't have. Undefined when the base can't be read. */
+export async function behindBase(cwd: string, base: string): Promise<number | undefined> {
+  const ref = await baseRef(cwd, base);
+  if (!ref) return undefined;
+  const r = await gitCode(cwd, ["rev-list", "--count", `HEAD..${ref}`]);
+  return r.code === 0 ? parseBehind(r.out) : undefined;
 }
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "task";
 
-export async function createWorktree(project: string, home: string, title: string, id: string): Promise<{ path: string; branch: string; baseBranch: string }> {
-  const blocked = await worktreeBlocker(project);
+export async function createWorktree(
+  project: string,
+  home: string,
+  title: string,
+  id: string,
+  opts: { base?: string; fetchTimeoutMs?: number } = {},
+): Promise<{ path: string; branch: string; baseBranch: string; baseSha: string; notice?: string }> {
+  const blocked = await worktreeBlocker(project, opts.base);
   if (blocked) throw new Error(blocked);
-  const baseBranch = (await currentBranch(project))!;
+  const start = await resolveBase(project, opts.base, opts);
   const branch = `perzian/${slug(title)}-${id.slice(0, 6)}`;
   const dir = join(home, "worktrees", basename(project));
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${slug(title)}-${id.slice(0, 6)}`);
-  await git(project, ["worktree", "add", "-b", branch, path, "HEAD"]);
-  return { path, branch, baseBranch };
+  // From the commit itself, so the new branch doesn't track origin/<base>; the checkout is left alone.
+  await git(project, ["worktree", "add", "-b", branch, path, start.sha]);
+  return { path, branch, baseBranch: start.base, baseSha: start.sha, ...(start.notice ? { notice: start.notice } : {}) };
 }
 
 const KIND: Record<string, ChangeKind> = { A: "added", M: "modified", D: "deleted", R: "renamed", T: "modified", C: "added" };
@@ -194,11 +355,10 @@ export async function mergeBase(cwd: string, a: string, b: string): Promise<stri
 }
 
 /** The branch's pull request via gh, or undefined (no gh, no PR, not signed in: all ignored). */
-export async function pullRequest(cwd: string): Promise<{ url: string; state: string } | undefined> {
+export async function pullRequest(cwd: string, branch?: string): Promise<PrView | undefined> {
   try {
-    const { stdout } = await exec("gh", ["pr", "view", "--json", "url,state"], { cwd, timeout: 10_000, maxBuffer: 1024 * 1024 });
-    const pr = JSON.parse(stdout) as { url?: string; state?: string };
-    return pr.url && pr.state ? { url: pr.url, state: pr.state } : undefined;
+    const { stdout } = await exec("gh", ["pr", "view", ...(branch ? [branch] : []), "--json", PR_FIELDS], { cwd, timeout: 10_000, maxBuffer: 4 * 1024 * 1024 });
+    return parsePrView(stdout);
   } catch {
     return undefined;
   }

@@ -40,7 +40,11 @@ coding agent. Adapters: `@agentclientprotocol/claude-agent-acp` (Claude Code), `
 Per session the daemon:
 
 1. Creates a worktree (every session in a repo, unless `worktree: false`): branch `perzian/<slug>-<id6>` at `$PERZIAN_HOME/worktrees/<repo>/<slug>-<id6>`,
-   and records `baseSha` (HEAD at start). Then readies it (`setup.ts`): copies the checkout's gitignored `.env*` and
+   cut from a base branch (`base` on `spawn_session` / `CreateSessionArgs`, default the repo's default branch; `GET /api/branches` feeds the picker):
+   `resolveBase` runs `git fetch origin <base>` (only `origin/<base>` moves, never the developer's checkout) and cuts from `origin/<base>`;
+   offline, a missing remote ref or no origin falls back to the local branch (or the last-fetched `origin/<base>`) and posts a notice on the session.
+   `base` may be another session's `perzian/…` branch (stacking): used as the local branch, never fetched; the tile shows "on <parent title>".
+   Records `baseSha` (the commit it started from) and `baseBranch`. Then readies it (`setup.ts`): copies the checkout's gitignored `.env*` and
    local config files, runs the lockfile's install, and records progress in `SessionInfo.setup`. Prompts wait for
    it; a failure holds them until the developer picks Retry or Start anyway (`session.setup`).
 2. Spawns the adapter, opens an ACP `ClientSideConnection`, `initialize`.
@@ -112,8 +116,14 @@ and git state are observed (`observe.ts`, `SessionInfo` fields): `outsidePaths` 
 `extraDirs` (extra folders, passed to Claude as `additionalDirectories`), `subagents` (Task/Agent calls; nested
 tool items carry `parentToolCallId`), `background` (`run_in_background` or trailing `&`, with a `--port`/`:N`
 port), `extraWorktrees` (worktrees the agent made itself, found with `git worktree list --porcelain` after
-execute calls and turns), `git` (`ahead`, `pushed`, `prUrl` from `gh pr view`, at most once a minute, failures
-ignored). After a branch switch or rebase that drops `baseSha` from HEAD, the base is recomputed with merge-base
+execute calls and turns), `git` (`ahead`, `pushed`, `prUrl`, plus `behind` and `pr`, below).
+`GitState.behind` is how far the base moved: commits on `origin/<base>` (or the parent session's local branch) that HEAD lacks.
+It is re-read after every observed turn; `origin/<base>` is fetched at most every 2 minutes. The header's "Base moved · N behind"
+has an Update button: `session.updateBase` prompts the agent to fetch and merge or rebase the base, so conflicts are the agent's.
+`GitState.pr` (`PrStatus`) folds `gh pr view <branch> --json url,state,mergeable,statusCheckRollup,reviewDecision` (`prstatus.ts`):
+state open/merged/closed, checks passing/failing/pending/none with the failing names, review decision, conflicts. Read at most once a
+minute, after an agent push or Open PR, and by a timer while the PR is open; merged and closed stop it; gh failures change nothing.
+The detail's "Ask agent to fix CI" is `session.fixCi`: a prompt with the failing check names and `gh run view --log-failed`. After a branch switch or rebase that drops `baseSha` from HEAD, the base is recomputed with merge-base
 against the original base branch. Merging removes the session's worktree (no `--force`) but keeps the branch
 (`ShipState.worktreeRemoved`); `GET /api/worktrees/leftover` lists worktree folders under `$PERZIAN_HOME/worktrees`
 with no live session. The global default permission mode is the `settings.setDefaultMode` command and

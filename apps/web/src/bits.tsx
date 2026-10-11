@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AGENTS, MODE_LABEL, shownStatus, type Command, type Decision, type FileChange, type PermissionMode, type SessionInfo, type SessionStatus, type State, type TranscriptItem } from "@perzian/protocol";
+import { AGENTS, MODE_LABEL, shownStatus, type BranchList, type Command, type Decision, type FileChange, type PermissionMode, type SessionInfo, type SessionStatus, type State, type TranscriptItem } from "@perzian/protocol";
 import { isFailureNotice } from "./onboarding.tsx";
 
 type Send = (c: Command) => void;
@@ -215,16 +215,18 @@ export function sessionChips(s: SessionInfo): Chip[] {
 /** "3 commits · pushed" plus the PR link, or null when the agent made no commits. */
 export function gitChip(s: SessionInfo): { label: string; url?: string } | null {
   const g = s.git;
-  if (!g || (!g.ahead && !g.prUrl)) return null;
+  // Once gh has reported the PR, its own line carries the link, state and checks.
+  if (!g || (!g.ahead && !(g.prUrl && !g.pr))) return null;
   const label = [g.ahead ? plural(g.ahead, "commit") : "", g.ahead && g.pushed ? "pushed" : ""].filter(Boolean).join(" · ");
-  return { label, url: g.prUrl };
+  return { label, url: g.pr ? undefined : g.prUrl };
 }
 
 /** `quietOutside`: the card on the tile already says which path is outside the project, so the chip would repeat it. */
 export function Chips({ s, quietOutside }: { s: SessionInfo; quietOutside?: boolean }) {
   const chips = sessionChips(s).filter((c) => !(quietOutside && c.key === "out"));
   const g = gitChip(s);
-  if (!chips.length && !g) return null;
+  const pr = prLabel(s);
+  if (!chips.length && !g && !pr) return null;
   return (
     <div className="chips-row">
       {chips.map((c) =>
@@ -233,6 +235,9 @@ export function Chips({ s, quietOutside }: { s: SessionInfo; quietOutside?: bool
         ) : (
           <span key={c.key} className="mchip" title={c.title}>{c.label}</span>
         ),
+      )}
+      {pr && (
+        <a className={`mchip${pr.bad ? " bad" : ""}`} href={s.git!.pr!.url} target="_blank" rel="noopener" title={prSummary(s) ?? undefined} onClick={(e) => e.stopPropagation()}>{pr.text}</a>
       )}
       {g && (
         <span className="mchip" title="Commits the agent made itself">
@@ -322,4 +327,53 @@ export function ModelPicker({ s, state, send }: { s: SessionInfo; state: State; 
       {options.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
     </select>
   );
+}
+
+/** The branch new sessions start from: "from main" by default; another session's branch reads "on <its title>" (stacking). */
+export function BasePicker({ list, value, onChange, state }: { list: BranchList; value: string; onChange: (b: string) => void; state: State }) {
+  const current = list.branches.includes(value) ? value : (list.default ?? list.branches[0] ?? "");
+  const owner = (b: string) => Object.values(state.sessions).find((x) => x.role === "worker" && !x.archived && x.branch === b);
+  return (
+    <select className="picker base-pick" aria-label="Start from branch" title="The branch new sessions start from. Another session's branch stacks on its work." value={current} onChange={(e) => onChange(e.target.value)}>
+      {list.branches.map((b) => (
+        <option key={b} value={b}>{owner(b) ? `on ${owner(b)!.title}` : `from ${b}`}</option>
+      ))}
+    </select>
+  );
+}
+
+/** The session this one is stacked on: the worker whose branch is this session's base. */
+export function stackedOn(s: SessionInfo, state: State): SessionInfo | undefined {
+  if (!s.baseBranch || s.baseBranch === s.branch) return undefined;
+  return Object.values(state.sessions).find((x) => x.id !== s.id && x.role === "worker" && x.branch === s.baseBranch);
+}
+
+export interface PrLabel {
+  /** "PR · checks ✓", "PR · 2 failing", "Merged". */
+  text: string;
+  /** Only a failed CI is red. */
+  bad?: boolean;
+}
+
+/** The PR chip the tile shows, or null when the session has no PR read from gh yet. */
+export function prLabel(s: SessionInfo): PrLabel | null {
+  const pr = s.git?.pr;
+  if (!pr) return null;
+  if (pr.state === "merged") return { text: "Merged" };
+  if (pr.state === "closed") return { text: "PR closed" };
+  if (pr.checks === "failing") return { text: `PR · ${pr.failing.length} failing`, bad: true };
+  if (pr.checks === "passing") return { text: "PR · checks ✓" };
+  if (pr.checks === "pending") return { text: "PR · checks running" };
+  return { text: "PR" };
+}
+
+const REVIEW_TEXT = { approved: "Approved", changes_requested: "Changes requested", review_required: "Review needed" } as const;
+
+/** One line on the PR for the session header: state, checks, review. */
+export function prSummary(s: SessionInfo): string | null {
+  const pr = s.git?.pr;
+  if (!pr) return null;
+  if (pr.state !== "open") return pr.state === "merged" ? "Merged" : "Closed";
+  const checks = pr.checks === "passing" ? "checks ✓" : pr.checks === "pending" ? "checks running" : pr.checks === "failing" ? `${pr.failing.length} failing` : "no checks";
+  return ["Open", checks, pr.review ? REVIEW_TEXT[pr.review] : "", pr.conflicting ? "conflicts with base" : ""].filter(Boolean).join(" · ");
 }

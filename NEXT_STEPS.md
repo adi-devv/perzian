@@ -23,8 +23,6 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
      the pairing token is the only gate and quick tunnels have no uptime guarantee. About 1-2 days.
    - Later, if people want zero setup with guarantees: our own Cloudflare Durable Objects relay with end-to-end encryption,
      about $5-30/month per 1k active users, possibly paid. Firebase rejected (data at Google, per-event cost).
-2. **Branches for teams.** Teams don't ship straight to main. PR is already the default ship action. Next: base picker on New session (lead can pass `base`),
-   fetch and branch from `origin/<base>` (offline falls back to local with a note), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
 3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
 5. **Observation UI, leftovers (the rest is drawn: chips and facts on tiles and the session header, outside-project tag on cards, nested subagent calls, default-mode picker, persisted projects).**
    Leftover worktrees (Accounts) are list-and-copy-command only; a Remove button needs a safe daemon removal.
@@ -44,7 +42,6 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 - **Thinking animation from the logo** (like Claude's spark), for the lead's "working" state and the site hero. Design after the pick.
 
 ## From competitors (Conductor, Vibe Kanban, Cursor, Zed)
-- **PR + CI status on the session** after "Open PR": checks passing/failing, merged.
 - **Run the app from a session:** start its dev server on its own port to try the change before merging.
 - **Checkpoints:** roll a session back to before a given turn.
 - **Sessions from issues:** pick a GitHub/Linear issue; it becomes the brief.

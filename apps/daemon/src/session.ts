@@ -11,6 +11,7 @@ import {
   type AgentConfig,
   type AgentKind,
   type Decision,
+  type GitState,
   type PauseInfo,
   type PermissionMode,
   type SessionInfo,
@@ -18,6 +19,7 @@ import {
 } from "@perzian/protocol";
 import type { EventStore } from "./store.ts";
 import * as git from "./git.ts";
+import { fixCiPrompt, toPrStatus, updateBasePrompt, type PrView } from "./prstatus.ts";
 import { symbolChanges } from "./symbols.ts";
 import { ProofTracker, derivedStatus, mergeProofs } from "./proof.ts";
 import { existsSync } from "node:fs";
@@ -70,6 +72,8 @@ const CLAUDE_ASK = { permissions: { ask: ["Bash", "Edit", "Write", "MultiEdit", 
 // extraDirs go to Claude as additionalDirectories (claude-agent-acp merges _meta.claudeCode.options into the SDK options).
 const claudeMeta = (extraDirs?: string[]) => ({ claudeCode: { options: { settings: CLAUDE_ASK, ...(extraDirs?.length ? { additionalDirectories: extraDirs } : {}) } } });
 const PR_CHECK_MS = 60_000;
+/** The base branch is fetched at most this often to see whether it moved. */
+const BASE_FETCH_MS = 120_000;
 const isTerminal = (status: string) => status === "completed" || status === "failed" || status === "cancelled";
 
 export interface PendingDecision {
@@ -89,8 +93,10 @@ export interface SessionDeps {
   adapter?: { command: string; args: string[] };
   /** Overrides each declared check's timeout, in ms (tests). */
   checkTimeoutMs?: number;
-  /** Looks up the branch's open pull request (tests swap out gh). */
-  prLookup?: (cwd: string) => Promise<{ url: string; state: string } | undefined>;
+  /** Looks up the branch's pull request (tests swap out gh). */
+  prLookup?: (cwd: string, branch?: string) => Promise<PrView | undefined>;
+  /** Fetches the base branch from origin (tests swap out git's network). Resolves whether it worked. */
+  baseFetch?: (cwd: string, base: string) => Promise<boolean>;
 }
 
 // One agent session = one adapter process + one ACP connection. Can be dormant (restored from the log)
@@ -109,6 +115,8 @@ export class AgentSession {
   private repoAgain = false;
   private repoDirty = false;
   private lastPrCheck = 0;
+  private lastBaseFetch = 0;
+  private prTimer?: ReturnType<typeof setInterval>;
   private inflight = 0;
   private outcomeThisTurn = false;
   // Verification commands the agent actually ran this turn, with real exit codes.
@@ -149,6 +157,7 @@ export class AgentSession {
     if (files) this.lastChanges = JSON.stringify(files);
     this.startBranch = info.baseBranch ?? info.branch;
     this.observer = new ToolObserver(info.cwd, () => this.roots(), info);
+    if (info.git?.pr?.state === "open" && !info.archived) this.watchPr(true); // restored with its PR still open
   }
 
   /** The folders edits are expected in: the session's own and its extra ones. */
@@ -781,8 +790,9 @@ export class AgentSession {
     // Commits, push, PR.
     const ahead = (await git.aheadCount(cwd, base)) ?? 0;
     const up = await git.upstreamState(cwd);
-    const prUrl = this.info.git?.prUrl;
-    const gitState = { ahead, pushed: up.upstream && up.unpushed === 0, ...(prUrl ? { prUrl } : {}) };
+    // What gh and the base fetch reported (prUrl, pr, behind) is kept; they're updated by their own refreshes.
+    const { prUrl, pr, behind } = this.info.git ?? {};
+    const gitState: GitState = { ahead, pushed: up.upstream && up.unpushed === 0, ...(prUrl ? { prUrl } : {}), ...(pr ? { pr } : {}), ...(behind ? { behind } : {}) };
     if (JSON.stringify(gitState) !== JSON.stringify(this.info.git)) patch.git = gitState;
 
     // Worktrees the agent made itself: not Perzian's (a session's cwd, the project, perzian/ branches), not another session's.
@@ -807,18 +817,73 @@ export class AgentSession {
 
     if (Object.keys(patch).length) this.update(patch);
     if (branch && (ahead > 0 || gitState.pushed)) void this.refreshPr();
+    void this.refreshBehind();
   }
 
-  // gh at most once a minute; no gh, no PR or no sign-in just means no link.
+  /**
+   * How far the base moved: commits on it this branch lacks. The base is fetched at most every 2 minutes
+   * (offline or no origin just means the last known count stays); the count itself is cheap and re-read
+   * after every turn, so it drops as soon as the agent has merged the base in.
+   */
+  private async refreshBehind(): Promise<void> {
+    const base = this.info.baseBranch;
+    if (!base || !this.info.worktree || this.info.ship?.state === "merged") return;
+    if (Date.now() - this.lastBaseFetch >= BASE_FETCH_MS) {
+      this.lastBaseFetch = Date.now();
+      await (this.deps.baseFetch ?? git.refreshBase)(this.info.cwd, base).catch(() => false);
+    }
+    const n = (await git.behindBase(this.info.cwd, base).catch(() => undefined)) ?? 0;
+    const cur = this.info.git;
+    if ((cur?.behind ?? 0) === n || !cur) return;
+    const { behind: _, ...rest } = cur;
+    this.update({ git: { ...rest, ...(n ? { behind: n } : {}) } });
+  }
+
+  /** "Update" on the Base moved line: the agent merges or rebases the base in, and handles any conflicts. */
+  async updateBase(): Promise<void> {
+    const base = this.info.baseBranch;
+    if (!base || !this.info.worktree) throw new Error("This session has no base branch to update from.");
+    this.lastBaseFetch = 0; // the count is recomputed fresh when the turn ends
+    await this.prompt(updateBasePrompt(base, this.info.git?.behind));
+  }
+
+  /** "Ask agent to fix CI": the failing check names, and where to read their logs. */
+  async fixCi(): Promise<void> {
+    const pr = this.info.git?.pr;
+    if (pr?.state !== "open") throw new Error("This session has no open pull request.");
+    this.lastPrCheck = 0; // re-read the checks once the agent has pushed
+    await this.prompt(fixCiPrompt(pr.failing, pr.url));
+  }
+
+  /**
+   * The branch's PR, state, checks and review, via gh: at most once a minute, while a PR is open or after
+   * the agent pushed. gh missing, signed out, offline or no PR just means nothing changes.
+   */
   private async refreshPr(): Promise<void> {
     if (Date.now() - this.lastPrCheck < PR_CHECK_MS) return;
+    const known = this.info.git?.pr;
+    if (known && known.state !== "open") return; // merged or closed: nothing more will change
     this.lastPrCheck = Date.now();
-    const pr = await (this.deps.prLookup ?? git.pullRequest)(this.info.cwd).catch(() => undefined);
-    const prUrl = pr && pr.state.toUpperCase() === "OPEN" ? pr.url : undefined;
-    const cur = this.info.git;
-    if (!cur || cur.prUrl === prUrl) return;
-    const { prUrl: _, ...rest } = cur;
-    this.update({ git: { ...rest, ...(prUrl ? { prUrl } : {}) } });
+    const view = await (this.deps.prLookup ?? git.pullRequest)(this.info.cwd, this.info.branch).catch(() => undefined);
+    const cur = this.info.git ?? { ahead: 0, pushed: false };
+    if (!view) return;
+    const pr = toPrStatus(view);
+    const { prUrl: _, pr: __, ...rest } = cur;
+    const next: GitState = { ...rest, ...(pr.state === "open" ? { prUrl: pr.url } : {}), pr };
+    if (JSON.stringify(next) !== JSON.stringify(this.info.git)) this.update({ git: next });
+    this.watchPr(pr.state === "open");
+  }
+
+  /** While a PR is open, look again every minute, even with the agent idle: CI finishes and reviews land on their own. */
+  private watchPr(open: boolean): void {
+    if (!open) {
+      if (this.prTimer) clearInterval(this.prTimer);
+      this.prTimer = undefined;
+      return;
+    }
+    if (this.prTimer) return;
+    this.prTimer = setInterval(() => void this.refreshPr(), PR_CHECK_MS);
+    this.prTimer.unref();
   }
 
   // ---- Usage limits ----
@@ -915,6 +980,11 @@ export class AgentSession {
 
   setShip(ship: SessionInfo["ship"]): void {
     this.update(ship?.state === "merged" ? { ship, live: false } : { ship });
+    // A PR was just opened: read its state and checks now instead of waiting for the next turn.
+    if (ship?.state === "pr") {
+      this.lastPrCheck = 0;
+      void this.refreshPr();
+    }
   }
 
   archive(): void {
@@ -923,6 +993,7 @@ export class AgentSession {
   }
 
   dispose(): void {
+    this.watchPr(false);
     if (!this.proc) return;
     this.disposing = true;
     this.proc.kill();
@@ -1101,13 +1172,17 @@ export class AgentSession {
 /**
  * Where a session works. Every task in a git repo gets its own worktree unless the caller says
  * `worktree: false`, so its work lands as a branch that can be merged or opened as a PR, never as
- * uncommitted edits on the developer's branch.
+ * uncommitted edits on the developer's branch. `base` (default: the repo's default branch) is fetched
+ * from origin and the worktree is cut from it.
  */
-export async function prepareWorkspace(project: string, home: string, title: string, id: string, worktree?: boolean) {
-  if (!(await git.isRepo(project))) return { cwd: project, branch: undefined, baseSha: undefined, worktree: false };
+export async function prepareWorkspace(project: string, home: string, title: string, id: string, worktree?: boolean, base?: string) {
+  if (!(await git.isRepo(project))) {
+    if (base) throw new Error(`${project} isn't a git repo, so it can't start from ${base}.`);
+    return { cwd: project, branch: undefined, baseSha: undefined, worktree: false };
+  }
   if (worktree !== false) {
-    const wt = await git.createWorktree(project, home, title, id);
-    return { cwd: wt.path, branch: wt.branch, baseSha: await git.head(wt.path), worktree: true, baseBranch: wt.baseBranch };
+    const wt = await git.createWorktree(project, home, title, id, { base });
+    return { cwd: wt.path, branch: wt.branch, baseSha: wt.baseSha, worktree: true, baseBranch: wt.baseBranch, notice: wt.notice };
   }
   return { cwd: project, branch: await git.currentBranch(project), baseSha: await git.head(project), worktree: false };
 }

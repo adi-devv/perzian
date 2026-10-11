@@ -150,10 +150,17 @@ describe("git helpers", () => {
     run(empty, "init", "-q");
     await assert.rejects(git.createWorktree(empty, join(root, "home"), "x", "111111"), /no commits yet/);
 
+    // Detached, and no main or master to fall back on: nothing to start from unless a base is named.
+    const name = await git.currentBranch(repo);
+    run(repo, "branch", "-m", "trunk");
     run(repo, "checkout", "-q", "--detach");
     assert.equal(await git.currentBranch(repo), undefined);
     await assert.rejects(git.createWorktree(repo, join(root, "home"), "x", "222222"), /detached HEAD/);
-    run(repo, "checkout", "-q", "-");
+    const wt = await git.createWorktree(repo, join(root, "home"), "x", "333333", { base: "trunk" });
+    assert.equal(wt.baseBranch, "trunk");
+    run(repo, "worktree", "remove", "--force", wt.path);
+    run(repo, "checkout", "-q", "trunk");
+    run(repo, "branch", "-m", name!);
   });
 });
 

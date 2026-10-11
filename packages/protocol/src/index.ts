@@ -41,7 +41,7 @@ export interface SessionInfo {
   usage?: SessionUsage;
   /** Which ship action leads: PR when the repo has a GitHub origin, else Merge; perzian.json "ship" overrides. Read at spawn. */
   shipDefault?: "pr" | "merge";
-  /** The branch a worktree session was cut from; "Merge" lands the work back here. */
+  /** The branch a worktree session was cut from; "Merge" lands the work back here and "Open PR" targets it. */
   baseBranch?: string;
   /** Where the session's work went: merged back, opened as a PR, or why it couldn't. */
   ship?: ShipState;
@@ -95,6 +95,23 @@ export interface GitState {
   pushed: boolean;
   /** Open pull request for the branch, when gh is available. */
   prUrl?: string;
+  /** Commits on the base branch (or the parent session's branch, when stacked) that this branch doesn't have yet. Omitted at 0. */
+  behind?: number;
+  /** The branch's pull request as last read from gh (open, merged or closed), with its checks and review. */
+  pr?: PrStatus;
+}
+
+/** A pull request folded from `gh pr view`: state, a summary of its checks, and the review decision. */
+export interface PrStatus {
+  state: "open" | "merged" | "closed";
+  url: string;
+  /** failing: at least one check failed · pending: some still running · passing: all done and fine · none: no checks. */
+  checks: "passing" | "failing" | "pending" | "none";
+  /** Names of the failing checks (empty unless checks is "failing"). */
+  failing: string[];
+  review?: "approved" | "changes_requested" | "review_required";
+  /** The PR can't merge cleanly into its base. */
+  conflicting?: boolean;
 }
 
 export interface BackgroundProc {
@@ -334,6 +351,18 @@ export interface CreateSessionArgs {
   worktree?: boolean;
   /** Extra folders the session may edit besides its own (absolute or ~/ paths). */
   extraDirs?: string[];
+  /** Branch to start the worktree from (implies worktree). Omitted: the repo's default branch. Fetched from origin first. */
+  base?: string;
+}
+
+/** GET /api/branches?project=…: the branches a new worktree session can start from. */
+export interface BranchList {
+  /** False when the folder isn't a git repo with commits (no picker then). */
+  repo: boolean;
+  /** Local and origin branches by name (origin/x and x listed once): the default first, then most recent. */
+  branches: string[];
+  /** origin/HEAD, else main or master, else the checked-out branch. */
+  default?: string;
 }
 
 // UI -> daemon
@@ -348,6 +377,10 @@ export type Command =
   | { type: "session.archive"; sessionId: string }
   | { type: "session.ship"; sessionId: string; how: "merge" | "pr" }
   | { type: "session.runChecks"; sessionId: string }
+  // Asks the session's agent to merge or rebase the latest base branch into its branch (conflicts are the agent's to handle).
+  | { type: "session.updateBase"; sessionId: string }
+  // Asks the agent to fix the PR's failing CI checks, pointing it at `gh run view --log-failed`.
+  | { type: "session.fixCi"; sessionId: string }
   | { type: "settings.setDefaultMode"; mode: PermissionMode }
   | { type: "settings.addProject"; path: string }
   // After a failed worktree setup: run it again, or start the agent without it.
@@ -463,6 +496,7 @@ Split or keep together
 
 Spawn well (spawn_session)
 - project: absolute repo path. Every session, even a one-line fix, gets its own worktree and branch by default so the developer can Merge or open a PR: omit worktree. worktree: false only when the developer asks to work directly on their branch.
+- base: omit (the repo's default branch, freshly fetched). Set it when the developer names a branch to start from or their message ends with a "Base branch" line. To build on another session's work, pass that session's branch (from get_session) as base; the new session is stacked on it.
 - prompt is the worker's whole world; it hasn't seen this chat. Write:
   Goal: the developer's request for this unit, restated completely, nothing dropped.
   Context: the relevant files and areas.
@@ -487,15 +521,15 @@ Talk in signals
 // The UI adds the folder it picked for the lead as a last line; the agent needs it, the transcript doesn't show it.
 const PROJECT_LINE = "\n\nProject folder: ";
 const EXTRA_LINE = "\nExtra folders (pass as extraDirs when starting sessions): ";
-export const withProject = (prompt: string, path: string, extra: string[] = []): string =>
-  `${prompt}${PROJECT_LINE}${path}${extra.length ? `${EXTRA_LINE}${extra.join(", ")}` : ""}`;
+const BASE_LINE = "\nBase branch (pass as base when starting sessions): ";
+export const withProject = (prompt: string, path: string, extra: string[] = [], base?: string): string =>
+  `${prompt}${PROJECT_LINE}${path}${extra.length ? `${EXTRA_LINE}${extra.join(", ")}` : ""}${base ? `${BASE_LINE}${base}` : ""}`;
 /** A prompt as the developer typed it: without the "Project folder: …" (and "Extra folders: …") lines withProject added. */
 export function shownPrompt(text: string): string {
   const i = text.lastIndexOf(PROJECT_LINE);
   if (i < 0) return text;
-  const rest = text.slice(i + PROJECT_LINE.length);
-  const nl = rest.indexOf("\n");
-  const ok = nl < 0 || (rest.startsWith(EXTRA_LINE, nl) && !rest.slice(nl + EXTRA_LINE.length).includes("\n"));
+  const [, ...more] = text.slice(i + PROJECT_LINE.length).split("\n");
+  const ok = more.every((l) => l.startsWith(EXTRA_LINE.slice(1)) || l.startsWith(BASE_LINE.slice(1)));
   return ok ? text.slice(0, i) : text;
 }
 
