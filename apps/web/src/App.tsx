@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AGENTS, isUnseen, pendingUsageCard, shownPrompt, shownStatus, type BranchList, type Command, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
 import { isDemo, useBranches, useDaemon, useDoctor, type Link } from "./daemon.ts";
+import { ProjectCard } from "./askproject.tsx";
+import { Welcome } from "./welcome.tsx";
 import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, parseFolders, readiness, saveProject, withProject } from "./onboarding.tsx";
 import { PairScreen, PhoneHome, useNarrow } from "./phone.tsx";
 import { BasePicker, Composer, DecisionLine, LEAD_PLACEHOLDER, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
@@ -23,30 +25,34 @@ export function App() {
   const [leadProject, setLeadProject] = useState<string | null>(null);
   const narrow = useNarrow();
   useTick();
+  // The welcome splash: on startup while "Show on startup" is on (a beat after connecting, so the saved setting has arrived),
+  // and any time from the ⋯ menu.
+  const [welcome, setWelcome] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
+  const [splashReady, setSplashReady] = useState(false);
+  useEffect(() => {
+    if (!link || link !== "online") return;
+    const t = setTimeout(() => setSplashReady(true), 400);
+    return () => clearTimeout(t);
+  }, [link]);
 
   const all = Object.values(state.sessions).filter((s) => !s.archived);
   const main = all.find((s) => s.role === "main");
   // First run: connected, nothing started yet. The demo always has sessions, so it never lands here.
   const firstRun = !isDemo && link === "online" && all.length === 0;
   const recent = useMemo(() => recentProjects(state), [state.sessions]);
-  const doctor = useDoctor(project, firstRun);
-  const checked = doctor.report?.project;
-  const projectPath = checked?.exists && checked.input === project.trim() ? checked.path : undefined;
-  // Remember a folder once the daemon confirms it exists, so a reload keeps it.
-  useEffect(() => {
-    if (projectPath) saveProject(project.trim());
-  }, [projectPath]);
-  // The same checks gate the example buttons and the free-text composer on first run.
-  const gate = firstRun ? readiness(doctor.report, project) : { ready: true, blocker: "" };
+  // First run needs no project: chat starts right away. A project chip is only a hint for the lead's first message.
+  const doctor = useDoctor(leadProject ?? "", firstRun);
+  const gate = firstRun ? readiness(doctor.report) : { ready: true, blocker: "" };
   // The branch new sessions start from ("" = the repo's default), picked beside the composer. Only a non-default one is sent.
   const [base, setBase] = useState("");
-  const baseProject = leadProject ?? (firstRun ? (projectPath ?? null) : null);
+  const baseProject = leadProject;
   const branches = useBranches(baseProject);
   useEffect(() => setBase(""), [baseProject]);
   const baseArg = base && base !== branches?.default && branches?.branches.includes(base) ? base : undefined;
   const startLead = (prompt: string) => {
     if (!gate.ready) return;
-    send({ type: "main.start", prompt: firstRun && projectPath ? withProject(prompt, projectPath, [], baseArg) : prompt });
+    send({ type: "main.start", prompt });
   };
 
   // Use a folder for the lead's next message and land in Perzian's chat.
@@ -86,7 +92,14 @@ export function App() {
   }, [selected, sel]);
 
   const focusLead = () => requestAnimationFrame(() => document.getElementById("main-composer")?.focus());
-  const modal = help || accounts || adding;
+  const showWelcome = !isDemo && !narrow && (welcome || (splashReady && state.settings.splash && !splashDone));
+  const closeWelcome = () => {
+    setWelcome(false);
+    setSplashDone(true);
+    open(null);
+    focusLead();
+  };
+  const modal = help || accounts || adding || showWelcome;
 
   // Keyboard: ⌘1 / Esc Perzian · ↑/↓ move between tiles, Enter opens · 1-9 answer a decision · / focus the input · ? help
   useEffect(() => {
@@ -163,7 +176,7 @@ export function App() {
 
   return (
     <div className="app">
-      <Crew state={state} workers={workers} selected={sel?.id ?? null} onOpen={open} send={send} connected={connected} onAddProject={() => setAdding(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} onAccounts={() => setAccounts(true)} onUseProject={startInFolder} />
+      <Crew state={state} workers={workers} selected={sel?.id ?? null} onOpen={open} send={send} connected={connected} onAddProject={() => setAdding(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} onAccounts={() => setAccounts(true)} onUseProject={startInFolder} onWelcome={() => setWelcome(true)} />
 
       <div className="center">
         <Thread
@@ -175,8 +188,10 @@ export function App() {
           link={link}
           onStart={startLead}
           blocked={gate.ready ? undefined : gate.blocker}
-          focus={firstRun && !!project.trim()}
-          firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} recent={recent} /> : null}
+          focus={firstRun && !showWelcome}
+          firstRun={firstRun ? <Onboarding doctor={doctor} project={leadProject ?? ""} /> : null}
+          chips={firstRun ? recent : []}
+          onChip={startInFolder}
           leadProject={leadProject}
           onProjectUsed={() => setLeadProject(null)}
           branches={branches}
@@ -200,6 +215,7 @@ export function App() {
           }}
         />
       )}
+      {showWelcome && <Welcome state={state} send={send} recent={recent} onUseProject={(p) => { setLeadProject(p); closeWelcome(); }} onStart={closeWelcome} />}
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}
       {accounts && <Accounts onClose={() => setAccounts(false)} />}
       {error && <Toast message={error} onClose={clearError} />}
@@ -237,7 +253,7 @@ function AddProject({ recent, onClose, onPick }: { recent: string[]; onClose: ()
 
 /* ───────────── Perzian's chat: the one place work starts ───────────── */
 
-function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, focus, firstRun, leadProject, onProjectUsed, branches, base, onBase, baseArg }: { hidden: boolean; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode; leadProject: string | null; onProjectUsed: () => void; branches: BranchList | null; base: string; onBase: (b: string) => void; baseArg?: string }) {
+function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, focus, firstRun, chips, onChip, leadProject, onProjectUsed, branches, base, onBase, baseArg }: { hidden: boolean; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode; chips: string[]; onChip: (path: string) => void; leadProject: string | null; onProjectUsed: () => void; branches: BranchList | null; base: string; onBase: (b: string) => void; baseArg?: string }) {
   const items = main ? (state.transcripts[main.id] ?? []) : [];
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
@@ -252,10 +268,12 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
       return false;
     }
   });
+  // The lead's open "Which project?" card (ask_project).
+  const ask = main ? Object.values(state.decisions).filter((d) => d.sessionId === main.id && d.source === "ask_project").sort((a, b) => a.createdAt - b.createdAt)[0] : undefined;
   // Stay at the end as messages arrive, and land there again when coming back from a session.
   useEffect(() => {
     if (!hidden) end.current?.scrollIntoView({ block: "end" });
-  }, [items.length, hidden]);
+  }, [items.length, hidden, ask?.id]);
   const folder = leadProject?.split("/").filter(Boolean).slice(-1)[0];
 
   return (
@@ -273,6 +291,7 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
         {link === "offline" && (empty ? <DaemonOffline /> : <OfflineBanner />)}
         {firstRun}
         <ThreadItems items={items} state={state} onOpen={onOpen} retry={retry && main ? { index: retry.index, run: () => send({ type: "session.prompt", sessionId: main.id, prompt: retry.prompt }) } : undefined} />
+        {ask && <ProjectCard key={ask.id} d={ask} send={send} />}
         <div ref={end} />
       </div>
 
@@ -335,6 +354,15 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
           }}
           onStop={main ? () => send({ type: "session.cancel", sessionId: main.id }) : undefined}
         />
+        {chips.length > 0 && !main && (
+          <div className="folder-recent chips" aria-label="Recent projects">
+            {chips.map((p) => (
+              <button key={p} type="button" className={`btn small${p === leadProject ? " on" : ""}`} title={p} onClick={() => onChip(p)}>
+                {p.split("/").filter(Boolean).slice(-1)[0] ?? p}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
     </main>
   );

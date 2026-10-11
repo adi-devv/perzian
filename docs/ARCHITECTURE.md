@@ -129,10 +129,20 @@ against the original base branch. Merging removes the session's worktree (no `--
 with no live session. The global default permission mode is the `settings.setDefaultMode` command and
 `settings.defaultMode` event (`State.settings.defaultMode`, default `ask`); sessions created without a mode use it.
 
+The welcome splash's "Show on startup" is `settings.splash` (command `settings.setSplash`, default on). Its "Connect GitHub"
+is `GET/POST/DELETE /api/github/login` (`ghlogin.ts`): the daemon runs `gh auth login --web --hostname github.com
+--git-protocol https`, parses the one-time code and URL from its output, and the UI polls until gh exits; gh keeps the token.
+
 ## Main agent "Perzian"
 
-A session with `role: "main"`, started by `main.start`, running in `$PERZIAN_HOME/main` with
-`MAIN_INSTRUCTIONS`. It delegates through the orchestration tools; spawned sessions carry `parentId` and
+A session with `role: "main"`, started by `main.start`, running in the empty `$PERZIAN_HOME/lead` (leads made
+earlier in `$PERZIAN_HOME/main` keep working) with `MAIN_INSTRUCTIONS` plus a brief of the known projects
+(`State.settings.projects` and worker projects, names and paths). It has no project of its own: `ask_project { reason }`
+(lead-only report-mcp tool) raises a `Decision` with `source: "ask_project"` ("Which project?", recent projects as options,
+the reason as `detail`); `decision.answer` carries a folder path (option id or free path from the picker / typed), `lead.ts`
+checks it exists, emits `settings.projectAdded` and returns the absolute path to the lead. `spawn_session` from the lead
+errors without a usable project (empty, missing, or its own folder) and tells it to call `ask_project`. After a restart an
+open `ask_project` card is closed like any decision (`boot.ts`), and Retry makes the lead ask again. It delegates through the orchestration tools; spawned sessions carry `parentId` and
 appear in its thread as `spawn` transcript items. It always runs in Ask mode and can't edit or run commands
 (see the policy above).
 

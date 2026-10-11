@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type BranchList, type Command, type CredentialStatus, type DoctorReport, type InstallResult, type LeftoverWorktree, type PerzianEvent, type RepoTree, type ServerMessage, type State } from "@perzian/protocol";
+import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type BranchList, type Command, type CredentialStatus, type DoctorReport, type GitHubLogin, type InstallResult, type LeftoverWorktree, type PerzianEvent, type RepoTree, type ServerMessage, type State } from "@perzian/protocol";
 import { demoEvents } from "./demo.ts";
 import { demoAutoplay, demoSend } from "./demoScript.ts";
 
@@ -289,3 +289,26 @@ const DEMO_DIFF =`diff --git a/src/auth/session.ts b/src/auth/session.ts
 +  await redis.del(\`sess:\${sid}\`);
  }
 `;
+
+/** "Connect GitHub": the daemon runs gh's browser device flow; we show its code and poll until the developer has finished in their browser. */
+export function useGithubLogin(onDone: () => void) {
+  const [login, setLogin] = useState<GitHubLogin>({ state: "idle" });
+  const call = async (method: string) => {
+    try {
+      const res = await fetch(api("/api/github/login"), { method });
+      const next = (await res.json()) as GitHubLogin;
+      setLogin(next);
+      return next;
+    } catch {
+      setLogin({ state: "failed", error: "Couldn't reach the daemon" });
+    }
+  };
+  const done = useRef(onDone);
+  done.current = onDone;
+  useEffect(() => {
+    if (login.state !== "waiting") return;
+    const t = setInterval(() => void call("GET").then((n) => n?.state === "done" && done.current()), 2000);
+    return () => clearInterval(t);
+  }, [login.state]);
+  return { login, start: () => void call("POST"), cancel: () => void call("DELETE") };
+}

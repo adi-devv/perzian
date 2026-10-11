@@ -11,12 +11,12 @@ export interface State {
   changes: Record<string, FileChange[]>; // latest per session
   configs: Record<string, AgentConfig>;
   /** Global settings, folded from settings.* events. */
-  settings: { defaultMode: PermissionMode; /** Folders added by hand, oldest first. */ projects: string[]; usageCard: UsageCardMode };
+  settings: { defaultMode: PermissionMode; /** Folders added by hand, oldest first. */ projects: string[]; usageCard: UsageCardMode; /** Welcome splash on startup. */ splash: boolean };
   /** Account usage cards by key (window + reset); see UsageCard. */
   usageCards: Record<string, UsageCard>;
 }
 
-export const emptyState: State = { sessions: {}, transcripts: {}, decisions: {}, outcomes: {}, changes: {}, configs: {}, usageCards: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [], usageCard: "ask" } };
+export const emptyState: State = { sessions: {}, transcripts: {}, decisions: {}, outcomes: {}, changes: {}, configs: {}, usageCards: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [], usageCard: "ask", splash: true } };
 
 function patchSession(s: State, id: string, patch: Partial<SessionInfo>): State {
   const cur = s.sessions[id];
@@ -93,6 +93,8 @@ function step(s: State, e: PerzianEvent): State {
     }
     case "settings.usageCard":
       return { ...s, settings: { ...s.settings, usageCard: e.mode } };
+    case "settings.splash":
+      return s.settings.splash === e.show ? s : { ...s, settings: { ...s.settings, splash: e.show } };
     case "settings.projectAdded":
       return s.settings.projects.includes(e.path) ? s : { ...s, settings: { ...s.settings, projects: [...s.settings.projects, e.path] } };
   }

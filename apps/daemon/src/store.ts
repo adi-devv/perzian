@@ -30,6 +30,7 @@ export function compact(state: State, opts: CompactOptions = {}): PerzianEvent[]
   const out: PerzianEvent[] = [];
   if (state.settings.defaultMode !== DEFAULT_PERMISSION_MODE) out.push({ type: "settings.defaultMode", mode: state.settings.defaultMode, at: now });
   if (state.settings.usageCard !== "ask") out.push({ type: "settings.usageCard", mode: state.settings.usageCard, at: now });
+  if (!state.settings.splash) out.push({ type: "settings.splash", show: false, at: now });
   for (const path of state.settings.projects) out.push({ type: "settings.projectAdded", path, at: now });
   // Usage cards still in their window (the answer decides whether a second near-limit reading re-asks).
   for (const card of Object.values(state.usageCards)) {
@@ -63,7 +64,7 @@ export function replay(events: PerzianEvent[]): State {
   const sessions: Record<string, SessionInfo> = {};
   const transcripts: Record<string, TranscriptItem[]> = {};
   const toolIndex = new Map<string, Map<string, number>>(); // sessionId -> toolCallId -> index
-  const st: State = { sessions, transcripts, decisions: {}, outcomes: {}, changes: {}, configs: {}, usageCards: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [], usageCard: "ask" } };
+  const st: State = { sessions, transcripts, decisions: {}, outcomes: {}, changes: {}, configs: {}, usageCards: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [], usageCard: "ask", splash: true } };
   const patch = (id: string, p: Partial<SessionInfo>) => {
     if (sessions[id]) Object.assign(sessions[id], p);
   };
@@ -134,6 +135,9 @@ export function replay(events: PerzianEvent[]): State {
       }
       case "settings.usageCard":
         st.settings = { ...st.settings, usageCard: e.mode };
+        break;
+      case "settings.splash":
+        st.settings = { ...st.settings, splash: e.show };
         break;
       case "settings.projectAdded":
         if (!st.settings.projects.includes(e.path)) st.settings = { ...st.settings, projects: [...st.settings.projects, e.path] };

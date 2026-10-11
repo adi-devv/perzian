@@ -55,8 +55,10 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 ## Desktop app
 - ✅ Electron shell starts the daemon and loads the UI; desktop notifications when a session needs you.
 - ✅ First-run checks and one-click install for a missing agent CLI; API keys kept in the macOS Keychain.
-- ✅ Easy start: first run is folder + task + Enter and shows only what is broken (one fix each); New session is folder + task, with name, agent, model, permissions and worktree behind "Options"; last folder remembered.
-- ✅ Native "Choose folder…" picker (desktop) with the last 5 projects as one-click chips; typed path stays as the small fallback and the only option in the browser; picking jumps to the task box.
+- ✅ Chat first: first run is the lead's composer ("Ask Perzian, or tell it what to build…") with no folder step; it shows only what is broken (one fix each). Recent projects are optional small chips under the composer (a hint for the first message).
+- ✅ The lead starts without a project (empty `$PERZIAN_HOME/lead`, told the known projects). When it needs one it calls `ask_project`: a "Which project?" card with recent projects, "Choose folder…" (native picker on desktop, typed path in the browser) and a reason line; the answer is saved as a project and returned. `spawn_session` without a usable project errors and points the lead to `ask_project`.
+- ✅ Welcome splash (first launch, and "Welcome" in the ⋯ menu): version, tagline, default mode, Claude Code / Codex status, optional "Connect GitHub" (gh's browser device flow run by the daemon; shows the one-time code, no token handled), recent projects, What's new / Docs / Report an issue, and a persisted "Show on startup" checkbox. Esc or Start closes it.
+- ✅ Native "Choose folder…" picker (desktop) with the last 5 projects as one-click chips; typed path stays as the small fallback and the only option in the browser. New session is folder + task, with name, agent, model, permissions and worktree behind "Options".
 - ✅ Daemon only accepts the desktop app and the local UI (origin and token checks).
 - ⚠️ Packaged macOS build (`npm run dist`, unsigned, Apple Silicon); no release published yet.
 

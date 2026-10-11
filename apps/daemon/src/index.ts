@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DAEMON_PORT, PERMISSION_MODES, USAGE_CARD_MODES, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
+import { DAEMON_PORT, PERMISSION_MODES, knownProjects, projectName, USAGE_CARD_MODES, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
 import { EventStore } from "./store.ts";
 import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps } from "./session.ts";
 import * as git from "./git.ts";
@@ -24,6 +24,8 @@ import { loadDesktopToken, trustedOrigin } from "./origin.ts";
 import { Devices, PairingCodes, PhoneAccess } from "./phone.ts";
 import { Presence, PushSender, itemForEvent, loadVapid } from "./push.ts";
 import { answerDecision } from "./decisions.ts";
+import { answerProject, leadDir, projectProblem } from "./lead.ts";
+import { GhLogin } from "./ghlogin.ts";
 import { repoTree } from "./repotree.ts";
 import { startMode } from "./defaults.ts";
 import { UsageGovernor } from "./usagecard.ts";
@@ -42,6 +44,7 @@ loadDesktopToken(home);
 }
 const sessions = new Map<string, AgentSession>();
 const decisions = new Map<string, PendingDecision>();
+const ghLogin = new GhLogin();
 const creds = new Credentials(home);
 await creds.load();
 // One account, one usage question: nearing the limit raises a single card; a refused session stops the others.
@@ -153,9 +156,9 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   const extraDirs = (args.extraDirs ?? []).filter((d) => typeof d === "string" && d.trim()).map((d) => expand(d.trim()));
   for (const d of extraDirs) if (!existsSync(d) || !statSync(d).isDirectory()) throw new Error(`Extra folder not found: ${d}`);
   // An empty path would resolve to the daemon's own folder.
-  if (!args.project?.trim()) throw new Error("No project folder given");
+  const problem = projectProblem(args.project, home);
+  if (problem) throw new Error(problem);
   const project = expand(args.project.trim());
-  if (!existsSync(project) || !statSync(project).isDirectory()) throw new Error(`Project folder not found: ${project}`);
   const id = crypto.randomUUID();
   const title = args.title?.trim() || args.prompt.split("\n")[0].slice(0, 48) || basename(project);
   // A base branch only means something for a worktree: the checkout itself is never switched.
@@ -203,8 +206,8 @@ async function handleCommand(cmd: Command): Promise<void> {
         if (cmd.prompt) void existing.prompt(cmd.prompt);
         break;
       }
-      const dir = join(home, "main");
-      mkdirSync(dir, { recursive: true });
+      // No project needed: the lead starts in a neutral empty folder and asks for one (ask_project) when it needs it.
+      const dir = leadDir(home);
       const m = AgentSession.create({ project: dir, cwd: dir, title: "Perzian", agent: cmd.agent ?? "claude-code", model: cmd.model, role: "main", mode: "ask" }, deps);
       sessions.set(m.info.id, m);
       if (cmd.prompt) void m.prompt(cmd.prompt);
@@ -263,6 +266,9 @@ async function handleCommand(cmd: Command): Promise<void> {
       if (!PERMISSION_MODES.includes(cmd.mode)) throw new Error(`Unknown mode: ${String(cmd.mode)}`);
       if (store.state().settings.defaultMode !== cmd.mode) store.emit({ type: "settings.defaultMode", mode: cmd.mode, at: Date.now() });
       break;
+    case "settings.setSplash":
+      if (store.state().settings.splash !== !!cmd.show) store.emit({ type: "settings.splash", show: !!cmd.show, at: Date.now() });
+      break;
     case "settings.setUsageCard":
       if (!USAGE_CARD_MODES.includes(cmd.mode)) throw new Error(`Unknown usage card mode: ${String(cmd.mode)}`);
       if (store.state().settings.usageCard !== cmd.mode) store.emit({ type: "settings.usageCard", mode: cmd.mode, at: Date.now() });
@@ -303,7 +309,8 @@ async function handleCommand(cmd: Command): Promise<void> {
       s?.archive();
       break;
     case "decision.answer":
-      answerDecision(decisions, cmd.decisionId, cmd.optionId);
+      if (decisions.get(cmd.decisionId)?.decision.source === "ask_project") answerProject(decisions, store, cmd.decisionId, cmd.optionId);
+      else answerDecision(decisions, cmd.decisionId, cmd.optionId);
       break;
   }
 }
@@ -354,6 +361,18 @@ async function handleReport(call: ReportCall): Promise<unknown> {
       });
       return optionId ?? "dismissed";
     }
+    case "ask_project": {
+      if (s.info.role !== "main") throw new Error("Only the lead asks which project");
+      const projects = knownProjects(store.state());
+      const path = await s.requestDecision({
+        source: "ask_project",
+        question: "Which project?",
+        detail: call.args.reason,
+        options: projects.slice(0, 5).map((p) => ({ id: p, label: projectName(p), tradeoff: p, kind: "choice" as const })),
+      });
+      if (!path) throw new Error("The developer dismissed the project question. Ask in one line what they want, or wait for their next message.");
+      return path;
+    }
     case "report_outcome": {
       s.markOutcome();
       // What the daemon saw run outranks what the agent says it ran.
@@ -370,6 +389,10 @@ async function handleReport(call: ReportCall): Promise<unknown> {
       return brief(t.info);
     }
     case "spawn_session": {
+      if (s.info.role === "main") {
+        const problem = projectProblem(call.args.project, home);
+        if (problem) throw new Error(`${problem}. Call ask_project to get the project folder from the developer; don't guess.`);
+      }
       const blocked = spawnBlocker(s.info.id, (id) => sessions.get(id)?.info);
       if (blocked) throw new Error(blocked);
       const child = await createSession(call.args, { parentId: s.info.id });
@@ -429,6 +452,12 @@ const http = createServer(async (req, res) => {
       else if (url.pathname === "/api/phone/pair" && req.method === "POST") json(200, phone.pair());
       else if (url.pathname === "/api/phone/devices" && req.method === "DELETE") json(200, await phone.forgetAll());
       else json(404, { error: "not found" });
+      return;
+    }
+    if (url.pathname === "/api/github/login") {
+      if (req.method === "POST") json(200, await ghLogin.start());
+      else if (req.method === "DELETE") json(200, ghLogin.cancel());
+      else json(200, ghLogin.get());
       return;
     }
     if (url.pathname === "/api/install" && req.method === "POST") {

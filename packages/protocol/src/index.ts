@@ -248,7 +248,7 @@ export interface DecisionOption {
 export interface Decision {
   id: string;
   sessionId: string;
-  source: "permission" | "ask_decision";
+  source: "permission" | "ask_decision" | "ask_project";
   question: string;
   detail?: string;
   options: DecisionOption[];
@@ -363,7 +363,9 @@ export type PerzianEvent =
   // What the usage card does from now on ("Don't ask again").
   | { type: "settings.usageCard"; mode: UsageCardMode; at: number }
   // A project folder the developer added in the UI before any session exists in it; shown in the crew column.
-  | { type: "settings.projectAdded"; path: string; at: number };
+  | { type: "settings.projectAdded"; path: string; at: number }
+  // "Show on startup" of the welcome splash (default on).
+  | { type: "settings.splash"; show: boolean; at: number };
 
 export interface CreateSessionArgs {
   project: string;
@@ -408,6 +410,7 @@ export type Command =
   | { type: "session.fixCi"; sessionId: string }
   | { type: "settings.setDefaultMode"; mode: PermissionMode }
   | { type: "settings.addProject"; path: string }
+  | { type: "settings.setSplash"; show: boolean }
   | { type: "settings.setUsageCard"; mode: UsageCardMode }
   // Answer the usage card; `dontAsk` also saves the choice as the setting.
   | { type: "usage.answer"; key: string; choice: "pause" | "keep_going"; dontAsk?: boolean }
@@ -434,7 +437,9 @@ export type ReportCall =
   | { tool: "list_sessions"; sessionId: string; args: Record<string, never> }
   | { tool: "spawn_session"; sessionId: string; args: CreateSessionArgs }
   | { tool: "send_to_session"; sessionId: string; args: { id: string; prompt: string } }
-  | { tool: "get_session"; sessionId: string; args: { id: string } };
+  | { tool: "get_session"; sessionId: string; args: { id: string } }
+  // Lead only: raises a "Which project?" card; the answer is the project's absolute path (persisted as a project).
+  | { tool: "ask_project"; sessionId: string; args: { reason: string } };
 
 export const DAEMON_PORT = 4317;
 
@@ -495,12 +500,23 @@ export function crewStatus(sessions: SessionInfo[]): { key: CrewKey; count: numb
   return CREW_KEYS.map((key) => ({ key, count: sessions.filter((s) => crewMatch(key, s)).length })).filter((c) => c.count > 0);
 }
 
-/** The last 5 distinct project folders, newest first: ones added by hand, then those of worker sessions.
- * The lead's own folder (<PERZIAN_HOME>/main) is Perzian's, not a project. */
-export function recentProjects(state: { sessions: Record<string, SessionInfo>; settings: { projects: string[] } }): string[] {
+/** Every known project folder, newest first: ones added by hand, then those of worker sessions.
+ * The lead's own folder (<PERZIAN_HOME>/lead, formerly /main) is Perzian's, not a project. */
+export function knownProjects(state: { sessions: Record<string, SessionInfo>; settings: { projects: string[] } }): string[] {
   const out: string[] = [...state.settings.projects].reverse();
   for (const s of Object.values(state.sessions).reverse()) if (s.role !== "main" && s.project && !out.includes(s.project)) out.push(s.project);
-  return out.slice(0, 5);
+  return out;
+}
+
+/** The last 5 known projects: the optional chips under the composer. */
+export const recentProjects = (state: Parameters<typeof knownProjects>[0]): string[] => knownProjects(state).slice(0, 5);
+
+export const projectName = (path: string): string => path.split("/").filter(Boolean).slice(-1)[0] ?? path;
+
+/** Appended to the lead's first prompt: it has no repo of its own, and these are the projects it may name. */
+export function leadProjectsBrief(projects: string[]): string {
+  const list = projects.length ? projects.map((p) => `- ${projectName(p)}: ${p}`).join("\n") : "(none yet)";
+  return `Your working folder is empty: you have no repo yet.\nKnown projects:\n${list}`;
 }
 
 export const REPORT_INSTRUCTIONS = `You are a worker session inside Perzian, a visual dashboard. The developer watches tiles and cards, not prose. Report through the perzian MCP tools:
@@ -520,6 +536,11 @@ Decide first
 - Ambiguous (unclear goal or scope, several reasonable readings) or risky (deleting files or directories, data loss, history rewrites, public API breaks, secrets, production): call ask_decision BEFORE spawning, with 2-3 concrete options, a one-line tradeoff each, and recommended set. Never ask in plain text; the card is how the developer answers.
 - Clear and safe: act without asking.
 - Any change to files, even a one-line fix, goes to a session. Edits and shell commands are blocked for you.
+
+Which project
+- You start with no repo. Use a project directly when the developer named a known project or gave a path, when the message ends with a "Project folder" line, or when exactly one project is known.
+- Otherwise call ask_project({ reason }) BEFORE spawn_session or reading code: it shows a "Which project?" card and returns the folder's absolute path. Never guess between several projects, and don't ask in plain text.
+- spawn_session without a usable project fails; the fix is ask_project.
 
 Split or keep together
 - One session per independent unit: different files or areas, no shared interface, each verifiable alone. Spawn them all in the same turn so they run in parallel.
