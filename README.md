@@ -1,6 +1,8 @@
 # Perzian
 
-**Manage coding agents by looking, not reading.**
+**Talk to one. Command them all.**
+
+[perzian.dev](https://perzian.dev) · [live demo](https://perzian.dev/demo/)
 
 Perzian is an open-source agentic development environment (ADE). You talk to one main agent, **Perzian**,
 which runs a crew of coding sessions across projects and git worktrees, on whichever models you like. You see
@@ -13,12 +15,32 @@ what's happening at a glance:
 Each session can get its own git worktree, permission mode (ask · edits · plan · auto) and model. Sessions
 resume after a daemon restart.
 
-Perzian drives existing agents (Claude Code; Codex wired, untested) over the
+Perzian drives existing agents (Claude Code; Codex is experimental) over the
 [Agent Client Protocol](https://agentclientprotocol.com). It's the surface around the agent, not another agent.
 
 > Status: early. Core loop, main agent and desktop shell work. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## Quick start
+## Install
+
+**From source** (recommended for now; no macOS warnings):
+
+```bash
+git clone https://github.com/adi-devv/perzian && cd perzian && npm install && npm run app
+```
+
+**Prebuilt macOS app** (Apple Silicon): download the zip from
+[Releases](https://github.com/adi-devv/perzian/releases) (first release coming soon), unzip, and move Perzian to Applications.
+The app isn't notarized yet, so macOS blocks the first launch ("can't be verified"). To open it:
+
+1. Double-click Perzian, then click **Done** on the warning.
+2. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to Perzian.
+
+Or, in a terminal: `xattr -dr com.apple.quarantine /Applications/Perzian.app`
+
+You need [Claude Code](https://claude.com/claude-code) installed and signed in, or an Anthropic API key.
+If it's missing, Perzian's first-run screen installs it for you.
+
+## Develop
 
 ```bash
 npm install
