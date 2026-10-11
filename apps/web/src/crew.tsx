@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { isUnseen, needsYou, shownStatus, type Command, type Decision, type SessionInfo, type SessionStatus, type State } from "@perzian/protocol";
+import { isUnseen, needsYou, pendingUsageCard, shownStatus, type Command, type Decision, type SessionInfo, type SessionStatus, type State, type UsageCard } from "@perzian/protocol";
 import { explainFailure, isFailureNotice } from "./onboarding.tsx";
 import { PhoneButton } from "./phone.tsx";
 import { useFlip } from "./motion.tsx";
-import { Chips, OutsideTag, StatusGlyph, cost, denyOption, retryTarget, statusText, useFocusOnMount } from "./bits.tsx";
+import { Chips, OutsideTag, StatusGlyph, cost, denyOption, resumeTime, retryTarget, statusText, useFocusOnMount } from "./bits.tsx";
 import { isDemo, isDesktop } from "./daemon.ts";
 
 type Send = (c: Command) => void;
@@ -235,6 +235,26 @@ function Tile({ s, state, send, selected, onOpen, kids = [], selectedId }: { s: 
   );
 }
 
+/** The account's usage card: one question for every session (amber: it needs you). Keys 1 / 2 answer it (App.tsx). */
+function UsageCardView({ card, send }: { card: UsageCard; send: Send }) {
+  const [dontAsk, setDontAsk] = useState(false);
+  const answer = (choice: "pause" | "keep_going") => send({ type: "usage.answer", key: card.key, choice, ...(dontAsk ? { dontAsk: true } : {}) });
+  return (
+    <div className="usage-card" role="group" aria-label="Usage nearly used up">
+      <div className="uc-head">Usage {Math.round(card.utilization * 100)}% · resets {resumeTime({ resumeAt: card.resetsAt } as NonNullable<SessionInfo["pause"]>)}</div>
+      {card.overage && <div className="uc-warn">Extra usage is on: keeping going may cost money.</div>}
+      <div className="t-ans row">
+        <button className="btn primary" onClick={() => answer("pause")}>Pause sessions</button>
+        <button className="btn" onClick={() => answer("keep_going")}>Keep going</button>
+      </div>
+      <label className="uc-ask">
+        <input type="checkbox" checked={dontAsk} onChange={(e) => setDontAsk(e.target.checked)} /> Don't ask again
+      </label>
+      <div className="uc-note">No answer: pauses at {new Date(card.autoAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase()}</div>
+    </div>
+  );
+}
+
 function Summary({ workers }: { workers: SessionInfo[] }) {
   // Interrupted sessions count as needing you (needsYou), not under the status they were left in.
   const n = (st: SessionStatus) => workers.filter((w) => !w.interrupted && w.status === st).length;
@@ -287,6 +307,7 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
         </span>
       </div>
       <Summary workers={workers} />
+      {pendingUsageCard(state) && <UsageCardView key={pendingUsageCard(state)!.key} card={pendingUsageCard(state)!} send={send} />}
 
       <div className="crew-list" ref={scroll}>
         {[...groups.entries()].map(([project, list]) => {

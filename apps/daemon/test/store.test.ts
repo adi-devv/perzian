@@ -89,6 +89,7 @@ function expected(state: State, keep = TRANSCRIPT_KEEP): State {
     outcomes: pick(state.outcomes),
     changes: pick(state.changes),
     configs: pick(state.configs),
+    usageCards: Object.fromEntries(Object.entries(state.usageCards).filter(([, c]) => c.resetsAt >= NOW)),
     settings: state.settings,
   };
 }

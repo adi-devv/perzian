@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DAEMON_PORT, PERMISSION_MODES, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
+import { DAEMON_PORT, PERMISSION_MODES, USAGE_CARD_MODES, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
 import { EventStore } from "./store.ts";
 import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps } from "./session.ts";
 import * as git from "./git.ts";
@@ -24,6 +24,8 @@ import { loadDesktopToken, trustedOrigin } from "./origin.ts";
 import { Devices, PairingCodes, PhoneAccess } from "./phone.ts";
 import { answerDecision } from "./decisions.ts";
 import { repoTree } from "./repotree.ts";
+import { startMode } from "./defaults.ts";
+import { UsageGovernor } from "./usagecard.ts";
 import { fileURLToPath } from "node:url";
 import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
 
@@ -41,7 +43,9 @@ const sessions = new Map<string, AgentSession>();
 const decisions = new Map<string, PendingDecision>();
 const creds = new Credentials(home);
 await creds.load();
-const deps: SessionDeps = { store, daemonUrl, decisions, creds };
+// One account, one usage question: nearing the limit raises a single card; a refused session stops the others.
+const usage = new UsageGovernor({ store, sessions: () => sessions.values() });
+const deps: SessionDeps = { store, daemonUrl, decisions, creds, usage };
 
 
 let installing: Promise<InstallResult> | undefined;
@@ -65,6 +69,7 @@ function runInstaller(agent: AgentKind): Promise<InstallResult> {
   for (const info of Object.values(store.state().sessions)) {
     if (!info.archived) sessions.set(info.id, new AgentSession({ ...info }, deps));
   }
+  usage.attach(); // a usage card still open when the daemon stopped keeps its timeout
 }
 
 // The lead hears about the sessions it started when they finish, pause at a usage limit or resume
@@ -159,7 +164,7 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   const checks = allChecks(detectChecks(ws.cwd), declared.checks);
   const shipDefault = ws.worktree ? shipPreference(declared.ship, await hasGithubOrigin(project)) : undefined;
   const s = AgentSession.create(
-    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode ?? store.state().settings.defaultMode, ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, declaredSetup: setupCfg.steps, checksError: declared.error ?? setupCfg.error, ...(shipDefault ? { shipDefault } : {}), ...extra },
+    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: startMode(args.mode, store.state().settings), ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, declaredSetup: setupCfg.steps, checksError: declared.error ?? setupCfg.error, ...(shipDefault ? { shipDefault } : {}), ...extra },
     deps,
   );
   if (args.worktree !== false && !ws.worktree) s.notice("This folder isn't a git repo, so the session works in it directly (no worktree)");
@@ -249,6 +254,15 @@ async function handleCommand(cmd: Command): Promise<void> {
     case "settings.setDefaultMode":
       if (!PERMISSION_MODES.includes(cmd.mode)) throw new Error(`Unknown mode: ${String(cmd.mode)}`);
       if (store.state().settings.defaultMode !== cmd.mode) store.emit({ type: "settings.defaultMode", mode: cmd.mode, at: Date.now() });
+      break;
+    case "settings.setUsageCard":
+      if (!USAGE_CARD_MODES.includes(cmd.mode)) throw new Error(`Unknown usage card mode: ${String(cmd.mode)}`);
+      if (store.state().settings.usageCard !== cmd.mode) store.emit({ type: "settings.usageCard", mode: cmd.mode, at: Date.now() });
+      break;
+    case "usage.answer":
+      if (cmd.choice !== "pause" && cmd.choice !== "keep_going") throw new Error(`Unknown choice: ${String(cmd.choice)}`);
+      if (cmd.dontAsk && store.state().settings.usageCard !== cmd.choice) store.emit({ type: "settings.usageCard", mode: cmd.choice, at: Date.now() });
+      usage.answer(cmd.key, cmd.choice);
       break;
     case "settings.addProject": {
       if (typeof cmd.path !== "string" || !cmd.path.trim()) throw new Error("Choose a folder");
@@ -407,6 +421,13 @@ const http = createServer(async (req, res) => {
     }
     if (url.pathname === "/api/worktrees/leftover" && req.method === "GET") {
       json(200, git.leftoverWorktrees(home, [...sessions.values()].map((x) => x.info)));
+      return;
+    }
+    if (url.pathname === "/api/worktrees/remove" && req.method === "POST") {
+      const { path } = JSON.parse(await readBody(req)) as { path?: string };
+      if (typeof path !== "string" || !path) throw new Error("No worktree given");
+      await git.removeLeftoverWorktree(home, [...sessions.values()].map((x) => x.info), path);
+      json(200, { ok: true });
       return;
     }
     if (url.pathname === "/api/doctor") {

@@ -192,6 +192,17 @@ export function useLeftover(enabled: boolean) {
   return list;
 }
 
+/** Removes a leftover worktree (never forced, never its branch). Resolves to why it refused, or undefined when it's gone. */
+export async function removeWorktree(path: string): Promise<string | undefined> {
+  if (isDemo) return "Not available in the demo";
+  try {
+    const res = await fetch(api(`/api/worktrees/remove`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }) });
+    return res.ok ? undefined : (await res.text()) || "Couldn't remove it";
+  } catch {
+    return "Daemon not reachable";
+  }
+}
+
 export async function installAgent(agent: AgentKind): Promise<InstallResult> {
   const res = await fetch(api(`/api/install`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent }) });
   if (!res.ok) return { ok: false, output: await res.text() };

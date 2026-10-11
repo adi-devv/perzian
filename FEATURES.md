@@ -39,13 +39,14 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ "Open PR" leads when the repo has a GitHub origin, otherwise "Merge into <base>" does; `"ship": "pr" | "merge"` in `perzian.json` overrides.
 - ✅ "Merge into <base>" from the session detail; merges only what the agent changed (never `.env`/keys), asks first (and warns when required checks fail), removes the worktree.
 - ✅ Merge conflicts are listed with "Ask the agent to resolve"; a dirty checkout is refused with one plain line.
-- ✅ Accounts shows "Connected as <user>" for the project's origin host (read-only `gh auth status`, cached) or a copyable `gh auth login`; never blocks local use. Accounts also lists leftover worktrees (path, branch, age) with a copyable remove command; New session has an "Also edit" field for extra folders.
+- ✅ Accounts shows "Connected as <user>" for the project's origin host (read-only `gh auth status`, cached) or a copyable `gh auth login`; never blocks local use. Accounts also lists leftover worktrees (path, branch, age) with a Remove button (a plain worktree remove: refuses with uncommitted changes, never deletes the branch); New session has an "Also edit" field for extra folders.
 - ⚠️ "Open PR": checks origin and `gh` auth before pushing (a non-GitHub origin stops there, tried for real); the push and `gh pr create` haven't run against a real repo.
 
 ## Usage and limits
 - ✅ Per-session usage and a running total spent across all sessions.
 - ⚠️ Cost figures not yet checked against a real paid run.
 - ✅ Usage limits: a worker near its limit finishes its step and pauses ("Paused · resumes 17:40"); the pause survives a daemon restart (seen for real at 98% of the 5-hour window).
+- ✅ One account-level usage card ("Usage 95% · resets 10:15 pm", Pause sessions / Keep going; keys 1 and 2) per window instead of per-session early pauses. No answer in 2 minutes pauses; "Don't ask again" is a saved setting; a warning shows when extra (paid) usage is on. When any session is refused at the hard limit, the other working Claude sessions pause too (shared account limit).
 - ⚠️ It then resumes itself at reset, also after a restart; "Resume now" in the session detail (not yet seen at a real reset).
 
 ## Desktop app

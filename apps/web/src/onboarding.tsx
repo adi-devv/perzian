@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { AgentCheck, ApiKeyProvider, CredentialStatus, DoctorReport, GitHubCheck } from "@perzian/protocol";
-import { DAEMON_ADDR, installAgent, isDesktop, useCredentials, useDoctor, useLeftover } from "./daemon.ts";
+import { DAEMON_ADDR, installAgent, isDesktop, removeWorktree, useCredentials, useDoctor, useLeftover } from "./daemon.ts";
 import { ago } from "./bits.tsx";
 
 /* ───────────── Project folder memory (shared with New session) ───────────── */
@@ -339,23 +339,39 @@ export function GitHubLine({ gh }: { gh: GitHubCheck }) {
   );
 }
 
-/** Worktree folders left behind by archived or merged sessions. Removal is a command to copy, never a button. */
+/** Worktree folders left behind by archived or merged sessions. Remove is a plain `git worktree remove`: it refuses when there are uncommitted changes and never deletes the branch. */
 function Leftover() {
   const list = useLeftover(true);
-  if (!list?.length) return null;
+  const [gone, setGone] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<string | null>(null);
+  const [refused, setRefused] = useState<Record<string, string>>({});
+  const left = list?.filter((w) => !gone.has(w.path));
+  if (!left?.length) return null;
+  const remove = async (path: string) => {
+    setBusy(path);
+    const why = await removeWorktree(path);
+    setBusy(null);
+    if (why) setRefused((r) => ({ ...r, [path]: why }));
+    else setGone((g) => new Set(g).add(path));
+  };
   return (
     <section className="account">
       <div className="step-line">
         <span className="step-label">Leftover worktrees</span>
-        <span className="step-meta">{list.length}</span>
+        <span className="step-meta">{left.length}</span>
       </div>
-      {list.map((w) => (
+      {left.map((w) => (
         <div key={w.path} className="leftover">
           <div className="step-line">
             <code title={w.path}>{w.repo}/{w.name}</code>
             <span className="step-meta">{[w.branch, w.at && ago(w.at)].filter(Boolean).join(" · ")}</span>
+            {w.project && (
+              <button className="btn small" disabled={busy === w.path} onClick={() => void remove(w.path)} title="Removes the folder only; the branch is kept. Refuses if it has uncommitted changes.">
+                Remove
+              </button>
+            )}
           </div>
-          {w.command && <CopyCmd cmd={w.command} />}
+          {refused[w.path] && <div className="step-meta" role="alert">{refused[w.path]}</div>}
         </div>
       ))}
     </section>

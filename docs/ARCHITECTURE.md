@@ -150,6 +150,16 @@ store is the resume queue: `ResumeQueue` rebuilds from state on start, polls the
 and at `resumeAt` + jitter sends a short system "continue" prompt to the same session. `session.resumed` clears it.
 The lead gets paused/resumed lines through the same batched updates as finished children.
 
+**Usage card and shared limit** (`usagecard.ts`): all Claude sessions share one plan limit, so nearing it (PERZIAN_PAUSE_AT,
+default 95%) is one account-level question, not per-session pauses. The first near reading per window + reset emits
+`usage.card` (the lead can raise it, but is never paused by it); the answer is `usage.answered` (command `usage.answer`).
+Workers keep running while it is open; Pause stops every working Claude worker after its current step with one shared
+`resumeAt`, Keep going means no early pause for that window (the real limit still pauses and auto-resumes), and no answer
+within 2 minutes counts as Pause. `settings.usageCard` (`ask | keep_going | pause`, "Don't ask again") skips the card.
+`_claude/rateLimit` overage fields (`isUsingOverage`, `overageStatus`) set `card.overage`: "keeping going may cost money".
+When a session is refused at the hard limit, every other working Claude worker pauses at once with the same `resumeAt`.
+Leftover worktrees are removed with a plain `worktree remove` (`POST /api/worktrees/remove`): refused when dirty, branches kept.
+
 ## Events
 
 All UI state is a fold over `PerzianEvent`s (`packages/protocol/src/fold.ts`, shared by daemon and UI). The

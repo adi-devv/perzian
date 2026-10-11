@@ -1,4 +1,4 @@
-import type { AgentConfig, Decision, FileChange, Outcome, PerzianEvent, PermissionMode, SessionInfo, TranscriptItem } from "./index.ts";
+import type { AgentConfig, Decision, FileChange, Outcome, PerzianEvent, PermissionMode, SessionInfo, TranscriptItem, UsageCard, UsageCardMode } from "./index.ts";
 
 export const PERMISSION_MODES: readonly PermissionMode[] = ["ask", "edits", "plan", "auto"];
 export const DEFAULT_PERMISSION_MODE: PermissionMode = "ask";
@@ -11,10 +11,12 @@ export interface State {
   changes: Record<string, FileChange[]>; // latest per session
   configs: Record<string, AgentConfig>;
   /** Global settings, folded from settings.* events. */
-  settings: { defaultMode: PermissionMode; /** Folders added by hand, oldest first. */ projects: string[] };
+  settings: { defaultMode: PermissionMode; /** Folders added by hand, oldest first. */ projects: string[]; usageCard: UsageCardMode };
+  /** Account usage cards by key (window + reset); see UsageCard. */
+  usageCards: Record<string, UsageCard>;
 }
 
-export const emptyState: State = { sessions: {}, transcripts: {}, decisions: {}, outcomes: {}, changes: {}, configs: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [] } };
+export const emptyState: State = { sessions: {}, transcripts: {}, decisions: {}, outcomes: {}, changes: {}, configs: {}, usageCards: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [], usageCard: "ask" } };
 
 function patchSession(s: State, id: string, patch: Partial<SessionInfo>): State {
   const cur = s.sessions[id];
@@ -82,9 +84,23 @@ function step(s: State, e: PerzianEvent): State {
       return { ...s, outcomes: { ...s.outcomes, [e.outcome.sessionId]: e.outcome } };
     case "settings.defaultMode":
       return { ...s, settings: { ...s.settings, defaultMode: e.mode } };
+    case "usage.card":
+      return s.usageCards[e.card.key] ? s : { ...s, usageCards: { ...s.usageCards, [e.card.key]: e.card } };
+    case "usage.answered": {
+      const cur = s.usageCards[e.key];
+      if (!cur || cur.answer) return s;
+      return { ...s, usageCards: { ...s.usageCards, [e.key]: { ...cur, answer: { choice: e.choice, at: e.at, ...(e.auto ? { auto: true } : {}) } } } };
+    }
+    case "settings.usageCard":
+      return { ...s, settings: { ...s.settings, usageCard: e.mode } };
     case "settings.projectAdded":
       return s.settings.projects.includes(e.path) ? s : { ...s, settings: { ...s.settings, projects: [...s.settings.projects, e.path] } };
   }
 }
 
-export const fold = (events: PerzianEvent[]): State => events.reduce(reduce, emptyState);
+/** The usage card waiting for an answer (the oldest, if somehow several), or undefined. */
+export function pendingUsageCard(s: Pick<State, "usageCards">): UsageCard | undefined {
+  return Object.values(s.usageCards).filter((c) => !c.answer).sort((a, b) => a.at - b.at)[0];
+}
+
+export const fold =(events: PerzianEvent[]): State => events.reduce(reduce, emptyState);
