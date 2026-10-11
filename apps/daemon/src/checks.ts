@@ -76,6 +76,11 @@ const CHECK_FIELDS = new Set(["name", "run", "timeoutSec"]);
 
 /** Parses and validates perzian.json. Throws an Error whose message says what to fix. */
 export function parsePerzianConfig(text: string): DeclaredCheck[] {
+  return parseConfig(text).checks;
+}
+
+/** Everything perzian.json says: the declared checks and the optional "ship": "pr" | "merge" default. */
+export function parseConfig(text: string): { checks: DeclaredCheck[]; ship?: "pr" | "merge" } {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -83,8 +88,12 @@ export function parsePerzianConfig(text: string): DeclaredCheck[] {
     throw new Error(`${CONFIG_FILE} is not valid JSON (${(e as Error).message})`);
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${CONFIG_FILE} must be an object, like { "checks": [{ "name": "unit", "run": "npm test" }] }`);
+  const rawShip = (raw as { ship?: unknown }).ship;
+  if (rawShip !== undefined && rawShip !== "pr" && rawShip !== "merge") throw new Error(`${CONFIG_FILE}: "ship" must be "pr" or "merge"`);
+  const ship: "pr" | "merge" | undefined = rawShip;
+  const withShip = (checks: DeclaredCheck[]) => ({ checks, ...(ship ? { ship } : {}) });
   const list = (raw as { checks?: unknown }).checks;
-  if (list === undefined) return [];
+  if (list === undefined) return withShip([]);
   if (!Array.isArray(list)) throw new Error(`${CONFIG_FILE}: "checks" must be a list`);
   if (list.length > MAX_CHECKS) throw new Error(`${CONFIG_FILE}: at most ${MAX_CHECKS} checks`);
   const out: DeclaredCheck[] = [];
@@ -114,16 +123,16 @@ export function parsePerzianConfig(text: string): DeclaredCheck[] {
     }
     out.push(check);
   });
-  return out;
+  return withShip(out);
 }
 
 /** Declared checks from the first of `dirs` that has a perzian.json. No file: no checks, no error. */
-export function loadDeclaredChecks(...dirs: string[]): { checks: DeclaredCheck[]; error?: string } {
+export function loadDeclaredChecks(...dirs: string[]): { checks: DeclaredCheck[]; ship?: "pr" | "merge"; error?: string } {
   for (const dir of dirs) {
     const text = read(dir, CONFIG_FILE);
     if (text === undefined) continue;
     try {
-      return { checks: parsePerzianConfig(text) };
+      return parseConfig(text);
     } catch (e) {
       return { checks: [], error: (e as Error).message };
     }

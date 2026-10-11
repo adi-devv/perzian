@@ -14,6 +14,7 @@ import { doctor, doctorHeaders, installCommand, resetDoctorCache } from "./docto
 import { Credentials, PROVIDERS } from "./credentials.ts";
 import { exec } from "node:child_process";
 import { allChecks, detectChecks, loadDeclaredChecks } from "./checks.ts";
+import { hasGithubOrigin, shipPreference } from "./github.ts";
 import { LeadNotifier, type ChildReport } from "./notify.ts";
 import { spawnBlocker } from "./observe.ts";
 import { ResumeQueue } from "./resume.ts";
@@ -170,8 +171,9 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   // perzian.json from the worktree (committed), else the checkout (not committed yet). Read once, here.
   const declared = loadDeclaredChecks(ws.cwd, project);
   const checks = allChecks(detectChecks(ws.cwd), declared.checks);
+  const shipDefault = ws.worktree ? shipPreference(declared.ship, await hasGithubOrigin(project)) : undefined;
   const s = AgentSession.create(
-    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode ?? store.state().settings.defaultMode, ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, checksError: declared.error, ...extra },
+    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode ?? store.state().settings.defaultMode, ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, checksError: declared.error, ...(shipDefault ? { shipDefault } : {}), ...extra },
     deps,
   );
   if (args.worktree && !ws.worktree) s.notice("This folder isn't a git repo, so the session works in it directly (no worktree)");

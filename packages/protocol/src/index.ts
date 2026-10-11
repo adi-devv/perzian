@@ -37,6 +37,8 @@ export interface SessionInfo {
   checkRun?: CheckRun;
   /** What the agent reports it has spent and how full its context is. Codex may report only context. */
   usage?: SessionUsage;
+  /** Which ship action leads: PR when the repo has a GitHub origin, else Merge; perzian.json "ship" overrides. Read at spawn. */
+  shipDefault?: "pr" | "merge";
   /** The branch a worktree session was cut from; "Merge" lands the work back here. */
   baseBranch?: string;
   /** Where the session's work went: merged back, opened as a PR, or why it couldn't. */

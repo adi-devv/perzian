@@ -549,6 +549,11 @@ code.chip { font-size: 11px; }
 .composer-row > .btn { align-self: flex-end; }
 .proj-chip { display: inline-flex; align-items: center; gap: 4px; padding: 0 2px 0 8px; border: 1px solid var(--line); border-radius: 999px; }
 .proj-chip .icon { width: 16px; height: 16px; font-size: 10px; }
+.composer-note .extra-dirs { flex: 1; min-width: 0; border: 0; background: transparent; font-size: 12px; padding: 2px 8px; }
+.composer-note .extra-dirs:focus { outline: none; }
+.leftover { display: flex; flex-direction: column; gap: 4px; }
+.leftover code { font-size: 12px; }
+.gh-note { margin: 8px 0 0; font-size: 12px; }
 .mode-pick { align-self: flex-end; height: var(--ctl); border: 1px solid var(--btn-line); border-radius: var(--r-sm); padding: 0 6px; color: var(--fg-2); font-size: 12px; max-width: none; }
 .mode-pick:disabled { opacity: 0.6; cursor: default; }
 .d-sub .mode-pick { border-color: transparent; padding: 2px 0; }

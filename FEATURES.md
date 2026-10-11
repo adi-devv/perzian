@@ -31,8 +31,10 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ "Run checks" in the session detail reruns the declared and detected checks (running, then ✓/✕).
 
 ## Ship
+- ✅ "Open PR" leads when the repo has a GitHub origin, otherwise "Merge into <base>" does; `"ship": "pr" | "merge"` in `perzian.json` overrides.
 - ✅ "Merge into <base>" from the session detail; merges only what the agent changed (never `.env`/keys), asks first (and warns when required checks fail), removes the worktree.
 - ✅ Merge conflicts are listed with "Ask the agent to resolve"; a dirty checkout is refused with one plain line.
+- ✅ Accounts shows "Connected as <user>" for the project's origin host (read-only `gh auth status`, cached) or a copyable `gh auth login`; never blocks local use. Accounts also lists leftover worktrees (path, branch, age) with a copyable remove command; New session has an "Also edit" field for extra folders.
 - ⚠️ "Open PR": checks origin and `gh` auth before pushing (a non-GitHub origin stops there, tried for real); the push and `gh pr create` haven't run against a real repo.
 
 ## Usage and limits

@@ -37,6 +37,38 @@ export interface ProjectCheck {
   detached?: boolean;
 }
 
+/** A folder under $PERZIAN_HOME/worktrees no live session works in (GET /api/worktrees/leftover). Removal is left to the developer. */
+export interface LeftoverWorktree {
+  path: string;
+  repo: string;
+  name: string;
+  /** The archived or merged session that owned it, when known. */
+  sessionId?: string;
+  /** The branch checked out there, when readable. */
+  branch?: string;
+  /** Last modified (ms): how long it has been sitting there. */
+  at?: number;
+  /** The repo it belongs to. */
+  project?: string;
+  /** The command that removes it safely (git refuses when there are uncommitted changes). */
+  command?: string;
+}
+
+/** GitHub through the developer's own `gh` login. Informational: local use never depends on it. */
+export interface GitHubCheck {
+  /** The project's origin host when it has one, else github.com. */
+  host: string;
+  ghInstalled: boolean;
+  /** true / false for that host; null = couldn't tell. */
+  signedIn: boolean | null;
+  /** The account gh is signed in as on that host. */
+  user?: string;
+  /** Exact install command for this OS, when there is a one-liner. */
+  installCommand?: string;
+  installUrl: string;
+  signInCommand: string;
+}
+
 export interface DoctorReport {
   agents: AgentCheck[];
   git: { installed: boolean; version?: string };
@@ -44,6 +76,7 @@ export interface DoctorReport {
   home: string;
   node: string;
   project?: ProjectCheck;
+  github?: GitHubCheck;
   at: number;
 }
 

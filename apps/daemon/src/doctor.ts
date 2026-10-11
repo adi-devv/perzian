@@ -4,7 +4,8 @@ import { execFile } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import type { AgentCheck, AgentKind, DoctorReport, ProjectCheck } from "@perzian/protocol";
+import type { AgentCheck, AgentKind, DoctorReport, GitHubCheck, ProjectCheck } from "@perzian/protocol";
+import { githubCheck, projectHost } from "./github.ts";
 import { adapterEntry, detectAgents, type AgentAvailability } from "./agents.ts";
 import type { Credentials } from "./credentials.ts";
 import { corsOrigin } from "./origin.ts";
@@ -97,8 +98,21 @@ export async function checkProject(input: string): Promise<ProjectCheck> {
 let cached: { at: number; value: Promise<Omit<DoctorReport, "project" | "home" | "at">> } | undefined;
 const TTL = 15_000;
 
+// gh sign-in per host (the project's origin decides which host matters), cached like the rest.
+const ghCache = new Map<string, { at: number; value: Promise<GitHubCheck> }>();
+function githubFor(host: string, fresh?: boolean): Promise<GitHubCheck> {
+  const hit = ghCache.get(host);
+  if (hit && !fresh && Date.now() - hit.at <= TTL) return hit.value;
+  const value = githubCheck(host);
+  ghCache.set(host, { at: Date.now(), value });
+  return value;
+}
+
 /** Drop cached probes, e.g. after an API key changes or an agent was installed. */
-export const resetDoctorCache = () => (cached = undefined);
+export const resetDoctorCache = () => {
+  cached = undefined;
+  ghCache.clear();
+};
 
 export async function doctor(perzianHome: string, opts: { project?: string; fresh?: boolean; creds?: Credentials } = {}): Promise<DoctorReport> {
   if (!cached || opts.fresh || Date.now() - cached.at > TTL) {
@@ -113,7 +127,8 @@ export async function doctor(perzianHome: string, opts: { project?: string; fres
     cached = { at: Date.now(), value };
   }
   const [base, project] = await Promise.all([cached.value, opts.project?.trim() ? checkProject(opts.project) : undefined]);
-  return { ...base, home: perzianHome, project, at: Date.now() };
+  const github = await githubFor(await projectHost(project?.gitRoot), opts.fresh);
+  return { ...base, github, home: perzianHome, project, at: Date.now() };
 }
 
 // The desktop app loads the UI from file:// (origin "null"); dev goes through the Vite proxy (same origin).
