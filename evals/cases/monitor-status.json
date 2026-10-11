@@ -1,0 +1,27 @@
+{
+  "name": "monitor-status",
+  "description": "Second turn asks for status: the lead checks the session and answers in signal form.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"calc\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "math.js": "export function add(a, b) {\n  return a + b;\n}\n",
+      "test/math.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { add } from \"../math.js\";\n\ntest(\"add\", () => assert.equal(add(2, 3), 5));\n"
+    }
+  },
+  "prompts": [
+    "In {repo}: add `multiply(a, b)` to math.js with a test.",
+    "Status? Did the tests pass?"
+  ],
+  "expect": {
+    "spawns": [
+      1,
+      1
+    ],
+    "noAsk": true,
+    "monitor": true,
+    "maxReplyWords": 50,
+    "replyMatches": "pass|green|✓|succeed|ok",
+    "observedTests": true,
+    "worktree": "any"
+  }
+}

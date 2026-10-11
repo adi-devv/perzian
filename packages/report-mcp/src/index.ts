@@ -37,8 +37,13 @@ const text = (t: string) => ({ content: [{ type: "text" as const, text: t }] });
 
 server.tool(
   "report_progress",
-  "Report the current phase of work so the developer can see progress at a glance.",
-  { phase: z.string(), step: z.number().int(), of: z.number().int(), note: z.string().optional() },
+  "Show your current phase as a progress ring on your tile. Call at each phase change (e.g. explore 1/3, implement 2/3, verify 3/3), not for every tool call.",
+  {
+    phase: z.string().describe("1-3 words, e.g. \"implement\""),
+    step: z.number().int(),
+    of: z.number().int(),
+    note: z.string().optional().describe("Optional, under 10 words"),
+  },
   async (args) => {
     await send({ tool: "report_progress", sessionId, args });
     return { content: [{ type: "text", text: "ok" }] };
@@ -47,11 +52,16 @@ server.tool(
 
 server.tool(
   "ask_decision",
-  "Ask the developer to choose between 2-3 options. Blocks until they answer; returns the chosen option id.",
+  "Put a decision card in front of the developer and block until they pick; returns the chosen option id (or \"dismissed\"). " +
+    "Only for genuine forks: an ambiguous or risky request (deleting files, data loss, public API breaks), conflicting requirements, irreversible steps. " +
+    "Not for things the code or brief already settles. Give 2-3 concrete options, a one-line tradeoff each, and set recommended. Never ask in plain text instead.",
   {
-    question: z.string(),
-    options: z.array(z.object({ id: z.string(), label: z.string(), tradeoff: z.string().optional() })).min(2).max(4),
-    recommended: z.string().optional(),
+    question: z.string().describe("One short question"),
+    options: z
+      .array(z.object({ id: z.string(), label: z.string().describe("2-6 words"), tradeoff: z.string().optional().describe("One line: what you gain and lose") }))
+      .min(2)
+      .max(4),
+    recommended: z.string().optional().describe("id of the option you recommend"),
   },
   async (args) => {
     const chosen = JSON.parse(await send({ tool: "ask_decision", sessionId, args })) as string;
@@ -61,21 +71,23 @@ server.tool(
 
 server.tool(
   "report_outcome",
-  "Report the final outcome of the task: what changed, proof it works, risks, follow-ups. Call once at the end.",
+  "Your outcome card. Call once per task as your last action (and again after each follow-up message), after running the project's real checks (tests, typecheck, build). " +
+    "status: success only if the task is done and checks pass; partial if anything is unfinished or failing; failed if blocked. " +
+    "proof: only checks you actually ran, with their real result; Perzian also records the commands it saw run, and those win.",
   {
     intent: z.string(),
     status: z.enum(["success", "partial", "failed"]),
     changed: z.array(z.object({ path: z.string(), kind: z.enum(["added", "modified", "deleted", "renamed"]) })),
     proof: z.array(
       z.object({
-        kind: z.enum(["tests", "build", "screenshot", "command", "manual"]),
+        kind: z.enum(["tests", "build", "typecheck", "lint", "screenshot", "command", "manual"]),
         label: z.string(),
         passed: z.boolean(),
         detail: z.string().optional(),
       }),
     ),
-    risks: z.array(z.string()),
-    followups: z.array(z.string()),
+    risks: z.array(z.string()).describe("Short lines: what could break, defaults you chose, what you didn't verify"),
+    followups: z.array(z.string()).describe("Short lines: work left for later"),
   },
   async (args) => {
     await send({ tool: "report_outcome", sessionId, args });
@@ -87,24 +99,29 @@ if (role === "main") {
   server.tool("list_sessions", "List the developer's coding sessions with status, progress, changed files and outcomes.", {}, async () =>
     text(await send({ tool: "list_sessions", sessionId, args: {} })),
   );
-  server.tool("get_session", "Get one session's status, progress, changed files, outcome and last message.", { id: z.string() }, async (args) =>
+  server.tool("get_session", "Get one session's status, progress, changed files, outcome (with observed proof) and last message. You are not notified when sessions finish: call this before reporting status or results.", { id: z.string() }, async (args) =>
     text(await send({ tool: "get_session", sessionId, args })),
   );
   server.tool(
     "spawn_session",
-    "Start a coding agent session in a project folder. Returns its id. Use worktree: true to run in an isolated git worktree.",
+    "Start a worker coding session in a project folder; returns its id. The worker has not seen this conversation, so prompt must be a complete brief: " +
+      "Goal (the request restated in full), Context (relevant files), Constraints (the developer's don'ts, verbatim), Done when (criteria + checks that must pass). " +
+      "Spawn independent units in the same turn so they run in parallel; keep coupled work in one session.",
     {
       project: z.string().describe("Absolute path (or ~/...) of the project folder"),
-      prompt: z.string().describe("The full task for the agent"),
+      prompt: z.string().describe("Complete brief: Goal, Context, Constraints, Done when (including which checks must pass)"),
       title: z.string().optional().describe("Short tile title, 2-5 words"),
       agent: z.enum(["claude-code", "codex"]).optional(),
-      model: z.string().optional(),
-      mode: z.enum(["ask", "edits", "plan", "auto"]).optional(),
-      worktree: z.boolean().optional(),
+      model: z
+        .string()
+        .optional()
+        .describe("Omit for the default. Exact ids only: claude-haiku-5-5 (mechanical), claude-sonnet-5-5, claude-opus-5-5 (hard design/algorithms/debugging)"),
+      mode: z.enum(["ask", "edits", "plan", "auto"]).optional().describe("Omit for the developer's default. plan = analysis only, no edits; auto = only if the developer asked for hands-off"),
+      worktree: z.boolean().optional().describe("true whenever two or more sessions work on the same repo at once (isolated git worktree)"),
     },
     async (args) => text(await send({ tool: "spawn_session", sessionId, args })),
   );
-  server.tool("send_to_session", "Send a follow-up message to a session.", { id: z.string(), prompt: z.string() }, async (args) =>
+  server.tool("send_to_session", "Send a follow-up to an existing session; it keeps its context, branch and worktree. Use this, not a new spawn, for changes to work that session already did.", { id: z.string(), prompt: z.string() }, async (args) =>
     text(await send({ tool: "send_to_session", sessionId, args })),
   );
 }

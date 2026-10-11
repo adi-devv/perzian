@@ -1,0 +1,30 @@
+{
+  "name": "three-independent",
+  "description": "Three mechanical, unrelated edits: three parallel worktree sessions, cheap model or default.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"utils\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "array.js": "export function first(xs) {\n  return xs[0];\n}\n",
+      "number.js": "export function isEven(n) {\n  return n % 2 === 0;\n}\n",
+      "object.js": "export function keys(o) {\n  return Object.keys(o);\n}\n",
+      "test/basic.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { first } from \"../array.js\";\nimport { isEven } from \"../number.js\";\nimport { keys } from \"../object.js\";\n\ntest(\"basics\", () => { assert.equal(first([1]), 1); assert.ok(isEven(2)); assert.deepEqual(keys({ a: 1 }), [\"a\"]); });\n"
+    }
+  },
+  "prompts": [
+    "In {repo}, three separate small additions: `last(xs)` in array.js, `isOdd(n)` in number.js, and `values(o)` in object.js. Add a test for each."
+  ],
+  "expect": {
+    "spawns": [
+      3,
+      3
+    ],
+    "worktree": true,
+    "noAsk": true,
+    "models": [
+      "",
+      "claude-haiku-5-5"
+    ],
+    "observedTests": true,
+    "postCheck": "npm test"
+  }
+}

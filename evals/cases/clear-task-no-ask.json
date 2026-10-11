@@ -1,0 +1,24 @@
+{
+  "name": "clear-task-no-ask",
+  "description": "Clear, low-risk task with an obvious default: just do it, no decision card.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"forms\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "age.js": "export function parseAge(input) {\n  return Number(input);\n}\n",
+      "test/age.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { parseAge } from \"../age.js\";\n\ntest(\"parses\", () => assert.equal(parseAge(\"42\"), 42));\n"
+    }
+  },
+  "prompts": [
+    "In {repo}: make parseAge throw a RangeError for anything that isn't an integer from 0 to 150. Add tests."
+  ],
+  "expect": {
+    "spawns": [
+      1,
+      1
+    ],
+    "noAsk": true,
+    "observedTests": true,
+    "postCheck": "npm test",
+    "worktree": "any"
+  }
+}

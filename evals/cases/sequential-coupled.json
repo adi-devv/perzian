@@ -1,0 +1,25 @@
+{
+  "name": "sequential-coupled",
+  "description": "Second step depends on the first: one session does both.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"blog\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "posts.js": "export function postUrl(post) {\n  return `/posts/${post.id}`;\n}\n",
+      "utils.js": "export const noop = () => {};\n",
+      "test/posts.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { postUrl } from \"../posts.js\";\n\ntest(\"url\", () => assert.ok(postUrl({ id: 1, title: \"Hi\" }).startsWith(\"/posts/\")));\n"
+    }
+  },
+  "prompts": [
+    "In {repo}: add a `slugify(title)` helper to utils.js, then use it in posts.js so postUrl returns /posts/<id>-<slug>. Tests for both."
+  ],
+  "expect": {
+    "spawns": [
+      1,
+      1
+    ],
+    "noAsk": true,
+    "observedTests": true,
+    "postCheck": "npm test",
+    "worktree": "any"
+  }
+}

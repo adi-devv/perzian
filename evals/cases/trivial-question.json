@@ -1,0 +1,22 @@
+{
+  "name": "trivial-question",
+  "description": "General knowledge question: answer directly, no session, very short.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"empty\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "index.js": "export {};\n"
+    }
+  },
+  "prompts": [
+    "Quick one: in JavaScript, what's the difference between `let` and `const`?"
+  ],
+  "expect": {
+    "spawns": [
+      0,
+      0
+    ],
+    "maxReplyWords": 45,
+    "replyMatches": "reassign|rebind|re-assign",
+    "outcome": false
+  }
+}

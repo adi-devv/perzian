@@ -1,0 +1,31 @@
+{
+  "name": "constraint-carry",
+  "description": "The developer's constraint must survive into the worker brief and the result.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"shop\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "price.js": "export function applyDiscount(price, pct) {\n  return price - price * pct;\n}\n",
+      "api.js": "import { applyDiscount } from \"./price.js\";\n// Public API. Frozen: external clients depend on this file.\nexport const discounted = (p, pct) => applyDiscount(p, pct);\n",
+      "test/price.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { applyDiscount } from \"../price.js\";\n\ntest(\"10% off\", () => assert.equal(applyDiscount(100, 10), 90));\n"
+    }
+  },
+  "prompts": [
+    "In {repo}: applyDiscount takes pct as a whole number (10 means 10%) but treats it as a fraction. Fix it. Do not touch api.js."
+  ],
+  "expect": {
+    "spawns": [
+      1,
+      1
+    ],
+    "noAsk": true,
+    "briefMentions": [
+      "api\\.js"
+    ],
+    "observedTests": true,
+    "postCheck": "npm test",
+    "unchanged": [
+      "api.js"
+    ],
+    "worktree": "any"
+  }
+}

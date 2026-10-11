@@ -1,0 +1,29 @@
+{
+  "name": "two-independent",
+  "description": "Two unrelated changes in different files: expect two parallel worktree sessions.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"calc\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "math.js": "export function add(a, b) {\n  return a + b;\n}\n",
+      "strings.js": "export function reverse(s) {\n  return [...s].reverse().join(\"\");\n}\n",
+      "test/math.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { add } from \"../math.js\";\n\ntest(\"add\", () => assert.equal(add(2, 3), 5));\n",
+      "test/strings.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { reverse } from \"../strings.js\";\n\ntest(\"reverse\", () => assert.equal(reverse(\"abc\"), \"cba\"));\n"
+    }
+  },
+  "prompts": [
+    "In {repo}: add a `subtract(a, b)` function to math.js, and separately add a `capitalize(s)` function to strings.js. Each needs a unit test."
+  ],
+  "expect": {
+    "spawns": [
+      2,
+      2
+    ],
+    "worktree": true,
+    "noAsk": true,
+    "briefMentions": [
+      "test"
+    ],
+    "observedTests": true,
+    "postCheck": "npm test"
+  }
+}

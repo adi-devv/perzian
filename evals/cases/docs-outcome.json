@@ -1,0 +1,24 @@
+{
+  "name": "docs-outcome",
+  "description": "A docs-only change: the worker still reports a structured outcome (and runs the existing tests).",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"greeter\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "greet.js": "/** Returns a greeting. */\nexport function greet(name = \"world\") {\n  return `Hello, ${name}!`;\n}\n",
+      "README.md": "# greeter\n",
+      "test/greet.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { greet } from \"../greet.js\";\n\ntest(\"greet\", () => assert.equal(greet(\"Ada\"), \"Hello, Ada!\"));\n"
+    }
+  },
+  "prompts": [
+    "In {repo}: add a Usage section to README.md documenting greet() with one example."
+  ],
+  "expect": {
+    "spawns": [
+      1,
+      1
+    ],
+    "noAsk": true,
+    "anyProof": true,
+    "worktree": "any"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "vague-request",
+  "description": "Underspecified request: the lead should put a choice in front of the developer before spawning.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"todo\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "todo.js": "const items = [];\nexport function addItem(t) { items.push(t); return items.length; }\nexport function list() { return items; }\n",
+      "test/todo.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { addItem, list } from \"../todo.js\";\n\ntest(\"add\", () => { addItem(\"a\"); assert.deepEqual(list(), [\"a\"]); });\n"
+    }
+  },
+  "prompts": [
+    "Make {repo} better."
+  ],
+  "expect": {
+    "askBefore": "spawn",
+    "spawns": [
+      0,
+      1
+    ],
+    "worktree": "any"
+  }
+}

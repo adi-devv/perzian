@@ -1,0 +1,25 @@
+{
+  "name": "coupled-rename",
+  "description": "A rename that touches every caller: one session, not several.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"calc\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "math.js": "export function sum(a, b) {\n  return a + b;\n}\n",
+      "calc.js": "import { sum } from \"./math.js\";\n\nexport function total(xs) {\n  return xs.reduce((acc, x) => sum(acc, x), 0);\n}\n",
+      "test/math.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { sum } from \"../math.js\";\nimport { total } from \"../calc.js\";\n\ntest(\"sum\", () => assert.equal(sum(2, 3), 5));\ntest(\"total\", () => assert.equal(total([1, 2, 3]), 6));\n"
+    }
+  },
+  "prompts": [
+    "In {repo}: rename the function `sum` to `add` everywhere (definition, callers and tests)."
+  ],
+  "expect": {
+    "spawns": [
+      1,
+      1
+    ],
+    "noAsk": true,
+    "observedTests": true,
+    "postCheck": "npm test",
+    "worktree": "any"
+  }
+}

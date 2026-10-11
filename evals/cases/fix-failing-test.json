@@ -1,0 +1,27 @@
+{
+  "name": "fix-failing-test",
+  "description": "A real bug with a failing test: the worker must run the tests and the daemon must observe them pass.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"dates\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "duration.js": "// Formats seconds as m:ss\nexport function formatDuration(totalSeconds) {\n  const m = Math.floor(totalSeconds / 60);\n  const s = totalSeconds % 60;\n  return `${m}:${s}`;\n}\n",
+      "test/duration.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { formatDuration } from \"../duration.js\";\n\ntest(\"pads seconds\", () => assert.equal(formatDuration(65), \"1:05\"));\ntest(\"whole minutes\", () => assert.equal(formatDuration(120), \"2:00\"));\n"
+    }
+  },
+  "prompts": [
+    "The tests in {repo} are failing. Fix it."
+  ],
+  "expect": {
+    "spawns": [
+      1,
+      1
+    ],
+    "noAsk": true,
+    "observedTests": true,
+    "postCheck": "npm test",
+    "unchanged": [
+      "test/duration.test.js"
+    ],
+    "worktree": "any"
+  }
+}

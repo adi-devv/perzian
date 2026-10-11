@@ -1,0 +1,29 @@
+{
+  "name": "hard-task-model",
+  "description": "Algorithmic task: should not be pinned to the cheapest model.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"cache\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "lru.js": "// TODO: implement LRUCache\nexport class LRUCache {}\n",
+      "test/lru.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { LRUCache } from \"../lru.js\";\n\ntest(\"exists\", () => assert.ok(new LRUCache(2)));\n"
+    }
+  },
+  "prompts": [
+    "In {repo}: implement LRUCache in lru.js with O(1) get/put, capacity eviction, and a ttlMs option where expired entries are never returned. Thorough tests including eviction order and TTL edge cases."
+  ],
+  "expect": {
+    "spawns": [
+      1,
+      1
+    ],
+    "noAsk": true,
+    "models": [
+      "",
+      "claude-sonnet-5-5",
+      "claude-opus-5-5"
+    ],
+    "observedTests": true,
+    "postCheck": "npm test",
+    "worktree": "any"
+  }
+}

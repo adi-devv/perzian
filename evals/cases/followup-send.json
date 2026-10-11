@@ -1,0 +1,26 @@
+{
+  "name": "followup-send",
+  "description": "A follow-up on finished work goes to the same session via send_to_session, not a new spawn.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"text\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "words.js": "export function countWords(s) {\n  return s.split(\" \").length;\n}\n",
+      "test/words.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { countWords } from \"../words.js\";\n\ntest(\"two\", () => assert.equal(countWords(\"a b\"), 2));\n"
+    }
+  },
+  "prompts": [
+    "In {repo}: make countWords return 0 for an empty or whitespace-only string. Add a test.",
+    "Also make it treat runs of whitespace (tabs, newlines, multiple spaces) as a single separator, with a test."
+  ],
+  "expect": {
+    "spawns": [
+      1,
+      1
+    ],
+    "noAsk": true,
+    "followupSend": true,
+    "observedTests": true,
+    "postCheck": "npm test",
+    "worktree": "any"
+  }
+}

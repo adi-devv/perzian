@@ -1,0 +1,24 @@
+{
+  "name": "read-only-explain",
+  "description": "Question about the repo, no changes wanted: nothing may change on disk.",
+  "repo": {
+    "files": {
+      "package.json": "{\n  \"name\": \"router\",\n  \"version\": \"0.0.0\",\n  \"private\": true,\n  \"type\": \"module\",\n  \"scripts\": {\n    \"test\": \"node --test\"\n  }\n}\n",
+      "router.js": "const routes = new Map();\nexport function on(path, handler) { routes.set(path, handler); }\nexport function dispatch(path) {\n  const h = routes.get(path) ?? routes.get(\"*\");\n  return h ? h(path) : 404;\n}\n",
+      "test/router.test.js": "import { test } from \"node:test\";\nimport assert from \"node:assert/strict\";\nimport { on, dispatch } from \"../router.js\";\n\ntest(\"fallback\", () => { on(\"*\", () => 200); assert.equal(dispatch(\"/x\"), 200); });\n"
+    }
+  },
+  "prompts": [
+    "How does dispatch pick a handler in {repo}/router.js? Don't change anything."
+  ],
+  "expect": {
+    "spawns": [
+      0,
+      1
+    ],
+    "noChanges": true,
+    "maxReplyWords": 80,
+    "outcome": false,
+    "worktree": "any"
+  }
+}
