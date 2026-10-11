@@ -6,3 +6,4 @@ dist/
 .env
 release/
 dist-site/
+.claude/worktrees/
