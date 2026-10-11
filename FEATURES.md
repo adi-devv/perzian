@@ -16,7 +16,7 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 ## Sessions and worktrees
 - ✅ Each session can get its own git worktree, permission mode (ask, edits, plan, auto) and model; sessions resume after a daemon restart.
 - ✅ Claude Code over ACP; Codex is experimental.
-- ⚠️ Ready worktrees: before the first message, copy gitignored `.env*`/`.npmrc` files and run the lockfile's install; shows "Setting up…" with Retry / Start anyway.
+- ✅ Ready worktrees: before the first message, copy gitignored `.env*`/`.npmrc` files and run the lockfile's install (npm ci, falling back to npm install with the committed lockfile kept); shows "Setting up…" with Retry / Start anyway.
 
 ## Decisions and permissions
 - ✅ Permission asks and agent decisions are one-click cards on the session tile (keys 1-9 answer the top one); phones get a queue.
@@ -27,17 +27,19 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ Outcome cards with observed proof: the daemon records the tests, builds, typechecks and lints the agent really ran, with real exit codes.
 - ✅ Change map by symbol (tree-sitter plus `git diff`), a read-only diff/file viewer, activity and a grouped transcript in the session detail view.
 - ⚠️ Map: a squarified treemap of the repo's real files (git, sized by bytes), shaded by how much this project's sessions changed each region; each active session is a dot on the file it last edited (click opens it), hover shows path and who touched it, click a folder to zoom (breadcrumb back). Small files fold into "+N" cells and drawing is capped, so big repos stay smooth.
-- ⚠️ Declared checks: `perzian.json` lists your own checks; the daemon runs them when an agent says it's done, sends failures back (2 rounds), and allows them without a card.
+- ✅ Declared checks: `perzian.json` lists your own checks; the daemon runs them when an agent says it's done, sends failures back (2 rounds), and allows them without a card. A broken `perzian.json` is named in the Checks tab.
 - ✅ "Run checks" in the session detail reruns the declared and detected checks (running, then ✓/✕).
 
 ## Ship
-- ⚠️ "Merge into <base>" or "Open PR" from the session detail; merges only what the agent changed (never `.env`/keys), asks first, removes the worktree.
-- ⚠️ Merge conflicts are listed with "Ask the agent to resolve"; Open PR checks origin and `gh` auth first.
+- ✅ "Merge into <base>" from the session detail; merges only what the agent changed (never `.env`/keys), asks first (and warns when required checks fail), removes the worktree.
+- ✅ Merge conflicts are listed with "Ask the agent to resolve"; a dirty checkout is refused with one plain line.
+- ⚠️ "Open PR": checks origin and `gh` auth before pushing (a non-GitHub origin stops there, tried for real); the push and `gh pr create` haven't run against a real repo.
 
 ## Usage and limits
 - ✅ Per-session usage and a running total spent across all sessions.
 - ⚠️ Cost figures not yet checked against a real paid run.
-- ⚠️ Usage limits: a worker near its limit finishes its step and pauses ("Paused · resumes 17:40"), then resumes itself at reset, also after a restart; "Resume now" in the session detail.
+- ✅ Usage limits: a worker near its limit finishes its step and pauses ("Paused · resumes 17:40"); the pause survives a daemon restart (seen for real at 98% of the 5-hour window).
+- ⚠️ It then resumes itself at reset, also after a restart; "Resume now" in the session detail (not yet seen at a real reset).
 
 ## Desktop app
 - ✅ Electron shell starts the daemon and loads the UI; desktop notifications when a session needs you.

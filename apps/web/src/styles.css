@@ -117,6 +117,9 @@ kbd { font-size: 10px; color: var(--fg-3); padding: 0 3px; }
 .crew-group { display: flex; flex-direction: column; gap: 6px; flex: none; }
 .grp-h { margin: 0; padding: 0 4px; display: flex; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 500; color: var(--fg-3); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
 .grp-h span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grp-h { align-items: center; }
+.btn.grp-new { min-height: 20px; padding: 0 7px; font-size: 11px; color: var(--fg-3); letter-spacing: 0; flex: none; }
+.btn.grp-new:hover { color: var(--fg); }
 .crew-empty { padding: 4px 6px; font-size: 12px; color: var(--fg-2); }
 
 .ctile { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 5px; padding: 9px 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--raised); cursor: pointer; min-width: 0; flex: none; transition: background-color 0.12s, border-color 0.12s; }
@@ -485,6 +488,7 @@ em.a { color: var(--add); font-style: normal; font-family: var(--mono); font-siz
 .ship.shipped b { font-weight: 500; white-space: nowrap; }
 .ship.shipped span { font-size: 12px; color: var(--fg-3); }
 .ship-confirm { margin: 0; font-size: 13px; color: var(--fg-2); line-height: 1.5; overflow-wrap: anywhere; }
+.ship-warn { margin: 0; font-size: 12px; color: var(--failed); }
 .closed-note { margin: 0; font-size: 12px; color: var(--fg-3); flex: 1; }
 .sheet-error { margin: 0; font-size: 12px; color: var(--failed); line-height: 1.5; }
 /* Follow-ups are actions: bordered rows with an explicit verb. */

@@ -13,7 +13,9 @@ export const WEB_PORT = 4318;
 const LOOPBACK = ["localhost", "127.0.0.1", "[::1]"];
 
 export function webOrigins(env: Record<string, string | undefined> = process.env): Set<string> {
-  const out = new Set(LOOPBACK.map((h) => `http://${h}:${WEB_PORT}`));
+  // PERZIAN_WEB_PORT: the dev server moved off 4318 (vite.config.ts reads the same variable).
+  const port = /^\d{2,5}$/.test(env.PERZIAN_WEB_PORT ?? "") ? Number(env.PERZIAN_WEB_PORT) : WEB_PORT;
+  const out = new Set(LOOPBACK.map((h) => `http://${h}:${port}`));
   try {
     const u = new URL(env.PERZIAN_WEB_URL ?? "");
     if (LOOPBACK.includes(u.hostname) || u.hostname === "::1") out.add(u.origin);

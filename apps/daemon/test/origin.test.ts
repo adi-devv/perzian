@@ -47,6 +47,10 @@ describe("trustedOrigin", () => {
   test("PERZIAN_WEB_URL adds its origin only when it's on this machine", () => {
     assert.ok(trustedOrigin("http://localhost:5555", undefined, webOrigins({ PERZIAN_WEB_URL: "http://localhost:5555/app" })));
     assert.ok(!trustedOrigin("https://example.com", undefined, webOrigins({ PERZIAN_WEB_URL: "https://example.com" })));
+    // A second dev stack: PERZIAN_WEB_PORT moves the trusted dev-server port (and only to a port number).
+    assert.ok(trustedOrigin("http://localhost:4328", undefined, webOrigins({ PERZIAN_WEB_PORT: "4328" })));
+    assert.ok(!trustedOrigin("http://localhost:4318", undefined, webOrigins({ PERZIAN_WEB_PORT: "4328" })));
+    assert.ok(trustedOrigin("http://localhost:4318", undefined, webOrigins({ PERZIAN_WEB_PORT: "evil.com" })));
   });
 
   test("corsOrigin echoes trusted browser origins only", () => {

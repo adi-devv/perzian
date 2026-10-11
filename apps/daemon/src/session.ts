@@ -23,7 +23,7 @@ import { ProofTracker, mergeProofs } from "./proof.ts";
 import { existsSync } from "node:fs";
 import { adapterEntry, agentEnv } from "./agents.ts";
 import type { Credentials } from "./credentials.ts";
-import { permissionPolicy } from "./permissions.ts";
+import { permissionDetail, permissionPolicy } from "./permissions.ts";
 import { ToolObserver, isWriteCall, outsideOf, parentToolCallId, pathInside, touchedPaths } from "./observe.ts";
 import { UsageMeter } from "./usage.ts";
 import { SetupGate, readyWorktree } from "./setup.ts";
@@ -306,7 +306,8 @@ export class AgentSession {
       try {
         res = await Promise.race([died, conn.loadSession({ sessionId: this.info.acpSessionId, cwd: this.info.cwd, mcpServers, ...meta })]);
         this.turn = 1; // the preamble is already part of the restored conversation
-        this.notice("Reattached to the previous conversation");
+        // Worth a line in a worker's transcript; in Perzian's own chat it is noise after every restart.
+        if (this.info.role !== "main") this.notice("Reattached to the previous conversation");
       } catch (err) {
         if (DEBUG) console.error(`[${this.info.id.slice(0, 6)}] loadSession failed`, err);
       } finally {
@@ -985,13 +986,13 @@ export class AgentSession {
           return reject ? { outcome: { outcome: "selected", optionId: reject.optionId } } : { outcome: { outcome: "cancelled" } };
         }
         const destructive = verdict.action === "ask" ? verdict.destructive : undefined;
-        const detail = command ?? (outside.length ? outside.join(", ") : typeof raw?.file_path === "string" ? raw.file_path : undefined);
+        const detail = permissionDetail({ title, command, outside, filePath: typeof raw?.file_path === "string" ? raw.file_path : undefined, cwd: this.info.cwd });
         // A destructive command is allowed once at most: an "always" rule would let the next one through unasked.
         const options = params.options.filter((o) => !destructive || o.kind !== "allow_always");
         const optionId = await this.requestDecision({
           source: "permission",
           question: title || "Allow this action?",
-          detail: detail && detail !== title ? detail : undefined,
+          detail,
           options: options.map((o) => ({ id: o.optionId, label: o.name, kind: o.kind })),
           ...(destructive ? { destructive } : {}),
           ...(outside.length ? { outside } : {}),

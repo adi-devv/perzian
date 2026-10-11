@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { destructiveReason, isReadOnlyCommand, isVerificationCommand, permissionPolicy } from "../src/permissions.ts";
+import { destructiveReason, isReadOnlyCommand, isVerificationCommand, permissionDetail, permissionPolicy } from "../src/permissions.ts";
 
 describe("isVerificationCommand", () => {
   const allowed = [
@@ -336,5 +336,22 @@ describe("permissionPolicy: edits outside the session's folders", () => {
   });
   test("destructive commands keep their own card", () => {
     assert.deepEqual(permissionPolicy({ role: "worker", mode: "auto", toolKind: "execute", command: "rm -rf build", outside }), { action: "ask", destructive: "rm -rf" });
+  });
+});
+
+describe("permissionDetail", () => {
+  const cwd = "/home/me/.perzian/worktrees/app/fix-login-abc123";
+  test("a file in the session's folder shows relative, and not at all when the title names it", () => {
+    assert.equal(permissionDetail({ title: "Edit", outside: [], filePath: `${cwd}/src/login.ts`, cwd }), "src/login.ts");
+    assert.equal(permissionDetail({ title: "Write src/login.ts", outside: [], filePath: `${cwd}/src/login.ts`, cwd }), undefined);
+    assert.equal(permissionDetail({ title: `Write ${cwd}/src/login.ts`, outside: [], filePath: `${cwd}/src/login.ts`, cwd }), undefined);
+  });
+  test("commands and paths outside the project stay as they are", () => {
+    assert.equal(permissionDetail({ title: "Terminal", command: "rm -rf dist", outside: [], cwd }), "rm -rf dist");
+    assert.equal(permissionDetail({ title: "rm -rf dist", command: "rm -rf dist", outside: [], cwd }), undefined);
+    assert.equal(permissionDetail({ title: "Edit", outside: ["/etc/hosts"], filePath: "/etc/hosts", cwd }), "/etc/hosts");
+    assert.equal(permissionDetail({ title: "Edit", outside: [], filePath: "/tmp/x.txt", cwd }), "/tmp/x.txt");
+    assert.equal(permissionDetail({ title: "Fetch", outside: [], cwd }), undefined);
+    assert.equal(permissionDetail({ title: "Edit data.ts", outside: [], filePath: `${cwd}/a.ts`, cwd }), "a.ts");
   });
 });

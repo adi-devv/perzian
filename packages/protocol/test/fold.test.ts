@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { byAttention, checkPlan, crewMatch, crewStatus, emptyState, fold, isUnseen, reduce } from "../src/index.ts";
+import { byAttention, checkPlan, crewMatch, crewStatus, emptyState, fold, isUnseen, recentProjects, reduce } from "../src/index.ts";
 import type { Decision, Outcome, PerzianEvent, SessionInfo, SessionStatus } from "../src/index.ts";
 
 const session = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
@@ -218,4 +218,14 @@ test("checkPlan lists declared checks first, then detected commands not already 
     { name: "unit", run: "npm test", timeoutSec: 9 },
     { name: "npm run typecheck", run: "npm run typecheck" },
   ]);
+});
+
+test("recentProjects: added folders first, then worker projects, never the lead's own folder", () => {
+  const sessions = {
+    lead: session("lead", { role: "main", project: "/home/.perzian/main" }),
+    a: session("a", { project: "/code/api" }),
+    b: session("b", { project: "/code/web" }),
+    c: session("c", { project: "/code/api" }),
+  };
+  assert.deepEqual(recentProjects({ sessions, settings: { projects: ["/code/docs"] } }), ["/code/docs", "/code/api", "/code/web"]);
 });
