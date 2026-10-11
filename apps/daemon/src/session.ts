@@ -65,6 +65,7 @@ export interface SessionDeps {
 // and is re-attached on the next prompt.
 export class AgentSession {
   private proc?: ChildProcess;
+  private stderrTail = ""; // last lines the adapter (and the agent CLI under it) wrote to stderr
   private conn?: acp.ClientSideConnection;
   private starting?: Promise<void>;
   private agentText = "";
@@ -132,6 +133,15 @@ export class AgentSession {
     this.store.emit({ type: "session.status", sessionId: this.info.id, status, at: this.info.updatedAt });
   }
 
+  // ACP errors are often a bare "Internal error"; the cause is in `data` or the agent's stderr.
+  private describeError(err: unknown): string {
+    const e = err as { message?: string; data?: unknown };
+    const data = typeof e?.data === "string" ? e.data : e?.data && typeof e.data === "object" ? ((e.data as { details?: string; message?: string }).details ?? (e.data as { message?: string }).message ?? JSON.stringify(e.data)) : "";
+    const tail = this.stderrTail.split("\n").map((l) => l.trim()).filter(Boolean).slice(-2).join(" ");
+    const parts = [e?.message ?? String(err), data, tail].filter((x, i, a) => x && a.indexOf(x) === i);
+    return `Error: ${parts.join(" · ").slice(0, 600)}`;
+  }
+
   notice(text: string): void {
     this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "notice", text, at: Date.now() } });
   }
@@ -162,7 +172,10 @@ export class AgentSession {
     const proc = spawn(process.execPath, [adapterEntry(this.info.agent)], { cwd: this.info.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     this.proc = proc;
     let stderr = "";
-    proc.stderr!.on("data", (d) => (stderr = (stderr + d).slice(-4000)));
+    proc.stderr!.on("data", (d) => {
+      stderr = (stderr + d).slice(-4000);
+      this.stderrTail = stderr;
+    });
     const tail = () => stderr.split("\n").filter(Boolean).slice(-2).join(" ");
     // Rejects if the adapter can't be spawned or dies before the session is set up.
     const died = new Promise<never>((_, reject) => {
@@ -349,7 +362,7 @@ export class AgentSession {
       if (this.inflight === 1) await this.finishTurn(text, res.stopReason);
     } catch (err) {
       this.flushAgentText();
-      this.notice(`Error: ${(err as Error).message ?? String(err)}`);
+      this.notice(this.describeError(err));
       if (this.inflight === 1) {
         this.dropDecisions();
         this.closeOpenTools("failed");
