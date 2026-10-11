@@ -214,3 +214,22 @@ describe("default mode for a new session", () => {
     assert.equal(startMode(undefined, fold([]).settings), "ask");
   });
 });
+
+describe("usage readings (the usage line and the ring)", () => {
+  test("recorded per window; a reading that barely moved is not a new event; dismissal is an event", () => {
+    const { gov, store, events } = setup([]);
+    const readings = () => events().filter((e) => e.type === "usage.reading");
+    gov.reading({ state: "ok", resetAt: resetsAt, window: "seven_day", utilization: 0.4 });
+    gov.reading({ state: "ok", resetAt: resetsAt, window: "seven_day", utilization: 0.403 });
+    assert.equal(readings().length, 1);
+    gov.reading({ state: "ok", resetAt: resetsAt, window: "seven_day", utilization: 0.42 });
+    gov.reading({ state: "ok", resetAt: resetsAt, window: "five_hour", utilization: 0.1 });
+    gov.reading({ state: "ok", window: "five_hour", utilization: 0.1 }); // no reset time: nothing to show
+    assert.equal(readings().length, 3);
+    assert.equal(store.state().usage.windows.seven_day?.utilization, 0.42);
+    gov.dismissNotice(`seven_day:${resetsAt}`);
+    gov.dismissNotice(`seven_day:${resetsAt}`);
+    assert.deepEqual(store.state().usage.dismissed, [`seven_day:${resetsAt}`]);
+    store.close();
+  });
+});

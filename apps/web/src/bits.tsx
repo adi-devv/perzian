@@ -5,7 +5,7 @@ import { isFailureNotice } from "./onboarding.tsx";
 type Send = (c: Command) => void;
 
 /** The one placeholder for the lead's composer, in the real app and the demo, with or without a lead session. */
-export const LEAD_PLACEHOLDER = "Ask Perzian, or tell it what to build…";
+export const LEAD_PLACEHOLDER = "Ask Perzian, or type / for commands";
 
 export const STATUS_LABEL: Record<SessionStatus, string> = { needs_you: "Needs you", working: "Working", failed: "Failed", done: "Done", idle: "Idle", paused: "Paused" };
 
@@ -268,44 +268,6 @@ export function retryTarget(items: TranscriptItem[], status: SessionInfo["status
     if (it.kind === "user") return it.system ? null : { index: fail, prompt: it.text };
   }
   return null;
-}
-
-/** An input; the placeholder says who it talks to (`to` is its accessible name). `blocked`: why sending isn't possible yet; typing still works and the text is kept. */
-export function Composer({ id, to, placeholder, focus, busy, blocked, onSubmit, onStop, note, controls }: { id: string; to: string; placeholder: string; focus?: boolean; busy?: boolean; blocked?: string; onSubmit: (t: string) => void; onStop?: () => void; note?: React.ReactNode; controls?: React.ReactNode }) {
-  const [text, setText] = useState("");
-  const submit = () => {
-    if (!text.trim() || blocked) return;
-    onSubmit(text.trim());
-    setText("");
-  };
-  return (
-    <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-      {note && <div className="composer-note">{note}</div>}
-      <div className="composer-row">
-        <textarea
-          id={id}
-          aria-label={to}
-          rows={1}
-          autoFocus={focus}
-          value={text}
-          placeholder={placeholder}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-        {controls}
-        {busy && onStop ? (
-          <button type="button" className="btn" onClick={onStop}>Stop</button>
-        ) : (
-          <button className="btn primary" disabled={!text.trim() || !!blocked} title={blocked}>Send</button>
-        )}
-      </div>
-    </form>
-  );
 }
 
 /** Permission mode as a compact toggle beside a composer, like Claude's: Ask / Edits / Plan / Auto. */

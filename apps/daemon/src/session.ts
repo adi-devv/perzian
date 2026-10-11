@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
+import { buildPrompt, refOf, type Attachments } from "./attachments.ts";
 import {
   FOLLOWUP_REMINDER,
   MAIN_INSTRUCTIONS,
@@ -11,6 +12,7 @@ import {
   leadProjectsBrief,
   REPORT_INSTRUCTIONS,
   type AgentConfig,
+  type AttachmentInfo,
   type AgentKind,
   type Decision,
   type GitState,
@@ -37,6 +39,9 @@ import { hitFromReading, limitFromError, parseLimitText, pauseThreshold, readRat
 
 /** Sent to a session when its usage limit resets. */
 export const CONTINUE_PROMPT = "(Perzian: your usage limit has reset. Continue where you left off.)";
+
+/** Claude Code's own commands, sent verbatim even before the agent has listed them. */
+const BUILTIN_COMMANDS = new Set(["compact", "clear", "context", "cost", "init", "review", "help"]);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const reportMcpEntry = join(here, "../../../packages/report-mcp/src/index.ts");
@@ -101,12 +106,19 @@ export interface SessionDeps {
   baseFetch?: (cwd: string, base: string) => Promise<boolean>;
   /** The account-level usage governor (usagecard.ts); without it, nearing a limit pauses nothing. */
   usage?: UsageSignals;
+  /** Where uploaded attachments live (tests omit it). */
+  attachments?: Attachments;
 }
+
+/** An attachment resolved from its id: what the prompt needs (see attachments.ts). */
+export type ResolvedAttachment = AttachmentInfo & { path: string };
 
 /** What a session tells the account-level usage governor. */
 export interface UsageSignals {
   /** A rate-limit reading past the pause threshold. */
   near(reading: RateLimitReading, sessionId: string): void;
+  /** Any rate-limit reading (not only past the threshold): the plan windows' usage shown in the UI. */
+  reading?(reading: RateLimitReading): void;
   /** This session was refused at its limit and paused; the others share the account, so they stop too. */
   refused(sessionId: string, hit: LimitHit): void;
 }
@@ -313,6 +325,7 @@ export class AgentSession {
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
       }),
     ]);
+    this.canImage = !!init.agentCapabilities?.promptCapabilities?.image;
     const mcpServers = [
       {
         name: "perzian",
@@ -360,6 +373,7 @@ export class AgentSession {
     if (this.info.model) await this.applyModel(this.info.model).catch((e) => this.notice(`Could not set model: ${(e as Error).message ?? e}`));
   }
 
+  private canImage = false;
   private replaying = false;
   private config: AgentConfig = { models: [], modes: [] };
 
@@ -460,10 +474,10 @@ export class AgentSession {
    * `checkFix`: the daemon sending failed declared checks back; any other prompt starts a new task, so
    * the fix-attempt count starts over.
    */
-  async prompt(text: string, opts: { system?: boolean; resend?: boolean; checkFix?: boolean } = {}): Promise<void> {
+  async prompt(text: string, opts: { system?: boolean; resend?: boolean; checkFix?: boolean; attachments?: ResolvedAttachment[] } = {}): Promise<void> {
     // Writing to a paused session resumes it now (the scheduled resume is dropped).
     this.clearPause("prompt");
-    if (!opts.resend) this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "user", text, at: Date.now(), ...(opts.system ? { system: true as const } : {}) } });
+    if (!opts.resend) this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "user", text, at: Date.now(), ...(opts.system ? { system: true as const } : {}), ...(opts.attachments?.length ? { attachments: opts.attachments.map(refOf) } : {}) } });
     // A prompt sent while a turn is running is queued by the agent; the session stays "working" until
     // the last one returns.
     const first = this.inflight++ === 0;
@@ -489,8 +503,11 @@ export class AgentSession {
       await this.ensureStarted();
       if (!this.conn || !this.info.acpSessionId) throw new Error("session not started");
       if (first) this.turnBaseline = this.info.baseSha ? JSON.stringify(await git.changes(this.info.cwd, this.info.baseSha).catch(() => [])) : undefined;
-      const body = this.promptBody(text, this.turn++ === 0);
-      const res = await this.conn.prompt({ sessionId: this.info.acpSessionId, prompt: [{ type: "text", text: body }] });
+      // A slash command goes to the agent as typed: the report preamble would turn "/compact" into plain text.
+      const slash = /^\/([\w:-]+)(\s|$)/.exec(text.trimStart());
+      const isCommand = !!slash && (BUILTIN_COMMANDS.has(slash[1]) || !!this.info.commands?.some((c) => c.name === slash[1]));
+      const body = isCommand ? text.trimStart() : this.promptBody(text, this.turn++ === 0);
+      const res = await this.conn.prompt({ sessionId: this.info.acpSessionId, prompt: buildPrompt(body, opts.attachments ?? [], this.canImage) });
       this.flushAgentText();
       // Close the cancelled turn's tools now, even if a newer prompt is already queued behind it;
       // otherwise that prompt's end_turn would close them as "completed".
@@ -952,9 +969,9 @@ export class AgentSession {
   // Near the threshold: stop after the current step (see maybeStopForLimit). Workers only: the lead's
   // turns are short and it should stay reachable.
   private onRateLimit(info: unknown): void {
-    if (this.inflight === 0) return;
     const r = readRateLimit(info, pauseThreshold());
-    if (!r) return;
+    if (r) this.deps.usage?.reading?.(r);
+    if (this.inflight === 0 || !r) return;
     if (r.state === "rejected") this.limitHit ??= hitFromReading(r);
     // Near: the account-level card decides (usagecard.ts); the lead raises it too but is never paused by it.
     else if (r.state === "near" && r.resetAt !== undefined && Date.now() >= this.nearLimitOkUntil) this.deps.usage?.near(r, this.info.id);
@@ -1188,6 +1205,11 @@ export class AgentSession {
           case "config_option_update":
             this.readConfig({ configOptions: update.configOptions });
             break;
+          case "available_commands_update": {
+            const commands = update.availableCommands.map((c) => ({ name: c.name, ...(c.description ? { description: c.description } : {}), ...(c.input && "hint" in c.input && c.input.hint ? { hint: c.input.hint } : {}) }));
+            if (JSON.stringify(commands) !== JSON.stringify(this.info.commands ?? [])) this.update({ commands });
+            break;
+          }
           case "usage_update": {
             const usage = this.meter?.read(update);
             if (usage) this.update({ usage });

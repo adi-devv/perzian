@@ -20,7 +20,8 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { PhoneMode, PhonePairing, PhoneStatus } from "@perzian/protocol";
+import { sendAttachment } from "./attachments.ts";
+import type { AttachmentInfo, PhoneMode, PhonePairing, PhoneStatus } from "@perzian/protocol";
 import { run, serveOff, serveOn, tailscaleInfo, type Run } from "./tailscale.ts";
 import { findCloudflared, startTunnel, type Tunnel } from "./tunnel.ts";
 import { validateSubscription, type PushSubscriptionJSON } from "./push.ts";
@@ -207,6 +208,8 @@ export interface PhoneServerOptions extends PhoneAuth {
   onConnection: (ws: WebSocket) => void;
   /** Web Push: the VAPID public key phones subscribe with. Absent = /api/push/* answers 404. */
   push?: { publicKey: string };
+  /** A stored attachment by id: a paired phone may read (never upload) the thumbnails in the transcript. */
+  attachment?: (id: string) => (AttachmentInfo & { path: string }) | undefined;
 }
 
 export interface PhoneServer {
@@ -237,6 +240,11 @@ export function createPhoneServer(o: PhoneServerOptions): PhoneServer {
       if (path === "/ws" || path.startsWith("/api/")) {
         if (!o.devices.verify(deviceToken(req, url))) return void json(res, 401, { error: "unpaired" });
         if (path === "/api/ping") return void json(res, 200, { ok: true });
+        if (o.attachment && req.method === "GET" && path.startsWith("/api/attachments/")) {
+          const a = o.attachment(decodeURIComponent(path.slice("/api/attachments/".length)));
+          if (!a) return void json(res, 404, { error: "not found" });
+          return void sendAttachment(res, a);
+        }
         if (o.push && path === "/api/push/key" && req.method === "GET") return void json(res, 200, { publicKey: o.push.publicKey });
         if (o.push && path === "/api/push/subscribe") {
           const id = o.devices.idOf(deviceToken(req, url));
@@ -295,6 +303,7 @@ export interface PhoneAccessOptions {
   webDir: () => string | undefined;
   onConnection: (ws: WebSocket) => void;
   push?: { publicKey: string };
+  attachment?: PhoneServerOptions["attachment"];
   exec?: Run;
   /** Tests inject these; defaults run the real `cloudflared`. */
   findCloudflared?: typeof findCloudflared;
@@ -359,7 +368,7 @@ export class PhoneAccess {
     if (!webDir) return this.fail("The web UI isn't built. Run: npm run build");
     // Tunnel mode: the allowlist starts empty (everything is refused) and gets the tunnel's name once it exists.
     const hosts = new Set<string>(dnsName ? [dnsName] : []);
-    const server = createPhoneServer({ hosts, devices: this.o.devices, codes: this.o.codes, webDir, onConnection: this.o.onConnection, push: this.o.push });
+    const server = createPhoneServer({ hosts, devices: this.o.devices, codes: this.o.codes, webDir, onConnection: this.o.onConnection, push: this.o.push, attachment: this.o.attachment });
     try {
       await new Promise<void>((ok, bad) => {
         server.http.once("error", bad);

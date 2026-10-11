@@ -48,6 +48,19 @@ export class UsageGovernor implements UsageSignals {
     for (const c of Object.values(this.opts.store.state().usageCards)) if (!c.answer) this.arm(c);
   }
 
+  /** Records the window's usage for the UI (the usage line and the ring's popover), only when it moved. */
+  reading(r: RateLimitReading): void {
+    if (r.resetAt === undefined || r.utilization === undefined) return;
+    const window = r.window ?? "unknown";
+    const cur = this.opts.store.state().usage.windows[window];
+    if (cur && cur.resetsAt === r.resetAt && Math.abs(cur.utilization - r.utilization) < 0.01) return;
+    this.opts.store.emit({ type: "usage.reading", reading: { window, resetsAt: r.resetAt, utilization: r.utilization, at: this.now() } });
+  }
+
+  dismissNotice(key: string): void {
+    if (!this.opts.store.state().usage.dismissed.includes(key)) this.opts.store.emit({ type: "usage.dismissed", key, at: this.now() });
+  }
+
   near(r: RateLimitReading, sessionId: string): void {
     if (r.resetAt === undefined) return;
     const state = this.opts.store.state();

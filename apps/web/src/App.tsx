@@ -1,18 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AGENTS, isUnseen, pendingUsageCard, shownPrompt, shownStatus, type BranchList, type Command, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
-import { isDemo, useBranches, useDaemon, useDoctor, type Link } from "./daemon.ts";
+import { isDemo, useBranches, useDaemon, useDoctor, useMe, type Link } from "./daemon.ts";
 import { ProjectCard } from "./askproject.tsx";
 import { Welcome } from "./welcome.tsx";
 import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, parseFolders, readiness, saveProject, withProject } from "./onboarding.tsx";
 import { PairScreen, PhoneHome, useNarrow } from "./phone.tsx";
-import { BasePicker, Composer, DecisionLine, LEAD_PLACEHOLDER, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
+import { Attached, Composer, ContextRing, UsageLine } from "./composer.tsx";
+import { BasePicker, DecisionLine, LEAD_PLACEHOLDER, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
 import { Crew } from "./crew.tsx";
 import { SessionDetail } from "./detail.tsx";
 
 type Send = (c: Command) => void;
 
 export function App() {
-  const { state, send, link, connected, error, clearError } = useDaemon();
+  const { state, send, link, connected, error, clearError, synced } = useDaemon();
+  const me = useMe();
   // Which session fills the center column; null is Perzian's chat.
   const [selected, setSelected] = useState<string | null>(null);
   // Lead messages that arrived while a session was open count from here (the lead transcript length when you left it).
@@ -31,10 +33,11 @@ export function App() {
   const [splashDone, setSplashDone] = useState(false);
   const [splashReady, setSplashReady] = useState(false);
   useEffect(() => {
-    if (!link || link !== "online") return;
-    const t = setTimeout(() => setSplashReady(true), 400);
+    // Once the saved settings have arrived (the first snapshot), so an unticked "Show on startup" never flashes.
+    if (link !== "online" || !synced) return;
+    const t = setTimeout(() => setSplashReady(true), 150);
     return () => clearTimeout(t);
-  }, [link]);
+  }, [link, synced]);
 
   const all = Object.values(state.sessions).filter((s) => !s.archived);
   const main = all.find((s) => s.role === "main");
@@ -50,9 +53,9 @@ export function App() {
   const branches = useBranches(baseProject);
   useEffect(() => setBase(""), [baseProject]);
   const baseArg = base && base !== branches?.default && branches?.branches.includes(base) ? base : undefined;
-  const startLead = (prompt: string) => {
+  const startLead = (prompt: string, attachments: string[] = []) => {
     if (!gate.ready) return;
-    send({ type: "main.start", prompt });
+    send({ type: "main.start", prompt, ...(attachments.length ? { attachments } : {}) });
   };
 
   // Use a folder for the lead's next message and land in Perzian's chat.
@@ -190,7 +193,8 @@ export function App() {
           blocked={gate.ready ? undefined : gate.blocker}
           focus={firstRun && !showWelcome}
           firstRun={firstRun ? <Onboarding doctor={doctor} project={leadProject ?? ""} /> : null}
-          chips={firstRun ? recent : []}
+          chips={recent}
+          me={me}
           onChip={startInFolder}
           leadProject={leadProject}
           onProjectUsed={() => setLeadProject(null)}
@@ -253,11 +257,12 @@ function AddProject({ recent, onClose, onPick }: { recent: string[]; onClose: ()
 
 /* ───────────── Perzian's chat: the one place work starts ───────────── */
 
-function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, focus, firstRun, chips, onChip, leadProject, onProjectUsed, branches, base, onBase, baseArg }: { hidden: boolean; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode; chips: string[]; onChip: (path: string) => void; leadProject: string | null; onProjectUsed: () => void; branches: BranchList | null; base: string; onBase: (b: string) => void; baseArg?: string }) {
+function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, focus, firstRun, chips, onChip, leadProject, onProjectUsed, branches, base, onBase, baseArg, me }: { hidden: boolean; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; link: Link; onStart: (prompt: string, attachments: string[]) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode; chips: string[]; onChip: (path: string) => void; leadProject: string | null; onProjectUsed: () => void; branches: BranchList | null; base: string; onBase: (b: string) => void; baseArg?: string; me?: string }) {
   const items = main ? (state.transcripts[main.id] ?? []) : [];
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
   const [extras, setExtras] = useState("");
+  const [seed, setSeed] = useState<{ text: string; n: number }>();
   const end =useRef<HTMLDivElement>(null);
   // The demo's "this is scripted" notices are a dismissible hint above the composer, not a line in the stream.
   const demoNote = isDemo ? [...items].reverse().find((i) => i.kind === "notice" && i.text.startsWith("Demo:")) : undefined;
@@ -276,17 +281,36 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
   }, [items.length, hidden, ask?.id]);
   const folder = leadProject?.split("/").filter(Boolean).slice(-1)[0];
 
+  // Nothing said yet: a centered greeting with the composer under it, like a new chat. After the first message the
+  // composer glides down to the bottom (a 150 ms FLIP; none with reduced motion).
+  const centered = !isDemo && link === "online" && items.length === 0 && !ask;
+  const dock = useRef<HTMLDivElement>(null);
+  const was = useRef<{ centered: boolean; top: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = dock.current;
+    if (!el || hidden) {
+      was.current = null;
+      return;
+    }
+    const top = el.getBoundingClientRect().top;
+    const prev = was.current;
+    if (prev?.centered && !centered && Math.abs(prev.top - top) > 2 && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      el.animate?.([{ transform: `translateY(${prev.top - top}px)` }, { transform: "none" }], { duration: 150, easing: "ease-out" });
+    }
+    was.current = { centered, top };
+  });
+
   return (
-    <main className="thread" hidden={hidden} aria-label="Perzian">
+    <main className={`thread${centered ? " empty" : ""}`} hidden={hidden} aria-label="Perzian">
       <div className="thread-head drag">
         <h1 className="lead-h">Perzian</h1>
         <span className="grow" />
         {main?.status === "working" && <span className="thinking">thinking</span>}
         {main?.status === "paused" && <Paused s={main} send={send} />}
-        {main && <ModelPicker s={main} state={state} send={send} />}
       </div>
 
       <div className="thread-scroll">
+        {centered && <Hero name={me} />}
         {link === "refused" && <DaemonRefused />}
         {link === "offline" && (empty ? <DaemonOffline /> : <OfflineBanner />)}
         {firstRun}
@@ -295,7 +319,7 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
         <div ref={end} />
       </div>
 
-      <div className="dock">
+      <div className="dock" ref={dock}>
         {demoNote && demoNote.kind === "notice" && !hintGone && (
           <p className="hint demo-hint">
             {demoNote.text}{" "}
@@ -321,41 +345,63 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
           focus={focus}
           busy={main?.status === "working"}
           blocked={main ? undefined : blocked}
-          controls={<ModePicker value={state.settings.defaultMode} onChange={(mode) => send({ type: "settings.setDefaultMode", mode })} title="Permission mode new sessions start in" />}
-          note={(folder || branches) && (
+          seed={seed}
+          commands={main?.commands}
+          above={<UsageLine state={state} send={send} />}
+          left={
             <>
+              <ModePicker value={state.settings.defaultMode} onChange={(mode) => send({ type: "settings.setDefaultMode", mode })} title="Permission mode new sessions start in" />
               {folder && (
                 <span className="proj-chip" title={leadProject ?? undefined}>
                   in <b>{folder}</b>
                   <button type="button" className="icon" aria-label="Clear project" onClick={onProjectUsed}>✕</button>
                 </span>
               )}
-              {branches && <BasePicker list={branches} value={base} onChange={onBase} state={state} />}
-              {folder && (
-                <input
-                  className="extra-dirs"
-                  value={extras}
-                  onChange={(e) => setExtras(e.target.value)}
-                  placeholder="Also edit: ~/other-repo, …"
-                  aria-label="Extra folders the sessions may also edit"
-                  spellCheck={false}
-                />
+              {(folder || branches) && (
+                <details className="copts" onToggle={(e) => e.currentTarget.classList.toggle("open", e.currentTarget.open)}>
+                  <summary aria-label="Options for new sessions" title="Start from a branch, extra folders">Options</summary>
+                  <div className="copts-menu">
+                    {branches && <BasePicker list={branches} value={base} onChange={onBase} state={state} />}
+                    {folder && (
+                      <input
+                        className="extra-dirs"
+                        value={extras}
+                        onChange={(e) => setExtras(e.target.value)}
+                        placeholder="Also edit: ~/other-repo, …"
+                        aria-label="Extra folders the sessions may also edit"
+                        spellCheck={false}
+                      />
+                    )}
+                  </div>
+                </details>
               )}
             </>
-          )}
-          onSubmit={(text) => {
+          }
+          right={main ? <ModelPicker s={main} state={state} send={send} /> : undefined}
+          ring={<ContextRing s={main} state={state} send={send} />}
+          onSubmit={(text, attachments) => {
             const prompt = leadProject ? withProject(text, leadProject, parseFolders(extras), baseArg) : text;
             if (leadProject) {
               onProjectUsed();
               setExtras("");
             }
-            if (main) send({ type: "session.prompt", sessionId: main.id, prompt });
-            else onStart(prompt);
+            if (main) send({ type: "session.prompt", sessionId: main.id, prompt, ...(attachments.length ? { attachments } : {}) });
+            else onStart(prompt, attachments);
           }}
           onStop={main ? () => send({ type: "session.cancel", sessionId: main.id }) : undefined}
         />
-        {chips.length > 0 && !main && (
+        {centered && (
+          <div className="suggest" aria-label="Suggestions">
+            {SUGGESTIONS.map((t) => (
+              <button key={t} type="button" className="btn small" onClick={() => setSeed({ text: `${t} `, n: (seed?.n ?? 0) + 1 })}>
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+        {chips.length > 0 && (centered || !main) && (
           <div className="folder-recent chips" aria-label="Recent projects">
+            {centered && <span className="chips-k">Recent</span>}
             {chips.map((p) => (
               <button key={p} type="button" className={`btn small${p === leadProject ? " on" : ""}`} title={p} onClick={() => onChip(p)}>
                 {p.split("/").filter(Boolean).slice(-1)[0] ?? p}
@@ -365,6 +411,25 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
         )}
       </div>
     </main>
+  );
+}
+
+const SUGGESTIONS = ["Fix a failing test", "Add a feature", "Explain a repo", "Review my changes"];
+
+/** "Good evening" by the local hour, then the first name from git config when the daemon has it. */
+export function greeting(date: Date, name?: string): string {
+  const h = date.getHours();
+  const hello = h >= 5 && h < 12 ? "Good morning" : h >= 12 && h < 17 ? "Good afternoon" : "Good evening";
+  const first = name?.trim().split(/\s+/)[0];
+  return first ? `${hello}, ${first}` : hello;
+}
+
+function Hero({ name }: { name?: string }) {
+  return (
+    <div className="hero">
+      <span className="mark big" aria-hidden />
+      <h2>{greeting(new Date(), name)}</h2>
+    </div>
   );
 }
 
@@ -384,7 +449,7 @@ function ThreadItems({ items, state, onOpen, retry }: { items: TranscriptItem[];
         switch (b.kind) {
           case "user":
             // Daemon updates to the lead ("sessions finished") are plumbing: the session's own line above already shows it.
-            return b.system ? null : <div key={i} className="msg user">{shownPrompt(b.text)}</div>;
+            return b.system ? null : <div key={i} className="msg user"><Attached items={b.attachments} />{shownPrompt(b.text)}</div>;
           case "agent":
             return <div key={i} className="msg agent">{b.text}</div>;
           case "notice":

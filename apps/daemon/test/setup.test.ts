@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fold, type SetupState } from "@perzian/protocol";
 import { createWorktree } from "../src/git.ts";
-import { SetupGate, copyLocalFiles, detectInstall, localFiles, readyWorktree } from "../src/setup.ts";
+import { SetupGate, copyLocalFiles, copyProjectSkills, detectInstall, localFiles, readyWorktree } from "../src/setup.ts";
 import { EventStore } from "../src/store.ts";
 import { AgentSession } from "../src/session.ts";
 
@@ -271,5 +271,22 @@ describe("session setup", () => {
     assert.deepEqual(started, ["ok"]);
     const users = (fold(store.all()).transcripts[s.info.id] ?? []).filter((t) => t.kind === "user");
     assert.equal(users.length, 1, "the resent prompt isn't added to the transcript twice");
+  });
+});
+
+describe("project skills and commands", () => {
+  test("untracked and gitignored ones are copied into the worktree; tracked ones are never overwritten", async () => {
+    const { project, wt } = await repo(
+      { ".gitignore": ".claude/skills/private/\n", ".claude/skills/tracked/SKILL.md": "committed\n", ".claude/commands/old.md": "committed\n" },
+      { ".claude/skills/private/SKILL.md": "ignored\n", ".claude/skills/fresh/SKILL.md": "untracked\n", ".claude/commands/deploy.md": "cmd\n", ".claude/settings.local.json": "{}" },
+    );
+    // The checkout edited a tracked command after the commit: the worktree keeps its own copy.
+    writeFileSync(join(project, ".claude/commands/old.md"), "edited in checkout\n");
+    const copied = await copyProjectSkills(project, wt);
+    assert.deepEqual(copied, [".claude/commands/deploy.md", ".claude/skills/fresh/SKILL.md", ".claude/skills/private/SKILL.md"]);
+    assert.equal(readFileSync(join(wt, ".claude/skills/private/SKILL.md"), "utf8"), "ignored\n");
+    assert.equal(readFileSync(join(wt, ".claude/commands/old.md"), "utf8"), "committed\n");
+    assert.ok(!existsSync(join(wt, ".claude/settings.local.json")), "only skills and commands");
+    assert.deepEqual(await copyProjectSkills(project, wt), [], "a second run copies nothing");
   });
 });

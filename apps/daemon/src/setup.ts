@@ -91,6 +91,34 @@ export async function copyLocalFiles(source: string, dest: string): Promise<stri
   return copied;
 }
 
+// Project skills and slash commands the checkout has but git doesn't carry into a worktree (gitignored or not committed yet).
+const SKILL_DIRS = [".claude/skills", ".claude/commands"];
+
+/**
+ * Copies the checkout's `.claude/skills/` and `.claude/commands/` files that are untracked or gitignored into `dest`, so the
+ * agent in a worktree has the same project skills and commands. Tracked files are already there and nothing is overwritten.
+ * Returns the paths copied.
+ */
+export async function copyProjectSkills(source: string, dest: string): Promise<string[]> {
+  const found = new Set<string>();
+  for (const flags of [["--exclude-standard"], ["--ignored", "--exclude-standard"]]) {
+    for (const p of await gitLines(source, ["ls-files", "-z", "--others", ...flags, "--", ...SKILL_DIRS], { literal: true }).catch(() => [])) found.add(p);
+  }
+  const copied: string[] = [];
+  for (const p of [...found].sort()) {
+    const from = join(source, p);
+    const to = join(dest, p);
+    try {
+      const st = lstatSync(from);
+      if (!st.isFile() || st.size > MAX_FILE_BYTES || existsSync(to)) continue;
+      mkdirSync(dirname(to), { recursive: true });
+      copyFileSync(from, to, constants.COPYFILE_EXCL);
+      copied.push(p);
+    } catch {}
+  }
+  return copied;
+}
+
 export interface InstallStep {
   /** Shown to the developer, e.g. "npm ci". */
   label: string;
@@ -210,7 +238,7 @@ export async function readyWorktree(source: string, dest: string, opts: SetupOpt
     if (st.state === "running") opts.onUpdate?.(st);
   };
   try {
-    st.copied = await copyLocalFiles(source, dest);
+    st.copied = [...(await copyLocalFiles(source, dest)), ...(await copyProjectSkills(source, dest))];
   } catch (e) {
     st.notes = [`Couldn't copy local files: ${(e as Error).message ?? e}`];
   }

@@ -1,4 +1,4 @@
-import type { AgentConfig, Decision, FileChange, Outcome, PerzianEvent, PermissionMode, SessionInfo, TranscriptItem, UsageCard, UsageCardMode } from "./index.ts";
+import { usageKey, type AgentConfig, type LimitWindow, type UsageReading, type Decision, type FileChange, type Outcome, type PerzianEvent, type PermissionMode, type SessionInfo, type TranscriptItem, type UsageCard, type UsageCardMode } from "./index.ts";
 
 export const PERMISSION_MODES: readonly PermissionMode[] = ["ask", "edits", "plan", "auto"];
 export const DEFAULT_PERMISSION_MODE: PermissionMode = "ask";
@@ -14,9 +14,11 @@ export interface State {
   settings: { defaultMode: PermissionMode; /** Folders added by hand, oldest first. */ projects: string[]; usageCard: UsageCardMode; /** Welcome splash on startup. */ splash: boolean };
   /** Account usage cards by key (window + reset); see UsageCard. */
   usageCards: Record<string, UsageCard>;
+  /** Plan-window usage as last reported, and the "on pace" lines dismissed (see usageNotice). */
+  usage: { windows: Partial<Record<LimitWindow, UsageReading>>; dismissed: string[] };
 }
 
-export const emptyState: State = { sessions: {}, transcripts: {}, decisions: {}, outcomes: {}, changes: {}, configs: {}, usageCards: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [], usageCard: "ask", splash: true } };
+export const emptyState: State = { sessions: {}, transcripts: {}, decisions: {}, outcomes: {}, changes: {}, configs: {}, usageCards: {}, usage: { windows: {}, dismissed: [] }, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [], usageCard: "ask", splash: true } };
 
 function patchSession(s: State, id: string, patch: Partial<SessionInfo>): State {
   const cur = s.sessions[id];
@@ -93,6 +95,10 @@ function step(s: State, e: PerzianEvent): State {
     }
     case "settings.usageCard":
       return { ...s, settings: { ...s.settings, usageCard: e.mode } };
+    case "usage.reading":
+      return { ...s, usage: { ...s.usage, windows: { ...s.usage.windows, [e.reading.window]: e.reading } } };
+    case "usage.dismissed":
+      return s.usage.dismissed.includes(e.key) ? s : { ...s, usage: { ...s.usage, dismissed: [...s.usage.dismissed, e.key].slice(-8) } };
     case "settings.splash":
       return s.settings.splash === e.show ? s : { ...s, settings: { ...s.settings, splash: e.show } };
     case "settings.projectAdded":
@@ -106,3 +112,21 @@ export function pendingUsageCard(s: Pick<State, "usageCards">): UsageCard | unde
 }
 
 export const fold =(events: PerzianEvent[]): State => events.reduce(reduce, emptyState);
+
+const HOUR = 3_600_000;
+/** Length of each plan window; the overage and unknown ones have no pace. */
+const WINDOW_MS: Partial<Record<LimitWindow, number>> = { five_hour: 5 * HOUR, seven_day: 168 * HOUR, seven_day_opus: 168 * HOUR, seven_day_sonnet: 168 * HOUR };
+export const WINDOW_NAME: Record<LimitWindow, string> = { five_hour: "session", seven_day: "weekly", seven_day_opus: "weekly Opus", seven_day_sonnet: "weekly Sonnet", overage: "extra usage", unknown: "plan" };
+
+/** The slim "on pace to hit your limit early" line: a window at least 30% used that, at this pace, runs out before it resets. Null otherwise, or once dismissed. */
+export function usageNotice(usage: State["usage"], now: number): { key: string; window: LimitWindow; utilization: number; resetsAt: number } | null {
+  let best: UsageReading | null = null;
+  for (const r of Object.values(usage.windows)) {
+    const len = WINDOW_MS[r.window];
+    if (!len || r.utilization < 0.3 || r.resetsAt <= now || usage.dismissed.includes(usageKey(r))) continue;
+    const elapsed = Math.min(1, Math.max(0.01, (len - (r.resetsAt - now)) / len));
+    if (r.utilization / elapsed <= 1) continue;
+    if (!best || r.utilization > best.utilization) best = r;
+  }
+  return best ? { key: usageKey(best), window: best.window, utilization: best.utilization, resetsAt: best.resetsAt } : null;
+}

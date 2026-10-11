@@ -64,9 +64,38 @@ export interface SessionInfo {
   background?: BackgroundProc[];
   /** The daemon restarted while this session was busy; it needs you (Retry) until it runs again (see clearsInterrupted). */
   interrupted?: Interrupted;
+  /** Slash commands the agent offers (skills, plugin commands, built-ins), from ACP available_commands_update. */
+  commands?: AgentCommand[];
   createdAt: number;
   updatedAt: number;
 }
+
+export interface AgentCommand {
+  name: string;
+  description?: string;
+  /** Hint for the argument, shown after the name. */
+  hint?: string;
+}
+
+/** A file or image the developer attached; only ids and names travel in commands and events, the bytes stay on disk. */
+export interface AttachmentRef {
+  id: string;
+  name: string;
+  /** An image (png, jpg, gif, webp): shown as a thumbnail. */
+  image?: true;
+}
+
+/** The daemon's answer to an upload (POST /api/attachments?name=...): what the composer holds until the prompt is sent. */
+export interface AttachmentInfo extends AttachmentRef {
+  mime: string;
+  size: number;
+}
+
+export const MAX_ATTACHMENTS = 10;
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const MAX_FILE_BYTES = 25 * 1024 * 1024;
+/** Image types accepted as attachments, by extension. */
+export const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 
 export interface Interrupted {
   /** turn: mid-turn · decision: waiting for your answer · ship: merging or opening the PR · setup: readying the worktree. */
@@ -223,6 +252,18 @@ export interface UsageCard {
   answer?: { choice: "pause" | "keep_going"; at: number; /** nobody answered in time */ auto?: boolean };
 }
 
+/** One plan window's usage as last reported. */
+export interface UsageReading {
+  window: LimitWindow;
+  /** When the window resets (ms since epoch). */
+  resetsAt: number;
+  /** 0..1 */
+  utilization: number;
+  at: number;
+}
+
+export const usageKey = (r: Pick<UsageReading, "window" | "resetsAt">) => `${r.window}:${r.resetsAt}`;
+
 export interface SessionUsage {
   /** Total spent by this session across adapter restarts, in USD. */
   costUsd?: number;
@@ -326,7 +367,7 @@ export interface AgentConfig {
 
 export type TranscriptItem =
   // system: sent by the daemon (e.g. "sessions finished" updates to the lead), not typed by the developer.
-  | { kind: "user"; text: string; at: number; system?: true }
+  | { kind: "user"; text: string; at: number; system?: true; attachments?: AttachmentRef[] }
   | { kind: "agent"; text: string; at: number }
   // parentToolCallId: the Claude subagent (Task/Agent call, see SessionInfo.subagents) this call ran inside.
   // path: the file it targets, relative to the session's folder (set only inside it); places the session's dot on the Map.
@@ -365,7 +406,11 @@ export type PerzianEvent =
   // A project folder the developer added in the UI before any session exists in it; shown in the crew column.
   | { type: "settings.projectAdded"; path: string; at: number }
   // "Show on startup" of the welcome splash (default on).
-  | { type: "settings.splash"; show: boolean; at: number };
+  | { type: "settings.splash"; show: boolean; at: number }
+  // The account's plan-window usage as the agent last reported it (_claude/rateLimit); drives the usage line and the ring's popover.
+  | { type: "usage.reading"; reading: UsageReading }
+  // The "on pace to hit your limit" line was dismissed for this window and reset (key = `${window}:${resetsAt}`).
+  | { type: "usage.dismissed"; key: string; at: number };
 
 export interface CreateSessionArgs {
   project: string;
@@ -380,6 +425,8 @@ export interface CreateSessionArgs {
   extraDirs?: string[];
   /** Branch to start the worktree from (implies worktree). Omitted: the repo's default branch. Fetched from origin first. */
   base?: string;
+  /** Attachment ids (see AttachmentInfo) the first prompt carries, e.g. a screenshot the lead was given. */
+  attachments?: string[];
 }
 
 /** GET /api/branches?project=…: the branches a new worktree session can start from. */
@@ -395,7 +442,7 @@ export interface BranchList {
 // UI -> daemon
 export type Command =
   | ({ type: "session.create" } & CreateSessionArgs)
-  | { type: "session.prompt"; sessionId: string; prompt: string }
+  | { type: "session.prompt"; sessionId: string; prompt: string; attachments?: string[] }
   | { type: "session.cancel"; sessionId: string }
   | { type: "session.resume"; sessionId: string }
   | { type: "session.setModel"; sessionId: string; model: string }
@@ -413,10 +460,11 @@ export type Command =
   | { type: "settings.setSplash"; show: boolean }
   | { type: "settings.setUsageCard"; mode: UsageCardMode }
   // Answer the usage card; `dontAsk` also saves the choice as the setting.
+  | { type: "usage.dismiss"; key: string }
   | { type: "usage.answer"; key: string; choice: "pause" | "keep_going"; dontAsk?: boolean }
   // After a failed worktree setup: run it again, or start the agent without it.
   | { type: "session.setup"; sessionId: string; action: "retry" | "skip" }
-  | { type: "main.start"; model?: string; agent?: AgentKind; prompt?: string }
+  | { type: "main.start"; model?: string; agent?: AgentKind; prompt?: string; attachments?: string[] }
   | { type: "sessions.import"; sinceDays?: number; limit?: number }
   | { type: "decision.answer"; decisionId: string; optionId: string | null }
   // The Mac UI says whether it is focused, so phone pushes can stay quiet while you are looking at it.

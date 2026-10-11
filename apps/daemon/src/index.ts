@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DAEMON_PORT, PERMISSION_MODES, knownProjects, projectName, USAGE_CARD_MODES, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
+import { DAEMON_PORT, PERMISSION_MODES, knownProjects, projectName, USAGE_CARD_MODES, MAX_FILE_BYTES, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
 import { EventStore } from "./store.ts";
 import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps } from "./session.ts";
 import * as git from "./git.ts";
@@ -29,6 +29,8 @@ import { GhLogin } from "./ghlogin.ts";
 import { repoTree } from "./repotree.ts";
 import { startMode } from "./defaults.ts";
 import { UsageGovernor } from "./usagecard.ts";
+import { Attachments, sendAttachment } from "./attachments.ts";
+import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { AgentKind, ApiKeyProvider, BranchList, InstallResult } from "@perzian/protocol";
 
@@ -49,7 +51,8 @@ const creds = new Credentials(home);
 await creds.load();
 // One account, one usage question: nearing the limit raises a single card; a refused session stops the others.
 const usage = new UsageGovernor({ store, sessions: () => sessions.values() });
-const deps: SessionDeps = { store, daemonUrl, decisions, creds, usage };
+const attachments = new Attachments(home);
+const deps: SessionDeps = { store, daemonUrl, decisions, creds, usage, attachments };
 
 
 let installing: Promise<InstallResult> | undefined;
@@ -159,6 +162,7 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   const problem = projectProblem(args.project, home);
   if (problem) throw new Error(problem);
   const project = expand(args.project.trim());
+  const atts = attachments.resolve(args.attachments);
   const id = crypto.randomUUID();
   const title = args.title?.trim() || args.prompt.split("\n")[0].slice(0, 48) || basename(project);
   // A base branch only means something for a worktree: the checkout itself is never switched.
@@ -184,7 +188,7 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   if (extra.parentId) {
     store.emit({ type: "session.transcript", sessionId: extra.parentId, item: { kind: "spawn", childId: s.info.id, title, at: Date.now() } });
   }
-  void s.prompt(args.prompt).catch((e) => console.error(`[${s.info.id}]`, e));
+  void s.prompt(args.prompt, { attachments: atts }).catch((e) => console.error(`[${s.info.id}]`, e));
   return s;
 }
 
@@ -203,23 +207,27 @@ async function handleCommand(cmd: Command): Promise<void> {
       if (existing) {
         if (cmd.model !== undefined) await existing.applyModel(cmd.model);
         if (cmd.prompt) notifier.developerPrompted(existing.info.id);
-        if (cmd.prompt) void existing.prompt(cmd.prompt);
+        if (cmd.prompt) void existing.prompt(cmd.prompt, { attachments: attachments.resolve(cmd.attachments) });
         break;
       }
       // No project needed: the lead starts in a neutral empty folder and asks for one (ask_project) when it needs it.
+      const atts = attachments.resolve(cmd.attachments);
       const dir = leadDir(home);
       const m = AgentSession.create({ project: dir, cwd: dir, title: "Perzian", agent: cmd.agent ?? "claude-code", model: cmd.model, role: "main", mode: "ask" }, deps);
       sessions.set(m.info.id, m);
-      if (cmd.prompt) void m.prompt(cmd.prompt);
+      if (cmd.prompt) void m.prompt(cmd.prompt, { attachments: atts });
       else await m.ensureStarted();
       break;
     }
     case "session.prompt":
       if (!s) throw new Error("Unknown session");
       assertPromptable(s.info);
-      notifier.developerPrompted(s.info.id);
-      if (s.info.role !== "main") notifier.childPrompted(s.info.id, false);
-      void s.prompt(cmd.prompt);
+      {
+        const atts = attachments.resolve(cmd.attachments);
+        notifier.developerPrompted(s.info.id);
+        if (s.info.role !== "main") notifier.childPrompted(s.info.id, false);
+        void s.prompt(cmd.prompt, { attachments: atts });
+      }
       break;
     case "session.cancel":
       await s?.cancel();
@@ -272,6 +280,10 @@ async function handleCommand(cmd: Command): Promise<void> {
     case "settings.setUsageCard":
       if (!USAGE_CARD_MODES.includes(cmd.mode)) throw new Error(`Unknown usage card mode: ${String(cmd.mode)}`);
       if (store.state().settings.usageCard !== cmd.mode) store.emit({ type: "settings.usageCard", mode: cmd.mode, at: Date.now() });
+      break;
+    case "usage.dismiss":
+      if (typeof cmd.key !== "string" || !cmd.key) throw new Error("Nothing to dismiss");
+      usage.dismissNotice(cmd.key);
       break;
     case "usage.answer":
       if (cmd.choice !== "pause" && cmd.choice !== "keep_going") throw new Error(`Unknown choice: ${String(cmd.choice)}`);
@@ -409,6 +421,27 @@ async function handleReport(call: ReportCall): Promise<unknown> {
   }
 }
 
+/** A request body as bytes, refused past `limit`. */
+async function readBinary(req: import("node:http").IncomingMessage, limit: number): Promise<Buffer> {
+  const declared = Number(req.headers["content-length"] ?? 0);
+  if (declared > limit) throw new Error("That file is too large.");
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size > limit) throw new Error("That file is too large.");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
+/** The developer's name from git config, for the greeting ("Good evening, Aadit"). */
+function gitUserName(): Promise<string | undefined> {
+  return new Promise((done) => {
+    execFile("git", ["config", "--global", "user.name"], { timeout: 2000 }, (err, out) => done(err ? undefined : out.trim() || undefined));
+  });
+}
+
 async function readBody(req: import("node:http").IncomingMessage): Promise<string> {
   let body = "";
   for await (const chunk of req) body += chunk;
@@ -482,6 +515,21 @@ const http = createServer(async (req, res) => {
       json(200, { ok: true });
       return;
     }
+    if (url.pathname === "/api/attachments" && req.method === "POST") {
+      const data = await readBinary(req, MAX_FILE_BYTES);
+      json(200, attachments.save(url.searchParams.get("name") ?? "file", data));
+      return;
+    }
+    if (url.pathname.startsWith("/api/attachments/") && (req.method === "GET" || req.method === "HEAD")) {
+      const a = attachments.get(decodeURIComponent(url.pathname.slice("/api/attachments/".length)));
+      if (!a) return void res.writeHead(404, { "content-type": "text/plain" }).end("not found");
+      sendAttachment(res, a, { ...doctorHeaders(origin, token), "cache-control": "private, max-age=3600" });
+      return;
+    }
+    if (url.pathname === "/api/me" && req.method === "GET") {
+      json(200, { name: await gitUserName() });
+      return;
+    }
     if (url.pathname === "/api/doctor") {
       const report = await doctor(home, { project: url.searchParams.get("project") ?? undefined, fresh: url.searchParams.has("fresh"), creds });
       res.writeHead(200, doctorHeaders(origin, token)).end(JSON.stringify(report));
@@ -549,6 +597,7 @@ const phone = new PhoneAccess({
   webDir: phoneWebDir,
   onConnection: (ws) => attach(ws, true),
   push: { publicKey: vapid.publicKey },
+  attachment: (id) => attachments.get(id),
 });
 void phone.restore();
 
