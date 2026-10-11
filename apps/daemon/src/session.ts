@@ -102,7 +102,7 @@ export class AgentSession {
   }
 
   static create(
-    opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; id?: string; checks?: string[] },
+    opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; baseBranch?: string; id?: string; checks?: string[] },
     deps: SessionDeps,
   ): AgentSession {
     const now = Date.now();
@@ -116,6 +116,7 @@ export class AgentSession {
       branch: opts.branch,
       worktree: opts.worktree,
       baseSha: opts.baseSha,
+      ...(opts.baseBranch ? { baseBranch: opts.baseBranch } : {}),
       agent: opts.agent,
       model: opts.model || undefined,
       mode: opts.mode ?? "ask",
@@ -487,6 +488,10 @@ export class AgentSession {
   }
   private dropping = false;
 
+  setShip(ship: SessionInfo["ship"]): void {
+    this.update(ship?.state === "merged" ? { ship, live: false } : { ship });
+  }
+
   archive(): void {
     this.dispose();
     this.update({ archived: true });
@@ -640,7 +645,7 @@ export async function prepareWorkspace(project: string, home: string, title: str
   if (!(await git.isRepo(project))) return { cwd: project, branch: undefined, baseSha: undefined, worktree: false };
   if (worktree) {
     const wt = await git.createWorktree(project, home, title, id);
-    return { cwd: wt.path, branch: wt.branch, baseSha: await git.head(wt.path), worktree: true };
+    return { cwd: wt.path, branch: wt.branch, baseSha: await git.head(wt.path), worktree: true, baseBranch: await git.currentBranch(project) };
   }
   return { cwd: project, branch: await git.currentBranch(project), baseSha: await git.head(project), worktree: false };
 }

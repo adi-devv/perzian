@@ -4,7 +4,7 @@ import type { FileChange, PerzianEvent, SessionInfo } from "@perzian/protocol";
 const t = Date.now();
 const s = (id: string, title: string, project: string, branch: string, status: SessionInfo["status"], agent: SessionInfo["agent"], ago: number, extra: Partial<SessionInfo> = {}): SessionInfo => ({
   id, role: "worker", title, project, cwd: project, branch, agent, status, createdAt: t - ago, updatedAt: t - ago / 3, live: true,
-  model: agent === "codex" ? undefined : "claude-sonnet-5-5", mode: "ask", worktree: true, parentId: "main", ...extra,
+  model: agent === "codex" ? undefined : "claude-sonnet-5-5", mode: "ask", worktree: true, baseBranch: "main", parentId: "main", ...extra,
 });
 type Sym = NonNullable<FileChange["symbols"]>[number];
 const f = (path: string, kind: FileChange["kind"], additions: number, deletions: number, symbols?: [string, Sym["kind"], Sym["change"]][]): FileChange => ({

@@ -9,6 +9,7 @@ import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps 
 import * as git from "./git.ts";
 import { listClaudeSessions, toEvents } from "./importer.ts";
 import { mergeProofs } from "./proof.ts";
+import { ship } from "./ship.ts";
 import { doctor, doctorHeaders, installCommand, resetDoctorCache } from "./doctor.ts";
 import { Credentials, PROVIDERS } from "./credentials.ts";
 import { exec } from "node:child_process";
@@ -109,7 +110,7 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   const ws = await prepareWorkspace(project, home, title, id, !!args.worktree);
   const checks = detectChecks(ws.cwd);
   const s = AgentSession.create(
-    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode, checks, ...extra },
+    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode, checks, ...extra },
     deps,
   );
   notifier.childPrompted(s.info.id, !!extra.parentId);
@@ -176,6 +177,14 @@ async function handleCommand(cmd: Command): Promise<void> {
         const info = store.state().sessions[id];
         if (info) sessions.set(id, new AgentSession({ ...info }, deps));
       }
+      break;
+    }
+    case "session.ship": {
+      if (!s) throw new Error("Unknown session");
+      if (s.info.ship?.state === "shipping") break;
+      s.setShip({ state: "shipping", how: cmd.how, at: Date.now() });
+      const result = await ship(s.info, cmd.how, () => s.dispose());
+      s.setShip(result);
       break;
     }
     case "session.archive":

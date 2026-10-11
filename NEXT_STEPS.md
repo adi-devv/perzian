@@ -9,8 +9,8 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    Fix: Settings → Pages → Custom domain → `www.perzian.dev` → Save, wait for HTTPS, then switch back to `perzian.dev` if preferred.
 
 ## Features
-1. **Ship it.** A done session gets one click: "Merge into main" or "Open PR" (via `gh`). Show conflicts visually,
-   then remove the worktree. Today finished work sits on its `perzian/<slug>` branch until merged by hand.
+1. **Ship it: try it for real.** Built: "Merge into <base>" / "Open PR" in the session drawer, conflicts listed with
+   "Ask the agent to resolve", worktree removed after a merge. Unit-tested on temp repos; not yet run from the app on a real project.
 2. **Crew summary.** Ask the lead "what's going on?" and get a short digest of what's done, blocked and needs you,
    built from `list_sessions` and outcomes (roadmap: "Main agent summarizes crew state into decisions").
 3. **Calm visuals, follow-through.** The app now keeps color only for needs you (amber) and failed (red).

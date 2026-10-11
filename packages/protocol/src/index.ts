@@ -30,8 +30,24 @@ export interface SessionInfo {
   checks?: string[];
   /** What the agent reports it has spent and how full its context is. Codex may report only context. */
   usage?: SessionUsage;
+  /** The branch a worktree session was cut from; "Merge" lands the work back here. */
+  baseBranch?: string;
+  /** Where the session's work went: merged back, opened as a PR, or why it couldn't. */
+  ship?: ShipState;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface ShipState {
+  state: "shipping" | "merged" | "pr" | "conflict" | "error";
+  how: "merge" | "pr";
+  /** Branch merged into, for merge. */
+  into?: string;
+  url?: string;
+  /** Files that conflicted when merging. */
+  files?: string[];
+  detail?: string;
+  at: number;
 }
 
 export interface SessionUsage {
@@ -160,6 +176,7 @@ export type Command =
   | { type: "session.setMode"; sessionId: string; mode: PermissionMode }
   | { type: "session.seen"; sessionId: string }
   | { type: "session.archive"; sessionId: string }
+  | { type: "session.ship"; sessionId: string; how: "merge" | "pr" }
   | { type: "main.start"; model?: string; agent?: AgentKind; prompt?: string }
   | { type: "sessions.import"; sinceDays?: number; limit?: number }
   | { type: "decision.answer"; decisionId: string; optionId: string | null };

@@ -452,6 +452,56 @@ function ModelPicker({ s, state, send }: { s: SessionInfo; state: State; send: S
   );
 }
 
+/* ───────────── Ship it: land a worktree session's work ───────────── */
+
+function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send }) {
+  if (!s.worktree || !s.branch) return null;
+  const sh = s.ship;
+  if (sh?.state === "merged")
+    return (
+      <section className="ship shipped">
+        <b>✓ Merged into {sh.into}</b>
+        <span>{sh.detail ?? "The worktree and branch were cleaned up."}</span>
+      </section>
+    );
+  if (sh?.state === "pr")
+    return (
+      <section className="ship shipped">
+        <b>✓ Pull request opened</b>
+        {sh.url && <a className="btn small" href={sh.url} target="_blank" rel="noopener">View on GitHub ↗</a>}
+      </section>
+    );
+  if (s.status === "working" || s.status === "needs_you" || (files === 0 && !sh)) return null;
+  const busy = sh?.state === "shipping";
+  const into = s.baseBranch ?? "your branch";
+  return (
+    <section className="ship">
+      <h3 className="eyebrow">Ship it</h3>
+      <div className="ship-row">
+        <button className="btn primary" disabled={busy} onClick={() => send({ type: "session.ship", sessionId: s.id, how: "merge" })}>
+          {busy && sh.how === "merge" ? "Merging…" : `Merge into ${into}`}
+        </button>
+        <button className="btn" disabled={busy} onClick={() => send({ type: "session.ship", sessionId: s.id, how: "pr" })}>
+          {busy && sh.how === "pr" ? "Opening PR…" : "Open PR"}
+        </button>
+      </div>
+      {sh?.state === "conflict" && (
+        <div className="ship-msg">
+          <b>Conflicts with {sh.into} in {sh.files?.length} file{sh.files?.length === 1 ? "" : "s"}.</b> Nothing was merged.
+          <ul>{sh.files?.map((f) => <li key={f}><code>{f}</code></li>)}</ul>
+          <button
+            className="btn small"
+            onClick={() => send({ type: "session.prompt", sessionId: s.id, prompt: `Merging into ${sh.into} conflicts in: ${sh.files?.join(", ")}. Rebase this branch onto ${sh.into}, resolve the conflicts, and run the checks again.` })}
+          >
+            Ask the agent to resolve
+          </button>
+        </div>
+      )}
+      {sh?.state === "error" && <p className="ship-msg">{sh.detail}</p>}
+    </section>
+  );
+}
+
 /* ───────────── Drawer: deep dive into one session ───────────── */
 
 function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; state: State; send: Send; onClose: () => void; onFile: (path: string) => void; onOpen: (id: string) => void }) {
@@ -478,18 +528,26 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
             {s.live === false && <> · asleep</>}
           </p>
         </div>
-        <button className="icon" onClick={onClose} aria-label="Close">✕</button>
+        <button className="icon bordered" onClick={onClose} aria-label="Close">✕</button>
       </div>
 
-      <div className="chips">
-        {s.branch && <code className="chip" title={s.cwd}>{s.worktree ? "⑂ " : ""}{s.branch}</code>}
-        <span className="chip" title={AGENTS[s.agent].experimental ? "Experimental: less tested than Claude Code" : undefined}>{AGENTS[s.agent].label}{AGENTS[s.agent].experimental ? " · experimental" : ""}</span>
-        <ModelPicker s={s} state={state} send={send} />
+      <div className="drawer-meta">
+        {s.branch && <code title={s.cwd}>{s.worktree ? "⑂ " : ""}{s.branch}</code>}
+        <span title={AGENTS[s.agent].experimental ? "Experimental: less tested than Claude Code" : undefined}>{AGENTS[s.agent].label}{AGENTS[s.agent].experimental ? " · experimental" : ""}</span>
         <Usage s={s} />
-        <select className="picker" aria-label="Permission mode" value={s.mode ?? "ask"} onChange={(e) => send({ type: "session.setMode", sessionId: s.id, mode: e.target.value as PermissionMode })}>
-          {(Object.keys(MODE_LABEL) as PermissionMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
-        </select>
-        {parent && <button className="chip link" onClick={() => onOpen(parent.id)}>via {parent.title}</button>}
+        {parent && <button className="text-link" onClick={() => onOpen(parent.id)}>from {parent.title} ›</button>}
+      </div>
+      <div className="drawer-controls">
+        <label className="control">
+          <span>Model</span>
+          <ModelPicker s={s} state={state} send={send} />
+        </label>
+        <label className="control">
+          <span>Permissions</span>
+          <select className="picker" aria-label="Permission mode" value={s.mode ?? "ask"} onChange={(e) => send({ type: "session.setMode", sessionId: s.id, mode: e.target.value as PermissionMode })}>
+            {(Object.keys(MODE_LABEL) as PermissionMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+          </select>
+        </label>
       </div>
 
       <div className="drawer-scroll">
@@ -497,6 +555,8 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
         {decisions.map((d) => (
           <DecisionCard key={d.id} d={d} session={s} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: d.id, optionId })} />
         ))}
+
+        <ShipBar s={s} files={files.length} send={send} />
 
         {outcome && (
           <section className={`outcome o-${outcome.status}`}>
@@ -510,8 +570,9 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
             {outcome.followups.length > 0 && (
               <div className="followups">
                 {outcome.followups.map((f, i) => (
-                  <button key={i} className="chip link" onClick={() => send({ type: "session.prompt", sessionId: s.id, prompt: f })} title="Send as a follow-up">
-                    ↳ {f}
+                  <button key={i} className="followup" onClick={() => send({ type: "session.prompt", sessionId: s.id, prompt: f })} title="Send to this session as the next task">
+                    <span>{f}</span>
+                    <span className="followup-go">Send →</span>
                   </button>
                 ))}
               </div>
@@ -549,7 +610,7 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
 
         {lastAgent && lastAgent.kind === "agent" && !showTranscript && <div className="msg agent small">{lastAgent.text}</div>}
 
-        <button className="btn ghost wide" onClick={() => setShowTranscript((v) => !v)}>
+        <button className="btn wide" onClick={() => setShowTranscript((v) => !v)}>
           {showTranscript ? "Hide transcript" : `Read full transcript (${transcript.length})`}
         </button>
         {showTranscript && (
@@ -631,7 +692,7 @@ function FileViewer({ session, path, onClose }: { session: string; path: string;
             <button className={tab === "file" ? "on" : ""} onClick={() => setTab("file")}>File</button>
           </div>
           <span className="tag">read-only</span>
-          <button className="icon" onClick={onClose} aria-label="Close">✕</button>
+          <button className="icon bordered" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="viewer-body">
           {err && <p className="quiet">{err}</p>}

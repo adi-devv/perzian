@@ -67,6 +67,16 @@ export function demoSend(cmd: Command, s: State, emit: Emit): void {
     emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { model: cmd.model } });
   } else if (cmd.type === "session.setMode") {
     emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { mode: cmd.mode } });
+  } else if (cmd.type === "session.ship") {
+    const { sessionId, how } = cmd;
+    emit({ type: "session.updated", sessionId, patch: { ship: { state: "shipping", how, at } } });
+    later(1200, () =>
+      emit({
+        type: "session.updated",
+        sessionId,
+        patch: { ship: how === "merge" ? { state: "merged", how, into: "main", at: Date.now() } : { state: "pr", how, url: "https://github.com/adi-devv/perzian/pulls", at: Date.now() } },
+      }),
+    );
   } else if (cmd.type === "session.archive") {
     emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { archived: true } });
   }
@@ -115,7 +125,7 @@ function leadRun(prompt: string, s: State, emit: Emit, auto = false) {
   later(900, () => {
     tr("main", { kind: "agent", text: `On it. One session in its own worktree for "${title}". I'll come back only if it needs your call.`, at: now() });
     const session: SessionInfo = {
-      id, role: "worker", parentId: "main", title, project, cwd: `~/.perzian/worktrees/${slug}`, branch: `perzian/${slug}`, worktree: true,
+      id, role: "worker", parentId: "main", title, project, cwd: `~/.perzian/worktrees/${slug}`, branch: `perzian/${slug}`, worktree: true, baseBranch: "main",
       agent: "claude-code", model: "claude-sonnet-5-5", mode: "ask", status: "working", live: true, createdAt: now(), updatedAt: now(),
     };
     emit({ type: "session.created", session });
