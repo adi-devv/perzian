@@ -245,7 +245,8 @@ export interface Proof {
 export interface Outcome {
   sessionId: string;
   intent: string;
-  status: "success" | "partial" | "failed";
+  // unverified: derived by the daemon with no observed check run, so it can't claim success (agents report the other three).
+  status: "success" | "partial" | "failed" | "unverified";
   changed: { path: string; kind: ChangeKind }[];
   proof: Proof[];
   risks: string[];
@@ -299,6 +300,7 @@ export interface CreateSessionArgs {
   agent?: AgentKind;
   model?: string;
   mode?: PermissionMode;
+  /** Own worktree and branch (the default in a repo); false works in the checkout directly. */
   worktree?: boolean;
   /** Extra folders the session may edit besides its own (absolute or ~/ paths). */
   extraDirs?: string[];
@@ -415,7 +417,7 @@ Split or keep together
 - One session for coupled work: a rename across callers, step B builds on step A, same file, shared types. When unsure, one session.
 
 Spawn well (spawn_session)
-- project: absolute repo path. worktree: true whenever two or more sessions touch the same repo; omit for a single session.
+- project: absolute repo path. Every session, even a one-line fix, gets its own worktree and branch by default so the developer can Merge or open a PR: omit worktree. worktree: false only when the developer asks to work directly on their branch.
 - prompt is the worker's whole world; it hasn't seen this chat. Write:
   Goal: the developer's request for this unit, restated completely, nothing dropped.
   Context: the relevant files and areas.

@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import type { Proof } from "@perzian/protocol";
-import { classifyCommand, mergeProofs, parseSummary, ProofTracker, type ToolUpdateLike } from "../src/proof.ts";
+import { classifyCommand, derivedStatus, mergeProofs, parseSummary, ProofTracker, type ToolUpdateLike } from "../src/proof.ts";
 
 // Fixtures follow what claude-agent-acp 0.89 actually sent in a live run (client without terminal_output).
 const bashCall = (id: string): ToolUpdateLike => ({
@@ -398,6 +398,21 @@ describe("ProofTracker", () => {
     assert.deepEqual(tr.proofs(), []);
     tr.onToolUpdate(bashCompleted("t2", ""));
     assert.deepEqual(tr.proofs().map((p) => p.label), ["npm run lint"]);
+  });
+});
+
+describe("derivedStatus", () => {
+  const p = (passed: boolean, observed?: boolean): Proof => ({ kind: "tests", label: "npm test", passed, ...(observed ? { observed } : {}) });
+
+  test("no observed check is never success, even with the agent's own claims", () => {
+    assert.equal(derivedStatus([]), "unverified");
+    assert.equal(derivedStatus([p(true)]), "unverified");
+  });
+
+  test("success needs every observed check to pass; any failure is partial", () => {
+    assert.equal(derivedStatus([p(true, true)]), "success");
+    assert.equal(derivedStatus([p(true, true), p(true)]), "success");
+    assert.equal(derivedStatus([p(true, true), p(false, true)]), "partial");
   });
 });
 

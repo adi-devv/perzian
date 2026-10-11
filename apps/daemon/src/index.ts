@@ -164,7 +164,7 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   if (!existsSync(project) || !statSync(project).isDirectory()) throw new Error(`Project folder not found: ${project}`);
   const id = crypto.randomUUID();
   const title = args.title?.trim() || args.prompt.split("\n")[0].slice(0, 48) || basename(project);
-  const ws = await prepareWorkspace(project, home, title, id, !!args.worktree);
+  const ws = await prepareWorkspace(project, home, title, id, args.worktree);
   // perzian.json from the worktree (committed), else the checkout (not committed yet). Read once, here.
   const declared = loadDeclaredChecks(ws.cwd, project);
   const checks = allChecks(detectChecks(ws.cwd), declared.checks);
@@ -172,7 +172,7 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
     { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode ?? store.state().settings.defaultMode, ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, checksError: declared.error, ...extra },
     deps,
   );
-  if (args.worktree && !ws.worktree) s.notice("This folder isn't a git repo, so the session works in it directly (no worktree)");
+  if (args.worktree !== false && !ws.worktree) s.notice("This folder isn't a git repo, so the session works in it directly (no worktree)");
   if (declared.error) s.notice(`${declared.error}. Declared checks won't run until it's fixed.`);
   notifier.childPrompted(s.info.id, !!extra.parentId);
   sessions.set(s.info.id, s);
