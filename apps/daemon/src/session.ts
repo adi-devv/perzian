@@ -20,6 +20,7 @@ import { symbolChanges } from "./symbols.ts";
 import { ProofTracker, mergeProofs } from "./proof.ts";
 import { existsSync } from "node:fs";
 import { adapterEntry, agentEnv } from "./agents.ts";
+import type { Credentials } from "./credentials.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const reportMcpEntry = join(here, "../../../packages/report-mcp/src/index.ts");
@@ -59,6 +60,8 @@ export interface SessionDeps {
   store: EventStore;
   daemonUrl: string;
   decisions: Map<string, PendingDecision>;
+  /** API keys chosen over a subscription login; absent in tests. */
+  creds?: Credentials;
 }
 
 // One agent session = one adapter process + one ACP connection. Can be dormant (restored from the log)
@@ -167,7 +170,7 @@ export class AgentSession {
     // The user's installed agent CLI when there is one, else the binary bundled with the adapter.
     const agent = agentEnv(this.info.agent);
     console.log(`[${this.info.id.slice(0, 6)}] ${this.info.agent} executable (${agent.resolved.source}): ${agent.resolved.path}`);
-    const env: NodeJS.ProcessEnv = { ...process.env, ...agent.env };
+    const env: NodeJS.ProcessEnv = { ...process.env, ...agent.env, ...this.deps.creds?.envFor(this.info.agent) };
     if (this.info.agent === "claude-code" && this.info.model) env.ANTHROPIC_MODEL = this.info.model;
     const proc = spawn(process.execPath, [adapterEntry(this.info.agent)], { cwd: this.info.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     this.proc = proc;

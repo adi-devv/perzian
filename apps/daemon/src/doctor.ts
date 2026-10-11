@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { AgentCheck, AgentKind, DoctorReport, ProjectCheck } from "@perzian/protocol";
 import { adapterEntry, detectAgents, type AgentAvailability } from "./agents.ts";
+import type { Credentials } from "./credentials.ts";
 
 const home = homedir();
 
@@ -28,6 +29,12 @@ const hasAdapter = (kind: AgentKind) => {
   }
 };
 
+/** The official installer for each agent CLI; shown in onboarding and run by POST /api/install. */
+export function installCommand(kind: AgentKind): string {
+  if (kind === "codex") return "npm install -g @openai/codex";
+  return process.platform === "win32" ? "npm install -g @anthropic-ai/claude-code" : "curl -fsSL https://claude.ai/install.sh | bash";
+}
+
 function check(kind: AgentKind, a: AgentAvailability): AgentCheck {
   const claude = kind === "claude-code";
   return {
@@ -39,15 +46,13 @@ function check(kind: AgentKind, a: AgentAvailability): AgentCheck {
     path: a.path,
     signedIn: null,
     adapter: hasAdapter(kind),
-    installCommand: claude
-      ? process.platform === "win32" ? "npm install -g @anthropic-ai/claude-code" : "curl -fsSL https://claude.ai/install.sh | bash"
-      : "npm install -g @openai/codex",
+    installCommand: installCommand(kind),
     signInCommand: claude ? "claude auth login" : "codex login",
   };
 }
 
-async function claudeAuth(c: AgentCheck): Promise<AgentCheck> {
-  if (process.env.ANTHROPIC_API_KEY) return { ...c, signedIn: true, authMethod: "API key" };
+async function claudeAuth(c: AgentCheck, creds?: Credentials): Promise<AgentCheck> {
+  if (creds?.has("anthropic") || process.env.ANTHROPIC_API_KEY) return { ...c, signedIn: true, authMethod: "API key" };
   if (!c.installed || !c.path) return c;
   const auth = await run(c.path, ["auth", "status", "--json"]);
   try {
@@ -64,8 +69,8 @@ async function claudeAuth(c: AgentCheck): Promise<AgentCheck> {
   }
 }
 
-function codexAuth(c: AgentCheck): AgentCheck {
-  if (process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY) return { ...c, signedIn: true, authMethod: "API key" };
+function codexAuth(c: AgentCheck, creds?: Credentials): AgentCheck {
+  if (creds?.has("openai") || process.env.OPENAI_API_KEY || process.env.CODEX_API_KEY) return { ...c, signedIn: true, authMethod: "API key" };
   if (existsSync(join(process.env.CODEX_HOME ?? join(home, ".codex"), "auth.json"))) return { ...c, signedIn: true };
   return c.installed ? { ...c, signedIn: false } : c;
 }
@@ -84,10 +89,13 @@ export async function checkProject(input: string): Promise<ProjectCheck> {
 let cached: { at: number; value: Promise<Omit<DoctorReport, "project" | "home" | "at">> } | undefined;
 const TTL = 15_000;
 
-export async function doctor(perzianHome: string, opts: { project?: string; fresh?: boolean } = {}): Promise<DoctorReport> {
+/** Drop cached probes, e.g. after an API key changes or an agent was installed. */
+export const resetDoctorCache = () => (cached = undefined);
+
+export async function doctor(perzianHome: string, opts: { project?: string; fresh?: boolean; creds?: Credentials } = {}): Promise<DoctorReport> {
   if (!cached || opts.fresh || Date.now() - cached.at > TTL) {
     const value = Promise.all([
-      detectAgents().then((m) => Promise.all([claudeAuth(check("claude-code", m["claude-code"])), codexAuth(check("codex", m.codex))])),
+      detectAgents().then((m) => Promise.all([claudeAuth(check("claude-code", m["claude-code"]), opts.creds), codexAuth(check("codex", m.codex), opts.creds)])),
       run("git", ["--version"]),
     ]).then(([agents, g]) => ({
       agents,

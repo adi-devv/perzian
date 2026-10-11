@@ -1,7 +1,7 @@
 // Packages Perzian as an unsigned (ad-hoc signed) macOS arm64 app:
 //   slim (default, `npm run dist`): release/Perzian-darwin-arm64/Perzian.app and
 //     release/Perzian-<version>-mac-arm64.zip; runs the installed `claude` / `codex` CLIs
-//   --full (`npm run dist:full`): release/full/..., Perzian-<version>-mac-arm64-full.zip; also bundles
+//   --full (unadvertised; e.g. offline installs): release/full/..., Perzian-<version>-mac-arm64-full.zip; also bundles
 //     the native agent CLIs, so it runs with nothing installed (~4x larger)
 // Steps: bundle daemon/report-mcp/web (scripts/build-bundle.mjs), render the icon to .icns,
 // stage the Electron shell, run @electron/packager offline from the local Electron zip cache,

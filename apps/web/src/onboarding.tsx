@@ -1,6 +1,6 @@
 import { useState } from "react";
-import type { AgentCheck, DoctorReport } from "@perzian/protocol";
-import { DAEMON_ADDR, isDesktop } from "./daemon.ts";
+import type { AgentCheck, ApiKeyProvider, CredentialStatus, DoctorReport } from "@perzian/protocol";
+import { DAEMON_ADDR, installAgent, isDesktop, useCredentials, useDoctor } from "./daemon.ts";
 
 /* ───────────── Project folder memory (shared with New session) ───────────── */
 
@@ -71,8 +71,11 @@ interface Doctor {
   recheck: () => void;
 }
 
+type Creds = ReturnType<typeof useCredentials>;
+
 export function Onboarding({ doctor, project, setProject, onStart }: { doctor: Doctor; project: string; setProject: (p: string) => void; onStart: (prompt: string) => void }) {
   const { report, loading, failed, recheck } = doctor;
+  const creds = useCredentials(true);
   const claude = report?.agents.find((a) => a.kind === "claude-code");
   const proj = report?.project && report.project.input === project.trim() ? report.project : undefined;
   const again = (
@@ -100,17 +103,11 @@ export function Onboarding({ doctor, project, setProject, onStart }: { doctor: D
   } else if (claude) {
     installMark = "bad";
     installMeta = "Not found";
-    installFix = (
-      <div className="step-fix">
-        <p>Install it in a terminal, then check again.</p>
-        <CopyCmd cmd={claude.installCommand} />
-        {again}
-      </div>
-    );
+    installFix = <InstallFix agent={claude} onDone={recheck} again={again} />;
   }
 
   // 2 · signed in
-  const sign = signInStep(claude, again);
+  const sign = signInStep(claude, again, creds, recheck);
 
   // 3 · project
   let projMark: Mark = "todo";
@@ -179,9 +176,11 @@ export function Onboarding({ doctor, project, setProject, onStart }: { doctor: D
   );
 }
 
-function signInStep(claude: AgentCheck | undefined, again: React.ReactNode): { mark: Mark; meta?: string; fix?: React.ReactNode } {
+function signInStep(claude: AgentCheck | undefined, again: React.ReactNode, creds: Creds, recheck: () => void): { mark: Mark; meta?: string; fix?: React.ReactNode } {
   if (!claude) return { mark: "wait" };
   if (!claude.installed) return { mark: "todo" };
+  const key = creds.list?.find((c) => c.provider === "anthropic");
+  if (key?.set) return { mark: "ok", meta: `API key ···${key.last4}`, fix: <ApiKeyField provider="anthropic" status={key} creds={creds} onChange={recheck} /> };
   if (claude.signedIn === true) return { mark: "ok", meta: claude.authMethod };
   if (claude.signedIn === null) return { mark: "unknown", meta: "Couldn't tell. Claude Code will ask if needed." };
   return {
@@ -189,19 +188,127 @@ function signInStep(claude: AgentCheck | undefined, again: React.ReactNode): { m
     meta: "Not signed in",
     fix: (
       <div className="step-fix">
-        {claude.source === "bundled" ? (
-          <>
-            <p>Signing in needs the Claude Code CLI. Install it, sign in once, then check again.</p>
-            <CopyCmd cmd={claude.installCommand} />
-          </>
-        ) : (
-          <p>Sign in once in a terminal, then check again.</p>
-        )}
+        <p>With your Claude plan: sign in once in a terminal, then check again.</p>
         <CopyCmd cmd={claude.signInCommand} />
         {again}
+        <p className="or">Or use an Anthropic API key, billed per token to your API account.</p>
+        <ApiKeyField provider="anthropic" status={key} creds={creds} onChange={recheck} />
       </div>
     ),
   };
+}
+
+/* ───────────── Install + API keys ───────────── */
+
+function InstallFix({ agent, onDone, again }: { agent: AgentCheck; onDone: () => void; again: React.ReactNode }) {
+  const [state, setState] = useState<"idle" | "running" | "failed">("idle");
+  const [output, setOutput] = useState("");
+  return (
+    <div className="step-fix">
+      <div className="row-btns">
+        <button
+          type="button"
+          className="btn small primary"
+          disabled={state === "running"}
+          onClick={async () => {
+            setState("running");
+            const r = await installAgent(agent.kind).catch((e: Error) => ({ ok: false, output: e.message }));
+            setOutput(r.output);
+            setState(r.ok ? "idle" : "failed");
+            onDone();
+          }}
+        >
+          {state === "running" ? "Installing…" : `Install ${agent.label}`}
+        </button>
+        {again}
+      </div>
+      {state === "failed" && <pre className="install-out">{output || "The installer failed."}</pre>}
+      <p className="step-note">Runs the official installer. Or run it yourself:</p>
+      <CopyCmd cmd={agent.installCommand} />
+    </div>
+  );
+}
+
+const KEY_LABEL: Record<ApiKeyProvider, string> = { anthropic: "Anthropic", openai: "OpenAI" };
+
+export function ApiKeyField({ provider, status, creds, onChange }: { provider: ApiKeyProvider; status?: CredentialStatus; creds: Creds; onChange?: () => void }) {
+  const [key, setKey] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  if (status?.set)
+    return (
+      <div className="key-set">
+        <code>
+          {KEY_LABEL[provider]} key ···{status.last4}
+        </code>
+        <button type="button" className="link-btn" onClick={() => creds.remove(provider).then(onChange)}>
+          Remove
+        </button>
+      </div>
+    );
+  return (
+    <form
+      className="key-form"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        const msg = await creds.save(provider, key);
+        setBusy(false);
+        setErr(msg);
+        if (!msg) {
+          setKey("");
+          onChange?.();
+        }
+      }}
+    >
+      <input
+        type="password"
+        className="step-input"
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+        placeholder={provider === "anthropic" ? "sk-ant-…" : "sk-…"}
+        autoComplete="off"
+        spellCheck={false}
+        aria-label={`${KEY_LABEL[provider]} API key`}
+      />
+      <button type="submit" className="btn small" disabled={!key.trim() || busy}>
+        {busy ? "Saving…" : "Save"}
+      </button>
+      {err && <p className="step-note bad">{err}</p>}
+    </form>
+  );
+}
+
+const AGENT_KEY: Record<AgentCheck["kind"], ApiKeyProvider> = { "claude-code": "anthropic", codex: "openai" };
+
+/** Accounts & keys, reachable any time from the sidebar. */
+export function Accounts({ onClose }: { onClose: () => void }) {
+  const doctor = useDoctor("", true);
+  const creds = useCredentials(true);
+  return (
+    <div className="modal" onClick={onClose}>
+      <div className="accounts" role="dialog" aria-label="Accounts and API keys" onClick={(e) => e.stopPropagation()}>
+        <h2>Accounts</h2>
+        <p className="onboard-sub">Agents use your subscription sign-in. Add an API key to use it instead. Keys stay on this machine (in the Keychain on macOS) and only go to that agent.</p>
+        {(doctor.report?.agents ?? []).map((a) => {
+          const provider = AGENT_KEY[a.kind];
+          const status = creds.list?.find((c) => c.provider === provider);
+          const how = !a.installed ? "Not installed" : status?.set ? "Using API key" : a.signedIn ? `Signed in${a.authMethod ? ` · ${a.authMethod}` : ""}` : a.signedIn === false ? "Not signed in" : "Sign-in unknown";
+          return (
+            <section key={a.kind} className="account">
+              <div className="step-line">
+                <span className="step-label">{a.label}</span>
+                <span className="step-meta">{[a.version && `v${a.version}`, how].filter(Boolean).join(" · ")}</span>
+              </div>
+              {!a.installed && <InstallFix agent={a} onDone={doctor.recheck} again={null} />}
+              <ApiKeyField provider={provider} status={status} creds={creds} onChange={doctor.recheck} />
+            </section>
+          );
+        })}
+        {!doctor.report && <p className="quiet">{doctor.failed ? "Couldn't reach the daemon." : "Checking…"}</p>}
+      </div>
+    </div>
+  );
 }
 
 /* ───────────── Daemon offline ───────────── */

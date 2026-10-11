@@ -32,12 +32,13 @@ npm test           # unit tests
 - Daemon: http://127.0.0.1:4317
 - State lives in `$PERZIAN_HOME` (default `~/.perzian`): event log, worktrees, main-agent folder.
 
-Claude Code sessions need the usual Claude Code authentication on your machine.
+Agents sign in the usual way (`claude auth login`, `codex login`), or add an Anthropic / OpenAI API key under
+**Accounts & API keys**; keys are kept in the macOS Keychain and passed only to that agent's CLI.
 
 Perzian runs the agent CLIs you already have: `claude` (Claude Code) and `codex` (Codex CLI), found on your PATH,
 or set `CLAUDE_CODE_EXECUTABLE` / `CODEX_PATH`. In a source checkout it falls back to the binaries npm installed.
-`npm run dist` builds the slim macOS app (~325 MB), which needs those CLIs installed;
-`npm run dist:full` builds a self-contained app (~900 MB) that bundles them.
+`npm run dist` builds the macOS app (~116 MB download). It doesn't bundle the agent CLIs: if one is missing,
+onboarding installs it with the official installer in one click.
 
 ## How it works
 

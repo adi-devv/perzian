@@ -9,7 +9,10 @@ import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps 
 import * as git from "./git.ts";
 import { listClaudeSessions, toEvents } from "./importer.ts";
 import { mergeProofs } from "./proof.ts";
-import { doctor, doctorHeaders } from "./doctor.ts";
+import { doctor, doctorHeaders, installCommand, resetDoctorCache } from "./doctor.ts";
+import { Credentials, PROVIDERS } from "./credentials.ts";
+import { exec } from "node:child_process";
+import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
 
 const port = Number(process.env.PERZIAN_PORT ?? DAEMON_PORT);
 const home = resolve(process.env.PERZIAN_HOME ?? join(homedir(), ".perzian"));
@@ -22,7 +25,27 @@ const store = new EventStore(home);
 }
 const sessions = new Map<string, AgentSession>();
 const decisions = new Map<string, PendingDecision>();
-const deps: SessionDeps = { store, daemonUrl, decisions };
+const creds = new Credentials(home);
+await creds.load();
+const deps: SessionDeps = { store, daemonUrl, decisions, creds };
+
+// Browsers let any website send requests to 127.0.0.1. Only the desktop app (file://, origin "null") and
+// localhost pages may drive the daemon; non-browser clients (agents, scripts) send no Origin.
+const trustedOrigin = (origin: string | undefined) => !origin || origin === "null" || origin === "file://" || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+
+let installing: Promise<InstallResult> | undefined;
+function runInstaller(agent: AgentKind): Promise<InstallResult> {
+  installing ??= new Promise<InstallResult>((done) => {
+    exec(installCommand(agent), { timeout: 10 * 60_000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, CI: "1" } }, (err, stdout, stderr) => {
+      const output = `${stdout}${stderr}`.split("\n").filter((l) => l.trim()).slice(-12).join("\n");
+      done({ ok: !err, output });
+    });
+  }).finally(() => {
+    installing = undefined;
+    resetDoctorCache();
+  });
+  return installing;
+}
 
 // Restore sessions from the log as dormant; anything that was mid-flight (the daemon was stopped or
 // crashed during a turn) is now idle, with no open decisions and no tool calls left spinning.
@@ -202,14 +225,44 @@ async function readBody(req: import("node:http").IncomingMessage): Promise<strin
 
 const http = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", daemonUrl);
+  const origin = req.headers.origin;
+  if (!trustedOrigin(origin)) {
+    res.writeHead(403, { "content-type": "text/plain" }).end("forbidden origin");
+    return;
+  }
+  const json = (status: number, body: unknown) => res.writeHead(status, doctorHeaders(origin)).end(JSON.stringify(body));
   try {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, { ...doctorHeaders(origin), "access-control-allow-methods": "GET, POST, DELETE", "access-control-allow-headers": "content-type" }).end();
+      return;
+    }
+    if (url.pathname === "/api/credentials") {
+      if (req.method === "POST") {
+        const { provider, key } = JSON.parse(await readBody(req)) as { provider: ApiKeyProvider; key: string };
+        await creds.set(provider, String(key ?? ""));
+        resetDoctorCache();
+      } else if (req.method === "DELETE") {
+        const provider = url.searchParams.get("provider") as ApiKeyProvider;
+        if (!PROVIDERS.includes(provider)) throw new Error("Unknown provider");
+        await creds.remove(provider);
+        resetDoctorCache();
+      }
+      json(200, creds.status());
+      return;
+    }
+    if (url.pathname === "/api/install" && req.method === "POST") {
+      const { agent } = JSON.parse(await readBody(req)) as { agent: AgentKind };
+      if (agent !== "claude-code" && agent !== "codex") throw new Error("Unknown agent");
+      json(200, await runInstaller(agent));
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/report") {
       const out = await handleReport(JSON.parse(await readBody(req)));
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(out));
       return;
     }
     if (url.pathname === "/api/doctor") {
-      const report = await doctor(home, { project: url.searchParams.get("project") ?? undefined, fresh: url.searchParams.has("fresh") });
+      const report = await doctor(home, { project: url.searchParams.get("project") ?? undefined, fresh: url.searchParams.has("fresh"), creds });
       res.writeHead(200, doctorHeaders(req.headers.origin)).end(JSON.stringify(report));
       return;
     }
@@ -223,11 +276,11 @@ const http = createServer(async (req, res) => {
     }
     res.writeHead(200, { "content-type": "text/plain" }).end("perzian daemon");
   } catch (e) {
-    res.writeHead(400, { "content-type": "text/plain" }).end(String((e as Error).message ?? e));
+    res.writeHead(400, { "content-type": "text/plain", ...(origin && trustedOrigin(origin) ? { "access-control-allow-origin": origin } : {}) }).end(String((e as Error).message ?? e));
   }
 });
 
-const wss = new WebSocketServer({ server: http, path: "/ws" });
+const wss = new WebSocketServer({ server: http, path: "/ws", verifyClient: ({ origin }: { origin?: string }) => trustedOrigin(origin) });
 const send = (ws: WebSocket, msg: ServerMessage) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
 
 wss.on("connection", (ws) => {

@@ -16,7 +16,6 @@
     "test": "tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts",
     "bundle": "node scripts/build-bundle.mjs",
     "dist": "node scripts/build-app.mjs",
-    "dist:full": "node scripts/build-app.mjs --full",
     "site": "node scripts/build-site.mjs"
   },
   "engines": {

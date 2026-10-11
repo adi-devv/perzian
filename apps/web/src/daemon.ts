@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { emptyState, fold, reduce, type Command, type DoctorReport, type PerzianEvent, type ServerMessage, type State } from "@perzian/protocol";
+import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type Command, type CredentialStatus, type DoctorReport, type InstallResult, type PerzianEvent, type ServerMessage, type State } from "@perzian/protocol";
 import { demoEvents } from "./demo.ts";
 
 // In the desktop app (file://) talk to the daemon directly; in dev go through the Vite proxy.
@@ -126,6 +126,31 @@ export function useDoctor(project: string, enabled: boolean) {
     setNonce((n) => n + 1);
   };
   return { report, loading, failed, recheck };
+}
+
+// API keys live on the daemon (Keychain); the UI only ever sees whether one is set and its last 4 chars.
+export function useCredentials(enabled: boolean) {
+  const [list, setList] = useState<CredentialStatus[] | null>(null);
+  const call = async (method: string, query = "", body?: unknown) => {
+    const res = await fetch(`${API_BASE}/api/credentials${query}`, { method, ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}) });
+    if (!res.ok) throw new Error(await res.text());
+    setList((await res.json()) as CredentialStatus[]);
+  };
+  useEffect(() => {
+    if (enabled && !isDemo) call("GET").catch(() => {});
+  }, [enabled]);
+  return {
+    list,
+    /** Resolves to an error message, or null when saved. */
+    save: (provider: ApiKeyProvider, key: string) => call("POST", "", { provider, key }).then(() => null, (e: Error) => e.message),
+    remove: (provider: ApiKeyProvider) => call("DELETE", `?provider=${provider}`).catch(() => {}),
+  };
+}
+
+export async function installAgent(agent: AgentKind): Promise<InstallResult> {
+  const res = await fetch(`${API_BASE}/api/install`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent }) });
+  if (!res.ok) return { ok: false, output: await res.text() };
+  return (await res.json()) as InstallResult;
 }
 
 export async function fetchText(kind: "diff" | "file", session: string, path: string): Promise<string> {

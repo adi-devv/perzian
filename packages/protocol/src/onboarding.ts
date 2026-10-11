@@ -42,3 +42,23 @@ export interface DoctorReport {
   project?: ProjectCheck;
   at: number;
 }
+
+// API keys: GET /api/credentials -> CredentialStatus[]; POST /api/credentials {provider, key};
+// DELETE /api/credentials?provider=. A set key is passed to that agent's CLI instead of its subscription login.
+export type ApiKeyProvider = "anthropic" | "openai";
+
+export interface CredentialStatus {
+  provider: ApiKeyProvider;
+  /** The agent this key is used for. */
+  agent: AgentKind;
+  set: boolean;
+  /** Last four characters, to recognise the key. The key itself never leaves the daemon. */
+  last4?: string;
+}
+
+// POST /api/install {agent}: runs that agent's official installer.
+export interface InstallResult {
+  ok: boolean;
+  /** Last lines of the installer's output. */
+  output: string;
+}

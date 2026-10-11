@@ -12,7 +12,7 @@ import {
   type TranscriptItem,
 } from "@perzian/protocol";
 import { fetchText, isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
-import { DaemonOffline, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, saveProject, withProject } from "./onboarding.tsx";
+import { Accounts, DaemonOffline, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, saveProject, withProject } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import type { ThemedToken } from "shiki/core";
 import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, ago, churn, useTick } from "./bits.tsx";
@@ -25,6 +25,7 @@ export function App() {
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<{ session: string; path: string } | null>(null);
   const [help, setHelp] = useState(false);
+  const [accounts, setAccounts] = useState(false);
   const [project, setProject] = useState(loadProject);
   useTick();
 
@@ -91,7 +92,7 @@ export function App() {
 
   return (
     <div className={`app ${sel ? "with-drawer" : ""}`}>
-      <Sidebar state={state} main={main} workers={workers} selected={selected} onSelect={open} onNew={() => setCreating(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} connected={connected} />
+      <Sidebar state={state} main={main} workers={workers} selected={selected} onSelect={open} onNew={() => setCreating(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} onAccounts={() => setAccounts(true)} connected={connected} />
 
       <Thread
         state={state}
@@ -109,6 +110,7 @@ export function App() {
       {creating && <NewSession onClose={() => setCreating(false)} onCreate={(cmd) => { send(cmd); setCreating(false); }} />}
       {viewing && <FileViewer {...viewing} onClose={() => setViewing(null)} />}
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}
+      {accounts && <Accounts onClose={() => setAccounts(false)} />}
       {error && <Toast message={error} onClose={clearError} />}
     </div>
   );
@@ -145,7 +147,7 @@ function retryTarget(items: TranscriptItem[], status: SessionInfo["status"]): { 
 
 /* ───────────── Sidebar: every session at a glance ───────────── */
 
-function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, onHelp, connected }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; onHelp: () => void; connected: boolean }) {
+function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, onHelp, onAccounts, connected }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void; connected: boolean }) {
   const counts = { needs_you: 0, working: 0, failed: 0, done: 0, idle: 0 };
   for (const s of workers) counts[s.status]++;
   const groups = new Map<string, SessionInfo[]>();
@@ -202,6 +204,11 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
         <button className="link-btn" onClick={onImport} title="Show your recent Claude Code sessions here; open one to continue it">
           Import recent Claude Code sessions
         </button>
+        {!isDemo && (
+          <button className="link-btn" onClick={onAccounts}>
+            Accounts &amp; API keys
+          </button>
+        )}
         <button className="link-btn" onClick={onHelp}>
           Keyboard shortcuts <kbd>?</kbd>
         </button>
