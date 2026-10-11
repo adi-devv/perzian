@@ -103,8 +103,16 @@ const GLYPH = { added: "+", modified: "~", deleted: "−", renamed: "→" } as c
 
 // Change map: files grouped by directory; each row shows a magnitude bar and, when known,
 // the functions/classes that changed. Click a row for the read-only diff.
-export function ChangeMap({ files, onOpen }: { files: FileChange[]; onOpen: (path: string) => void }) {
-  if (!files.length) return <p className="quiet">No file changes yet.</p>;
+const NO_CHANGES: Record<SessionStatus, string> = {
+  working: "No file changes yet. Edits show up here as they happen.",
+  needs_you: "No file changes yet.",
+  done: "Finished without changing files.",
+  failed: "No files changed before it stopped.",
+  idle: "No file changes yet.",
+};
+
+export function ChangeMap({ files, onOpen, status }: { files: FileChange[]; onOpen: (path: string) => void; status?: SessionStatus }) {
+  if (!files.length) return <p className="quiet">{NO_CHANGES[status ?? "idle"]}</p>;
   const groups = new Map<string, FileChange[]>();
   for (const f of files) {
     const i = f.path.lastIndexOf("/");

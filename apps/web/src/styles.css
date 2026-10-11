@@ -178,6 +178,66 @@ em.a { color: var(--add); font-style: normal; font-family: var(--mono); font-siz
 .welcome ul { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 8px; font-size: 13px; color: var(--fg-2); }
 .welcome li { display: flex; align-items: center; gap: 10px; }
 
+/* first run: three checks, a folder, three example tasks. Color only in the check marks. */
+.onboard { margin: 9vh auto 0; max-width: 460px !important; display: flex; flex-direction: column; gap: 12px; }
+.onboard h2 { margin: 10px 0 0; font-size: 22px; font-weight: 600; letter-spacing: -0.025em; text-wrap: balance; }
+.onboard-sub { margin: 0; color: var(--fg-2); text-wrap: pretty; }
+.steps { list-style: none; padding: 0; margin: 14px 0 0; display: flex; flex-direction: column; border-top: 1px solid var(--line-soft); }
+.step { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.step-mark { width: 16px; height: 16px; flex: none; margin-top: 2px; display: grid; place-items: center; font-size: 11px; line-height: 1; border-radius: 50%; color: var(--fg-3); }
+.m-ok .step-mark { color: var(--done); font-size: 13px; }
+.m-bad .step-mark { color: var(--failed); }
+.m-todo .step-mark { border: 1.5px solid var(--line); width: 13px; height: 13px; margin: 3.5px 1.5px 0; }
+.m-wait .step-mark::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--fg-3); animation: breathe 1.4s ease-in-out infinite; }
+.step-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.step-line { display: flex; align-items: baseline; gap: 10px; min-height: 20px; }
+.step-label { font-size: 14px; color: var(--fg); }
+.m-todo .step-label { color: var(--fg-2); }
+.step-meta { margin-left: auto; font-size: 12px; color: var(--fg-3); text-align: right; font-variant-numeric: tabular-nums; }
+.m-bad .step-meta { color: var(--fg-2); }
+.step-fix { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.step-fix p, .step-note { margin: 0; font-size: 12px; color: var(--fg-2); }
+.step-note { color: var(--fg-3); }
+.step-input { background: var(--surface); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; width: 100%; font: 13px var(--mono); color: var(--fg); }
+.step-input:focus { outline: none; border-color: var(--fg-3); }
+.step-input::placeholder { color: var(--fg-3); }
+.cmd { display: flex; align-items: center; gap: 8px; width: 100%; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 7px; padding: 6px 6px 6px 10px; }
+.cmd code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; color: var(--fg); }
+.cmd code::before { content: "$ "; color: var(--fg-3); }
+.cmd-copy { border: 0; background: transparent; color: var(--fg-3); font-size: 11px; padding: 2px 6px; border-radius: 5px; }
+.cmd-copy:hover { background: var(--hover); color: var(--fg); }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.examples { display: flex; flex-direction: column; margin-top: 12px; }
+.examples .eyebrow { margin-bottom: 4px; }
+.example { display: flex; align-items: center; gap: 10px; border: 0; background: transparent; text-align: left; padding: 8px 10px; margin: 0 -10px; border-radius: 7px; font-size: 14px; color: var(--fg); transition: background 0.12s; }
+.example:hover:not(:disabled) { background: var(--hover); }
+.example:disabled { color: var(--fg-3); cursor: default; }
+.example-go { margin-left: auto; color: var(--fg-3); }
+.example:hover:not(:disabled) .example-go { color: var(--fg); }
+.onboard-foot { margin: 18px 0 0; font-size: 11px; color: var(--fg-3); overflow-wrap: anywhere; }
+.onboard-foot code { font-size: 11px; }
+.offline-mark { width: 9px; height: 9px; border-radius: 50%; background: var(--failed); }
+.reconnect { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-size: 12px; color: var(--fg-3); }
+.banner { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-2); padding: 0 0 10px; border-bottom: 1px solid var(--line-soft); }
+.banner code { font-size: 11px; }
+
+/* a failed turn: one line of why, one line of what to do, Retry */
+.failure { display: flex; flex-direction: column; gap: 3px; padding: 10px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.failure-line { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; }
+.failure-line b { font-weight: 500; flex: none; }
+.failure-reason { flex: 1; min-width: 0; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.failure-line .btn { flex: none; }
+.failure-fix { margin: 0; padding-left: 17px; font-size: 12px; color: var(--fg-3); }
+
+/* keyboard help */
+.keys { width: min(320px, 100%); background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.3); }
+.keys h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; }
+.keys dl { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.keys dl > div { display: flex; align-items: center; gap: 12px; font-size: 13px; color: var(--fg-2); }
+.keys dt { width: 44px; flex: none; }
+.keys dd { margin: 0; }
+.keys kbd { font-size: 11px; color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
+
 .dock { padding: 0 32px 20px; display: flex; flex-direction: column; gap: 10px; }
 .dock > * { width: 100%; max-width: 720px; margin-inline: auto; }
 .needs { max-height: 38vh; overflow-y: auto; }
@@ -295,6 +355,7 @@ code.chip { font-size: 11px; }
 .ln.del { background: color-mix(in srgb, var(--del) 9%, transparent); }
 .ln.hunk, .ln.meta { color: var(--fg-3); }
 
+.toast-fix { opacity: 0.7; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; z-index: 20; max-width: min(600px, 90vw); }
 
 @media (max-width: 1100px) {

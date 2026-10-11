@@ -11,7 +11,8 @@ import {
   type State,
   type TranscriptItem,
 } from "@perzian/protocol";
-import { fetchText, isDemo, useDaemon } from "./daemon.ts";
+import { fetchText, isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
+import { DaemonOffline, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, saveProject, withProject } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import type { ThemedToken } from "shiki/core";
 import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, ago, churn, useTick } from "./bits.tsx";
@@ -19,14 +20,35 @@ import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, Stat
 type Send = (c: Command) => void;
 
 export function App() {
-  const { state, send, connected, error, clearError } = useDaemon();
+  const { state, send, link, connected, error, clearError } = useDaemon();
   const [selected, setSelected] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<{ session: string; path: string } | null>(null);
+  const [help, setHelp] = useState(false);
+  const [project, setProject] = useState(loadProject);
   useTick();
 
   const all = Object.values(state.sessions).filter((s) => !s.archived);
   const main = all.find((s) => s.role === "main");
+  // First run: connected, nothing started yet. The demo always has sessions, so it never lands here.
+  const firstRun = !isDemo && link === "online" && all.length === 0;
+  const doctor = useDoctor(project, firstRun);
+  const checked = doctor.report?.project;
+  const projectPath = checked?.exists && checked.input === project.trim() ? checked.path : undefined;
+  // Remember a folder once the daemon confirms it exists, so a reload keeps it.
+  useEffect(() => {
+    if (projectPath) saveProject(project.trim());
+  }, [projectPath]);
+  const startLead = (prompt: string) => {
+    send({ type: "main.start", prompt: firstRun && projectPath ? withProject(prompt, projectPath) : prompt });
+  };
+
+  // Errors fade on their own; clicking dismisses sooner.
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(clearError, 10_000);
+    return () => clearTimeout(t);
+  }, [error]);
   const workers = useMemo(() => all.filter((s) => s.role === "worker").sort(byAttention), [state.sessions]);
   const decisions = useMemo(() => Object.values(state.decisions).sort((a, b) => a.createdAt - b.createdAt), [state.decisions]);
 
@@ -38,15 +60,19 @@ export function App() {
   // Keyboard: n new · esc close · 1-9 answer the first decision · / focus composer
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing = (e.target as HTMLElement).closest("input, textarea, select");
+      const typing = e.target instanceof Element && e.target.closest("input, textarea, select");
       if (e.key === "Escape") {
-        if (viewing) setViewing(null);
+        if (help) setHelp(false);
+        else if (viewing) setViewing(null);
         else if (creating) setCreating(false);
         else setSelected(null);
         return;
       }
       if (typing || e.metaKey || e.ctrlKey) return;
-      if (e.key === "n") {
+      if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
+        e.preventDefault();
+        setHelp((v) => !v);
+      } else if (e.key === "n") {
         e.preventDefault();
         setCreating(true);
       } else if (e.key === "/") {
@@ -59,32 +85,67 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [decisions, viewing, creating]);
+  }, [decisions, viewing, creating, help]);
 
   const sel = selected ? state.sessions[selected] : null;
 
   return (
     <div className={`app ${sel ? "with-drawer" : ""}`}>
-      <Sidebar state={state} main={main} workers={workers} selected={selected} onSelect={open} onNew={() => setCreating(true)} onImport={() => send({ type: "sessions.import" })} connected={connected} />
+      <Sidebar state={state} main={main} workers={workers} selected={selected} onSelect={open} onNew={() => setCreating(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} connected={connected} />
 
-      <Thread state={state} main={main} send={send} onOpen={open} decisions={decisions} />
+      <Thread
+        state={state}
+        main={main}
+        send={send}
+        onOpen={open}
+        decisions={decisions}
+        link={link}
+        onStart={startLead}
+        firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} onStart={startLead} /> : null}
+      />
 
       {sel && <Drawer key={sel.id} s={sel} state={state} send={send} onClose={() => setSelected(null)} onFile={(path) => setViewing({ session: sel.id, path })} onOpen={open} />}
 
       {creating && <NewSession onClose={() => setCreating(false)} onCreate={(cmd) => { send(cmd); setCreating(false); }} />}
       {viewing && <FileViewer {...viewing} onClose={() => setViewing(null)} />}
-      {error && (
-        <div className="toast" role="alert" onClick={clearError}>
-          {error}
-        </div>
-      )}
+      {help && <ShortcutHelp onClose={() => setHelp(false)} />}
+      {error && <Toast message={error} onClose={clearError} />}
     </div>
   );
 }
 
+function Toast({ message, onClose }: { message: string; onClose: () => void }) {
+  const { what, fix } = friendlyError(message);
+  return (
+    <div className="toast" role="alert" onClick={onClose} title={message}>
+      <span className="toast-what">{what}</span> <span className="toast-fix">{fix}</span>
+    </div>
+  );
+}
+
+/** The last failure in a transcript that nothing has been sent after, and the prompt to resend. */
+function retryTarget(items: TranscriptItem[], status: SessionInfo["status"]): { index: number; prompt: string } | null {
+  if (status === "working" || status === "needs_you") return null;
+  let fail = -1;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "user") break;
+    if (it.kind === "notice" && isFailureNotice(it.text)) {
+      fail = i;
+      break;
+    }
+  }
+  if (fail < 0) return null;
+  for (let i = fail - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "user") return { index: fail, prompt: it.text };
+  }
+  return null;
+}
+
 /* ───────────── Sidebar: every session at a glance ───────────── */
 
-function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, connected }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; connected: boolean }) {
+function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, onHelp, connected }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; onHelp: () => void; connected: boolean }) {
   const counts = { needs_you: 0, working: 0, failed: 0, done: 0, idle: 0 };
   for (const s of workers) counts[s.status]++;
   const groups = new Map<string, SessionInfo[]>();
@@ -141,6 +202,9 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, co
         <button className="link-btn" onClick={onImport} title="Show your recent Claude Code sessions here; open one to continue it">
           Import recent Claude Code sessions
         </button>
+        <button className="link-btn" onClick={onHelp}>
+          Keyboard shortcuts <kbd>?</kbd>
+        </button>
       </div>
     </nav>
   );
@@ -148,8 +212,10 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, co
 
 /* ───────────── Thread: the main agent conversation, made of cards ───────────── */
 
-function Thread({ state, main, send, onOpen, decisions }: { state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][] }) {
+function Thread({ state, main, send, onOpen, decisions, link, onStart, firstRun }: { state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; link: Link; onStart: (prompt: string) => void; firstRun: React.ReactNode }) {
   const items = main ? (state.transcripts[main.id] ?? []) : [];
+  const empty = Object.keys(state.sessions).length === 0;
+  const retry = main ? retryTarget(items, main.status) : null;
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
@@ -164,9 +230,11 @@ function Thread({ state, main, send, onOpen, decisions }: { state: State; main?:
       </div>
 
       <div className="thread-scroll">
-        {!main && <Welcome />}
+        {link === "offline" && (empty ? <DaemonOffline /> : <OfflineBanner />)}
+        {firstRun}
+        {!main && !firstRun && !(link === "offline" && empty) && link !== "connecting" && <Welcome />}
         <SinceYouLeft state={state} onOpen={onOpen} />
-        <ThreadItems items={items} state={state} onOpen={onOpen} />
+        <ThreadItems items={items} state={state} onOpen={onOpen} retry={retry && main ? { index: retry.index, run: () => send({ type: "session.prompt", sessionId: main.id, prompt: retry.prompt }) } : undefined} />
         <div ref={end} />
       </div>
 
@@ -186,9 +254,9 @@ function Thread({ state, main, send, onOpen, decisions }: { state: State; main?:
         )}
         <Composer
           id="main-composer"
-          placeholder={main ? "Ask Perzian, or tell it what to build…" : "What are we working on? Perzian will split it into sessions."}
+          placeholder={main ? "Ask Perzian, or tell it what to build…" : firstRun ? "Or describe your own task…" : "What are we working on? Perzian will split it into sessions."}
           busy={main?.status === "working"}
-          onSubmit={(text) => (main ? send({ type: "session.prompt", sessionId: main.id, prompt: text }) : send({ type: "main.start", prompt: text }))}
+          onSubmit={(text) => (main ? send({ type: "session.prompt", sessionId: main.id, prompt: text }) : onStart(text))}
           onStop={main ? () => send({ type: "session.cancel", sessionId: main.id }) : undefined}
         />
       </div>
@@ -237,8 +305,9 @@ function Welcome() {
 }
 
 // Consecutive tool calls collapse into one strip; spawns render as live session cards.
-function ThreadItems({ items, state, onOpen }: { items: TranscriptItem[]; state: State; onOpen: (id: string) => void }) {
+function ThreadItems({ items, state, onOpen, retry }: { items: TranscriptItem[]; state: State; onOpen: (id: string) => void; retry?: { index: number; run: () => void } }) {
   const blocks: (TranscriptItem | TranscriptItem[])[] = [];
+  const retryItem = retry ? items[retry.index] : undefined;
   for (const it of items) {
     const last = blocks[blocks.length - 1];
     if (it.kind === "tool" && Array.isArray(last)) last.push(it);
@@ -254,7 +323,11 @@ function ThreadItems({ items, state, onOpen }: { items: TranscriptItem[]; state:
           case "agent":
             return <div key={i} className="msg agent">{b.text}</div>;
           case "notice":
-            return <div key={i} className="notice">{b.text}</div>;
+            return isFailureNotice(b.text) ? (
+              <FailureNotice key={i} text={b.text} onRetry={b === retryItem ? retry?.run : undefined} />
+            ) : (
+              <div key={i} className="notice">{b.text}</div>
+            );
           case "spawn": {
             const child = state.sessions[b.childId];
             return child ? <LiveCard key={i} s={child} state={state} onOpen={() => onOpen(child.id)} /> : null;
@@ -368,6 +441,8 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
   const decisions = Object.values(state.decisions).filter((d) => d.sessionId === s.id);
   const lastAgent = [...transcript].reverse().find((t) => t.kind === "agent");
   const parent = s.parentId ? state.sessions[s.parentId] : undefined;
+  const retry = retryTarget(transcript, s.status);
+  const failure = retry ? transcript[retry.index] : undefined;
 
   return (
     <aside className={`drawer s-${s.status}`} aria-label="Session detail">
@@ -395,6 +470,7 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
       </div>
 
       <div className="drawer-scroll">
+        {retry && failure?.kind === "notice" && <FailureNotice text={failure.text} onRetry={() => send({ type: "session.prompt", sessionId: s.id, prompt: retry.prompt })} />}
         {decisions.map((d) => (
           <DecisionCard key={d.id} d={d} session={s} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: d.id, optionId })} />
         ))}
@@ -419,13 +495,19 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
             )}
           </section>
         )}
+        {!outcome && (
+          <section>
+            <h3 className="eyebrow">Outcome</h3>
+            <p className="quiet">{s.status === "working" || s.status === "needs_you" ? "Lands here when the agent finishes, with proof." : s.status === "failed" ? "None. The agent stopped before reporting one." : "No outcome yet. Send a task to get one."}</p>
+          </section>
+        )}
 
         <section>
           <h3 className="eyebrow">
             Change map <b>{files.length}</b>
             {files.length > 0 && <ChurnBar files={files} />}
           </h3>
-          <ChangeMap files={files} onOpen={onFile} />
+          <ChangeMap files={files} onOpen={onFile} status={s.status} />
         </section>
 
         <section>
@@ -560,13 +642,7 @@ function FileViewer({ session, path, onClose }: { session: string; path: string;
 /* ───────────── New session ───────────── */
 
 function NewSession({ onClose, onCreate }: { onClose: () => void; onCreate: (c: Command) => void }) {
-  const remembered = (() => {
-    try {
-      return localStorage.getItem("perzian.lastProject") ?? "";
-    } catch {
-      return "";
-    }
-  })();
+  const remembered = loadProject();
   const [project, setProject] = useState(remembered);
   const [prompt, setPrompt] = useState("");
   const [title, setTitle] = useState("");
@@ -581,9 +657,7 @@ function NewSession({ onClose, onCreate }: { onClose: () => void; onCreate: (c: 
         onClick={(e) => e.stopPropagation()}
         onSubmit={(e) => {
           e.preventDefault();
-          try {
-            localStorage.setItem("perzian.lastProject", project);
-          } catch {}
+          saveProject(project);
           onCreate({ type: "session.create", project, prompt, title: title || undefined, agent, model: model || undefined, mode, worktree });
         }}
       >

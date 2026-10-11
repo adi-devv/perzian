@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { emptyState, fold, reduce, type Command, type PerzianEvent, type ServerMessage, type State } from "@perzian/protocol";
+import { emptyState, fold, reduce, type Command, type DoctorReport, type PerzianEvent, type ServerMessage, type State } from "@perzian/protocol";
 import { demoEvents } from "./demo.ts";
 
 // In the desktop app (file://) talk to the daemon directly; in dev go through the Vite proxy.
@@ -7,14 +7,20 @@ const direct = location.protocol === "file:";
 const port = new URLSearchParams(location.search).get("port") ?? "4317";
 export const API_BASE = direct ? `http://127.0.0.1:${port}` : "";
 const WS_URL = direct ? `ws://127.0.0.1:${port}/ws` : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+export const isDesktop = direct;
 export const isDemo = new URLSearchParams(location.search).has("demo");
+/** Shown when the daemon can't be reached. */
+export const DAEMON_ADDR = direct ? `127.0.0.1:${port}` : "the local daemon";
+
+/** connecting: no answer yet · online · offline: the socket closed (the daemon isn't running or restarted). */
+export type Link = "connecting" | "online" | "offline";
 
 type Action = { kind: "event"; event: PerzianEvent } | { kind: "reset"; events: PerzianEvent[] };
 const reducer = (s: State, a: Action): State => (a.kind === "reset" ? fold(a.events) : reduce(s, a.event));
 
 export function useDaemon() {
   const [state, dispatch] = useReducer(reducer, emptyState);
-  const [connected, setConnected] = useState(isDemo);
+  const [link, setLink] = useState<Link>(isDemo ? "online" : "connecting");
   const [error, setError] = useState<string | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const stateRef = useRef(state);
@@ -30,9 +36,11 @@ export function useDaemon() {
     const connect = () => {
       const sock = new WebSocket(WS_URL);
       ws.current = sock;
-      sock.onopen = () => setConnected(true);
+      // A replaced socket (reconnect, hot reload) may close after its successor opened; ignore it.
+      sock.onopen = () => ws.current === sock && setLink("online");
       sock.onclose = () => {
-        setConnected(false);
+        if (ws.current !== sock) return;
+        setLink("offline");
         if (!closed) retry = setTimeout(connect, 1200);
       };
       sock.onmessage = (m) => {
@@ -56,7 +64,7 @@ export function useDaemon() {
     else setError("Not connected to the Perzian daemon");
   };
 
-  return { state, send, connected, error, clearError: () => setError(null) };
+  return { state, send, link, connected: link === "online", error, clearError: () => setError(null) };
 }
 
 // Minimal local behavior so the demo feels alive.
@@ -85,6 +93,39 @@ function demoSend(cmd: Command, s: State, emit: (e: PerzianEvent) => void) {
   } else if (cmd.type === "session.archive") {
     emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { archived: true } });
   }
+}
+
+// First-run checks. Agent probes are cached on the daemon; `recheck` bypasses that.
+export function useDoctor(project: string, enabled: boolean) {
+  const [report, setReport] = useState<DoctorReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [nonce, setNonce] = useState(0);
+  const fresh = useRef(false);
+  useEffect(() => {
+    if (!enabled || isDemo) return;
+    let cancelled = false;
+    const q = new URLSearchParams();
+    if (project.trim()) q.set("project", project.trim());
+    if (fresh.current) q.set("fresh", "1");
+    fresh.current = false;
+    const timer = setTimeout(() => {
+      setLoading(true);
+      fetch(`${API_BASE}/api/doctor?${q}`)
+        .then((r) => (r.ok ? (r.json() as Promise<DoctorReport>) : Promise.reject(new Error(String(r.status)))))
+        .then((r) => !cancelled && (setReport(r), setFailed(false)), () => !cancelled && setFailed(true))
+        .finally(() => !cancelled && setLoading(false));
+    }, project ? 250 : 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [project, enabled, nonce]);
+  const recheck = () => {
+    fresh.current = true;
+    setNonce((n) => n + 1);
+  };
+  return { report, loading, failed, recheck };
 }
 
 export async function fetchText(kind: "diff" | "file", session: string, path: string): Promise<string> {

@@ -9,6 +9,7 @@ import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps 
 import * as git from "./git.ts";
 import { listClaudeSessions, toEvents } from "./importer.ts";
 import { mergeProofs } from "./proof.ts";
+import { doctor, doctorHeaders } from "./doctor.ts";
 
 const port = Number(process.env.PERZIAN_PORT ?? DAEMON_PORT);
 const home = resolve(process.env.PERZIAN_HOME ?? join(homedir(), ".perzian"));
@@ -205,6 +206,11 @@ const http = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/report") {
       const out = await handleReport(JSON.parse(await readBody(req)));
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(out));
+      return;
+    }
+    if (url.pathname === "/api/doctor") {
+      const report = await doctor(home, { project: url.searchParams.get("project") ?? undefined, fresh: url.searchParams.has("fresh") });
+      res.writeHead(200, doctorHeaders(req.headers.origin)).end(JSON.stringify(report));
       return;
     }
     if (url.pathname === "/api/diff" || url.pathname === "/api/file") {

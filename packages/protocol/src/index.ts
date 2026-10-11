@@ -215,3 +215,4 @@ Delegate real coding work to sessions instead of doing it yourself. Split indepe
 Answer in one to three short sentences. Never paste long code or logs; the UI already shows sessions, diffs and outcomes visually.`;
 
 export * from "./fold.ts";
+export * from "./onboarding.ts";
