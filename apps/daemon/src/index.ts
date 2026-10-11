@@ -29,7 +29,7 @@ import { GhLogin } from "./ghlogin.ts";
 import { repoTree } from "./repotree.ts";
 import { startMode } from "./defaults.ts";
 import { UsageGovernor } from "./usagecard.ts";
-import { Attachments, sendAttachment } from "./attachments.ts";
+import { Attachments, referencedAttachmentIds, sendAttachment } from "./attachments.ts";
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { AgentKind, ApiKeyProvider, BranchList, InstallResult } from "@perzian/protocol";
@@ -52,6 +52,11 @@ await creds.load();
 // One account, one usage question: nearing the limit raises a single card; a refused session stops the others.
 const usage = new UsageGovernor({ store, sessions: () => sessions.values() });
 const attachments = new Attachments(home);
+// Uploads nothing refers to (attached, then the prompt was never sent) are dropped after a day.
+{
+  const n = attachments.sweep(referencedAttachmentIds(store.all()));
+  if (n) console.log(`[attachments] removed ${n} unused upload file${n === 1 ? "" : "s"}`);
+}
 const deps: SessionDeps = { store, daemonUrl, decisions, creds, usage, attachments };
 
 
@@ -206,8 +211,12 @@ async function handleCommand(cmd: Command): Promise<void> {
       const existing = mainSession();
       if (existing) {
         if (cmd.model !== undefined) await existing.applyModel(cmd.model);
-        if (cmd.prompt) notifier.developerPrompted(existing.info.id);
-        if (cmd.prompt) void existing.prompt(cmd.prompt, { attachments: attachments.resolve(cmd.attachments) });
+        // The composer allows an attachment-only send: that is a prompt too.
+        const atts = attachments.resolve(cmd.attachments);
+        if (cmd.prompt || atts.length) {
+          notifier.developerPrompted(existing.info.id);
+          void existing.prompt(cmd.prompt ?? "", { attachments: atts });
+        }
         break;
       }
       // No project needed: the lead starts in a neutral empty folder and asks for one (ask_project) when it needs it.
@@ -215,7 +224,7 @@ async function handleCommand(cmd: Command): Promise<void> {
       const dir = leadDir(home);
       const m = AgentSession.create({ project: dir, cwd: dir, title: "Perzian", agent: cmd.agent ?? "claude-code", model: cmd.model, role: "main", mode: "ask" }, deps);
       sessions.set(m.info.id, m);
-      if (cmd.prompt) void m.prompt(cmd.prompt, { attachments: atts });
+      if (cmd.prompt || atts.length) void m.prompt(cmd.prompt ?? "", { attachments: atts });
       else await m.ensureStarted();
       break;
     }
@@ -321,7 +330,7 @@ async function handleCommand(cmd: Command): Promise<void> {
       s?.archive();
       break;
     case "decision.answer":
-      if (decisions.get(cmd.decisionId)?.decision.source === "ask_project") answerProject(decisions, store, cmd.decisionId, cmd.optionId);
+      if (decisions.get(cmd.decisionId)?.decision.source === "ask_project") answerProject(decisions, store, cmd.decisionId, cmd.optionId, home);
       else answerDecision(decisions, cmd.decisionId, cmd.optionId);
       break;
   }

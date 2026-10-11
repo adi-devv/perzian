@@ -2,7 +2,7 @@
 // carry over (gitignored .env files and a few local config files), then installs dependencies with the
 // tool the lockfile names. Without this, the first test run in a new worktree fails.
 import { execFile, spawn } from "node:child_process";
-import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import type { SetupState } from "@perzian/protocol";
@@ -95,7 +95,8 @@ export async function copyLocalFiles(source: string, dest: string): Promise<stri
 const SKILL_DIRS = [".claude/skills", ".claude/commands"];
 
 /**
- * Copies the checkout's `.claude/skills/` and `.claude/commands/` files that are untracked or gitignored into `dest`, so the
+ * Copies the checkout's `.claude/skills/` and `.claude/commands/` files that are untracked or gitignored into `dest`
+ * (a symlink to a regular file is linked to its resolved target instead), so the
  * agent in a worktree has the same project skills and commands. Tracked files are already there and nothing is overwritten.
  * Returns the paths copied.
  */
@@ -110,7 +111,18 @@ export async function copyProjectSkills(source: string, dest: string): Promise<s
     const to = join(dest, p);
     try {
       const st = lstatSync(from);
-      if (!st.isFile() || st.size > MAX_FILE_BYTES || existsSync(to)) continue;
+      if (existsSync(to)) continue;
+      if (st.isSymbolicLink()) {
+        // A linked skill (e.g. into a shared skills folder): link the worktree's copy to the same absolute target, don't copy it.
+        const target = realpathSync(from);
+        const ts = statSync(target);
+        if (!ts.isFile() || ts.size > MAX_FILE_BYTES) continue;
+        mkdirSync(dirname(to), { recursive: true });
+        symlinkSync(target, to);
+        copied.push(p);
+        continue;
+      }
+      if (!st.isFile() || st.size > MAX_FILE_BYTES) continue;
       mkdirSync(dirname(to), { recursive: true });
       copyFileSync(from, to, constants.COPYFILE_EXCL);
       copied.push(p);

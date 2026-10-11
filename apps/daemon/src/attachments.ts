@@ -1,7 +1,7 @@
 // Files and images the developer attaches to a prompt. Uploaded once over HTTP into $PERZIAN_HOME/attachments/<id>.<ext>
 // (0600) with a <id>.json beside it (name, type). Commands and transcript events carry only ids; the bytes are read from
 // disk when a prompt is sent (as ACP image blocks when the agent takes images, otherwise the agent reads the path).
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ServerResponse } from "node:http";
 import { IMAGE_TYPES, MAX_ATTACHMENTS, MAX_FILE_BYTES, MAX_IMAGE_BYTES, type AttachmentInfo, type AttachmentRef } from "@perzian/protocol";
@@ -53,6 +53,16 @@ export function checkUpload(name: string, size: number): UploadCheck {
   return { ok: true, ext, image };
 }
 
+/** An upload nothing refers to is removed after this long. */
+export const ATTACHMENT_TTL_MS = 24 * 3600_000;
+
+/** Every attachment id mentioned anywhere in these events (transcript items, drafts, ...). */
+export function referencedAttachmentIds(events: Iterable<unknown>): Set<string> {
+  const ids = new Set<string>();
+  for (const e of events) for (const m of JSON.stringify(e).matchAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g)) ids.add(m[0]);
+  return ids;
+}
+
 export class Attachments {
   readonly dir: string;
   constructor(home: string) {
@@ -85,6 +95,35 @@ export class Attachments {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Deletes uploads (the file and its .json sidecar) older than `maxAgeMs` that no event refers to, so abandoned
+   * uploads don't pile up. Only regular files directly in the attachments dir named `<uuid>.<ext>` are touched.
+   * `referenced` is the set of attachment ids still in the event store. Returns how many files were removed.
+   */
+  sweep(referenced: ReadonlySet<string>, maxAgeMs = ATTACHMENT_TTL_MS, now = Date.now()): number {
+    let names: string[];
+    try {
+      names = readdirSync(this.dir);
+    } catch {
+      return 0;
+    }
+    let removed = 0;
+    for (const name of names) {
+      const m = /^([0-9a-f-]{36})\.[a-z0-9]{1,8}$/.exec(name);
+      if (!m || !isAttachmentId(m[1]) || referenced.has(m[1])) continue;
+      try {
+        const path = join(this.dir, name);
+        const st = lstatSync(path);
+        if (!st.isFile() || now - st.mtimeMs < maxAgeMs) continue;
+        unlinkSync(path);
+        removed++;
+      } catch {
+        // gone already, or not ours to delete: leave it
+      }
+    }
+    return removed;
   }
 
   /** Looks up every id; throws for one that is unknown or when there are too many. */
@@ -124,7 +163,8 @@ export function buildPrompt(text: string, atts: (AttachmentInfo & { path: string
     }
     lines.push(`Attached ${a.image ? "image" : "file"}: ${a.name} at ${a.path} (attachment id ${a.id})`);
   }
-  const body = lines.length ? `${text}\n\n${lines.join("\n")}` : text;
+  // An attachment-only send has no text: the body is just the attachment lines (never a blank lead-in).
+  const body = lines.length ? [text, lines.join("\n")].filter((p) => p.trim()).join("\n\n") : text;
   return [...images, { type: "text", text: body }];
 }
 
@@ -137,6 +177,7 @@ export function sendAttachment(res: ServerResponse, a: AttachmentInfo & { path: 
     res.writeHead(404, { "content-type": "text/plain" }).end("not found");
     return;
   }
+  const head = res.req?.method === "HEAD";
   res
     .writeHead(200, {
       ...extra,
@@ -147,5 +188,5 @@ export function sendAttachment(res: ServerResponse, a: AttachmentInfo & { path: 
       "content-security-policy": "default-src 'none'; img-src 'self' data:; sandbox",
       ...(a.image ? {} : { "content-disposition": `attachment; filename="${a.name.replace(/[^\w. -]/g, "_")}"` }),
     })
-    .end(data);
+    .end(head ? undefined : data);
 }
