@@ -18,6 +18,7 @@ import {
 } from "@perzian/protocol";
 import { fetchText, isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
 import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, readiness, saveProject, withProject } from "./onboarding.tsx";
+import { PairScreen, PhoneButton, PhoneHome, useNarrow } from "./phone.tsx";
 import { tokenize } from "./highlight.ts";
 import type { ThemedToken } from "shiki/core";
 import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, Usage, ago, churn, cost, pauseTitle, resumeTime, statusText, useTick } from "./bits.tsx";
@@ -33,6 +34,7 @@ export function App() {
   const [accounts, setAccounts] = useState(false);
   const [project, setProject] = useState(loadProject);
   const [crewFilter, setCrewFilter] = useState<CrewKey | null>(null);
+  const narrow = useNarrow();
   useTick();
 
   const all = Object.values(state.sessions).filter((s) => !s.archived);
@@ -121,6 +123,10 @@ export function App() {
   }, [decisions, viewing, creating, help]);
 
   const sel = selected ? state.sessions[selected] : null;
+
+  // A phone that isn't paired yet, or any window under 600px: the attention queue, nothing else.
+  if (link === "unpaired") return <PairScreen />;
+  if (narrow) return <PhoneHome state={state} send={send} link={link} />;
 
   return (
     <div className={`app ${sel ? "with-drawer" : ""}`}>
@@ -271,6 +277,7 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
             Accounts &amp; API keys
           </button>
         )}
+        <PhoneButton />
         <button className="link-btn" onClick={onHelp}>
           Keyboard shortcuts <kbd>?</kbd>
         </button>

@@ -9,9 +9,38 @@ const port = new URLSearchParams(location.search).get("port") ?? "4317";
 export const API_BASE = direct ? `http://127.0.0.1:${port}` : "";
 // The desktop app passes the daemon's token (?t=); file:// pages count only with it.
 const token = new URLSearchParams(location.search).get("t");
-/** An API URL, carrying the desktop token when there is one. */
-export const api = (path: string) => (direct && token ? `${API_BASE}${path}${path.includes("?") ? "&" : "?"}t=${encodeURIComponent(token)}` : `${API_BASE}${path}`);
-const WS_URL = direct ? `ws://127.0.0.1:${port}/ws${token ? `?t=${encodeURIComponent(token)}` : ""}` : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+// A phone opens the HTTPS tailnet address (*.ts.net). It carries a long-lived device token from pairing in
+// localStorage, sent as ?t= (a WebSocket can't set headers). Without one it shows the pairing screen.
+export const isPhone = location.hostname.endsWith(".ts.net");
+const DEVICE_KEY = "perzian.device";
+let deviceToken: string | null = null;
+try {
+  deviceToken = isPhone ? localStorage.getItem(DEVICE_KEY) : null;
+} catch {}
+const rememberDevice = (t: string | null) => {
+  deviceToken = t;
+  try {
+    if (t) localStorage.setItem(DEVICE_KEY, t);
+    else localStorage.removeItem(DEVICE_KEY);
+  } catch {}
+};
+/** Trade a one-time code (from the QR or typed) for a device token. Resolves to an error message, or null when paired. */
+export async function pairPhone(code: string): Promise<string | null> {
+  try {
+    const res = await fetch("/pair", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code }) });
+    if (!res.ok) return ((await res.json()) as { error?: string }).error ?? "That code didn't work.";
+    rememberDevice(((await res.json()) as { token: string }).token);
+    return null;
+  } catch {
+    return "Couldn't reach your Mac. Is Perzian running?";
+  }
+}
+/** An API URL, carrying the desktop token or this phone's device token when there is one. */
+export const api = (path: string) => {
+  const t = isPhone ? deviceToken : direct ? token : null;
+  return t ? `${API_BASE}${path}${path.includes("?") ? "&" : "?"}t=${encodeURIComponent(t)}` : `${API_BASE}${path}`;
+};
+const WS_URL = direct ? `ws://127.0.0.1:${port}/ws${token ? `?t=${encodeURIComponent(token)}` : ""}` : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws${isPhone && deviceToken ? `?t=${encodeURIComponent(deviceToken)}` : ""}`;
 export const isDesktop = direct;
 export const isDemo = new URLSearchParams(location.search).has("demo");
 /** Shown when the daemon can't be reached. */
@@ -19,7 +48,7 @@ export const DAEMON_ADDR = direct ? `127.0.0.1:${port}` : "the local daemon";
 
 /** connecting: no answer yet · online · offline: the socket closed (the daemon isn't running or restarted)
  *  · refused: the daemon is up but won't take this page (opened from an origin it doesn't trust). */
-export type Link = "connecting" | "online" | "offline" | "refused";
+export type Link = "connecting" | "online" | "offline" | "refused" | "unpaired";
 
 // A WebSocket the daemon rejects closes just like one to a dead port. Ask over HTTP to tell them apart:
 // a 401/403 means it's running and saying no; a network error or proxy 5xx means it's down.
@@ -37,7 +66,7 @@ const reducer = (s: State, a: Action): State => (a.kind === "reset" ? fold(a.eve
 
 export function useDaemon() {
   const [state, dispatch] = useReducer(reducer, emptyState);
-  const [link, setLink] = useState<Link>(isDemo ? "online" : "connecting");
+  const [link, setLink] = useState<Link>(isDemo ? "online" : isPhone && !deviceToken ? "unpaired" : "connecting");
   const [error, setError] = useState<string | null>(null);
   const ws = useRef<WebSocket | null>(null);
   const stateRef = useRef(state);
@@ -50,6 +79,7 @@ export function useDaemon() {
     }
     let retry: ReturnType<typeof setTimeout>;
     let closed = false;
+    if (isPhone && !deviceToken) return;
     const connect = () => {
       const sock = new WebSocket(WS_URL);
       ws.current = sock;
@@ -61,6 +91,12 @@ export function useDaemon() {
         if (ws.current !== sock) return;
         const no = !opened && (await refused());
         if (ws.current !== sock || closed) return;
+        // This phone was forgotten on the Mac: drop its token and ask to pair again.
+        if (no && isPhone) {
+          rememberDevice(null);
+          setLink("unpaired");
+          return;
+        }
         setLink(no ? "refused" : "offline");
         retry = setTimeout(connect, no ? 4000 : 1200);
       };

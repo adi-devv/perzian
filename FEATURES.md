@@ -45,6 +45,12 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ Daemon only accepts the desktop app and the local UI (origin and token checks).
 - ⚠️ Packaged macOS build (`npm run dist`, unsigned, Apple Silicon); no release published yet.
 
+## Phone access (opt-in, off by default)
+- ⚠️ "Open on phone" (sidebar): turns on a token-gated listener and `tailscale serve` (https://<mac>.<tailnet>.ts.net:8443), shows a QR with a one-time code (2 min, single use). Missing or logged-out Tailscale shows install/sign-in steps instead.
+- ⚠️ The phone pairs once, keeps a device token in localStorage (stored hashed on the Mac); "Forget all phones" revokes every token and cuts live connections.
+- ⚠️ Under 600px the UI is just the attention queue, answerable decision cards and compact session tiles; installable as a PWA. A phone can answer, stop and resume, nothing else.
+- Not yet tried with a real phone and tailnet (unit-tested over real sockets only).
+
 ## Site/demo
 - ✅ Site at perzian.dev (`apps/site`) and a live demo at perzian.dev/demo.
 - ✅ Site feature cards for declared checks ("Your checks run every time") and usage-limit resume ("Hit your limit at 2 am?").

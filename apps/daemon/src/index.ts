@@ -17,6 +17,8 @@ import { allChecks, detectChecks, loadDeclaredChecks } from "./checks.ts";
 import { LeadNotifier, type ChildReport } from "./notify.ts";
 import { ResumeQueue } from "./resume.ts";
 import { loadDesktopToken, trustedOrigin } from "./origin.ts";
+import { Devices, PairingCodes, PhoneAccess } from "./phone.ts";
+import { fileURLToPath } from "node:url";
 import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
 
 const port = Number(process.env.PERZIAN_PORT ?? DAEMON_PORT);
@@ -375,6 +377,14 @@ const http = createServer(async (req, res) => {
       json(200, creds.status());
       return;
     }
+    if (url.pathname.startsWith("/api/phone")) {
+      if (url.pathname === "/api/phone" && req.method === "GET") json(200, await phone.status());
+      else if (url.pathname === "/api/phone" && req.method === "POST") json(200, (JSON.parse(await readBody(req)) as { on?: boolean }).on ? await phone.turnOn() : await phone.turnOff());
+      else if (url.pathname === "/api/phone/pair" && req.method === "POST") json(200, phone.pair());
+      else if (url.pathname === "/api/phone/devices" && req.method === "DELETE") json(200, await phone.forgetAll());
+      else json(404, { error: "not found" });
+      return;
+    }
     if (url.pathname === "/api/install" && req.method === "POST") {
       const { agent } = JSON.parse(await readBody(req)) as { agent: AgentKind };
       if (agent !== "claude-code" && agent !== "codex") throw new Error("Unknown agent");
@@ -408,16 +418,38 @@ const http = createServer(async (req, res) => {
 const wss = new WebSocketServer({ server: http, path: "/ws", verifyClient: ({ origin, req }: { origin?: string; req: { url?: string } }) => trustedOrigin(origin, new URL(req.url ?? "/", daemonUrl).searchParams.get("t")) });
 const send = (ws: WebSocket, msg: ServerMessage) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
 
-wss.on("connection", (ws) => {
+// A paired phone answers and stops things; it doesn't start sessions, prompt, import or ship.
+const PHONE_COMMANDS: ReadonlySet<string> = new Set(["decision.answer", "session.cancel", "session.resume", "session.seen"]);
+
+function attach(ws: WebSocket, phone: boolean) {
   send(ws, { type: "snapshot", events: store.snapshot() });
   const unsubscribe = store.subscribe((event) => send(ws, { type: "event", event }));
   ws.on("message", (raw) => {
     Promise.resolve()
-      .then(() => handleCommand(JSON.parse(String(raw)) as Command))
+      .then(() => {
+        const cmd = JSON.parse(String(raw)) as Command;
+        if (phone && !PHONE_COMMANDS.has(cmd?.type)) throw new Error("Not available from a phone");
+        return handleCommand(cmd);
+      })
       .catch((e) => send(ws, { type: "error", message: String((e as Error).message ?? e) }));
   });
   ws.on("close", unsubscribe);
+}
+wss.on("connection", (ws) => attach(ws, false));
+
+// Phone access (phone.ts): off unless the developer turned it on. Its own listener, always token-gated.
+const here = fileURLToPath(new URL(".", import.meta.url));
+const phoneWebDir = () => [process.env.PERZIAN_WEB_DIR, join(here, "../../web/dist"), join(here, "../web")].find((d) => d && existsSync(join(d, "index.html")));
+const phone = new PhoneAccess({
+  home,
+  port: Number(process.env.PERZIAN_PHONE_PORT ?? port + 2),
+  httpsPort: Number(process.env.PERZIAN_PHONE_HTTPS ?? 8443),
+  devices: new Devices(home),
+  codes: new PairingCodes(),
+  webDir: phoneWebDir,
+  onConnection: (ws) => attach(ws, true),
 });
+void phone.restore();
 
 // A taken port is almost always another daemon; say so and exit non-zero instead of a stack trace.
 const listenFailed = (e: NodeJS.ErrnoException) => {

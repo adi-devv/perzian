@@ -7,10 +7,8 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 2. **Publish v0.0.1 as a GitHub Release.** `npm run dist`, upload the ~116 MB zip, link it from the README and site.
 
 ## Features
-1. **Phone access via Tailscale (decided).** "Open on phone" shows a QR code with the Mac's Tailscale HTTPS address
-   (`tailscale serve`, *.ts.net) and a one-time pairing token; if Tailscale is missing, a short install step.
-   - Phone gets an installable PWA with only the attention queue, decision cards and tiles.
-   - The daemon sends Web Push itself (VAPID, straight to Apple/Google push, no servers of ours) when a session needs you, finishes or fails.
+1. **Phone access, phase 2 (phase 1 is built, see FEATURES.md).** Try phase 1 on a real phone first (`Open on phone` in the sidebar).
+   - Web Push: the daemon sends it itself (VAPID, straight to Apple/Google push, no servers of ours) when a session needs you, finishes or fails.
    - Keep the Mac awake while agents work.
    - Same Wi-Fi without Tailscale is a view-only fallback (no HTTPS, so no push).
    - Later, if people want zero setup: a Cloudflare Durable Objects relay with end-to-end encryption, possibly paid. Firebase rejected (data at Google, per-event cost).

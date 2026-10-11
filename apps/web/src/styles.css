@@ -476,3 +476,25 @@ code.chip { font-size: 11px; }
 .folder-recent { display: flex; flex-wrap: wrap; gap: 6px; }
 .btn.on { border-color: var(--fg-3); background: var(--hover); }
 .folder-pick > input { font-size: 12px; padding: 5px 9px; }
+
+/* ── phone: pairing, the "Open on phone" sheet, and the <600px layout ── */
+.phone { height: 100%; overflow-y: auto; padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 22px; }
+.phone .onboard { margin-top: 6vh; }
+.phone-head { display: flex; align-items: center; justify-content: space-between; min-height: 32px; }
+.phone-note { font-size: 13px; }
+.phone-err { margin: 0; color: var(--failed); font-size: 13px; }
+.phone .needs-list { grid-template-columns: 1fr; }
+.tiles { display: flex; flex-direction: column; border-top: 1px solid var(--line-soft); }
+.tile { display: flex; align-items: center; gap: 10px; padding: 12px 2px; border-bottom: 1px solid var(--line-soft); }
+.tile-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tile-title { font-weight: 500; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile-sub { color: var(--fg-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile.s-needs_you .tile-sub, .tile.s-failed .tile-sub { color: var(--c); }
+.pair-form { display: flex; gap: 8px; }
+.pair-form input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 9px 10px; font: 15px var(--mono); letter-spacing: 0.08em; }
+.phone-sheet .steps { margin: 0; padding-left: 20px; color: var(--fg-2); display: flex; flex-direction: column; gap: 4px; }
+.pair { display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+.qr { width: 208px; height: 208px; border-radius: 8px; transition: opacity 0.2s; }
+.qr.dim { opacity: 0.15; }
+.pair-code { font: 500 18px var(--mono); letter-spacing: 0.12em; }
+.pair-url { font-size: 11px; overflow-wrap: anywhere; }
