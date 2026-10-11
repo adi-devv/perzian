@@ -31,6 +31,10 @@ export interface ProjectCheck {
   exists: boolean;
   /** Repo root when the folder is inside a git work tree. */
   gitRoot?: string;
+  /** A git repo with no commits yet: sessions can't branch a worktree from it. */
+  noCommits?: boolean;
+  /** The checkout is on a detached HEAD: there's no branch to merge sessions back into. */
+  detached?: boolean;
 }
 
 export interface DoctorReport {

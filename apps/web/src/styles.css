@@ -319,6 +319,9 @@ em.a { color: var(--add); font-style: normal; font-family: var(--mono); font-siz
 .ship.shipped { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; font-size: 13px; }
 .ship.shipped b { font-weight: 500; white-space: nowrap; }
 .ship.shipped span { font-size: 12px; color: var(--fg-3); }
+.ship-confirm { margin: 0; font-size: 13px; color: var(--fg-2); line-height: 1.5; overflow-wrap: anywhere; }
+.closed-note { margin: 0; font-size: 12px; color: var(--fg-3); flex: 1; }
+.sheet-error { margin: 0; font-size: 12px; color: var(--failed); line-height: 1.5; }
 /* Follow-ups are actions: bordered rows with an explicit verb. */
 .followup { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left; border: 1px solid var(--line); border-radius: 8px; background: transparent; padding: 8px 10px; font-size: 13px; color: var(--fg); cursor: pointer; }
 .followup:hover { background: var(--hover); border-color: var(--fg-3); }

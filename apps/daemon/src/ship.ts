@@ -2,10 +2,11 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { SessionInfo, ShipState } from "@perzian/protocol";
 
-// "Ship it": land a worktree session's work. Merge commits whatever the agent left, merges the branch
-// into the developer's checkout (which must be on the branch the session started from, and clean),
-// then removes the worktree. A conflict aborts the merge and reports the files; nothing is left half-done.
-// PR pushes the branch and opens a pull request with gh, keeping the worktree for follow-ups.
+// "Ship it": land a worktree session's work. Merge commits what the agent changed (never ignored or
+// secret-looking files), merges the branch into the developer's checkout (which must be on the branch the
+// session started from, and clean), then removes the worktree. A conflict aborts the merge and reports
+// the files; nothing is left half-done. PR first checks gh can open one, then pushes the branch and opens
+// a pull request, keeping the worktree for follow-ups.
 
 const exec = promisify(execFile);
 
@@ -19,7 +20,74 @@ async function run(cwd: string, cmd: string, args: string[]): Promise<{ ok: bool
   }
 }
 
-const tail = (s: string) => s.trim().split("\n").slice(-3).join(" ").slice(0, 300);
+/** The lines of git/gh output worth showing: errors and the file lists under them, else the last few. */
+export function tail(s: string, max = 600): string {
+  const lines = s.split("\n").filter((l) => l.trim());
+  const key = lines.filter((l) => /\b(fatal|error)\b:|^\s+\S|^\s*!/i.test(l) && !/^\s*hint:/i.test(l));
+  return (key.length ? key : lines.slice(-3)).map((l) => l.trim()).join(" ").slice(0, max);
+}
+
+// Files that look like secrets stay out of the commit even when they aren't gitignored.
+const SECRET = [/^\.env(\..*)?$/, /\.(pem|key|p12|pfx)$/i, /^id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/, /^\.(netrc|npmrc|pypirc)$/];
+const TEMPLATE = /^\.env\.(example|sample|template|dist|defaults)$/;
+export function isSensitive(path: string): boolean {
+  const name = path.split("/").pop() ?? path;
+  return !TEMPLATE.test(name) && SECRET.some((re) => re.test(name));
+}
+
+/** Paths from `git status --porcelain -z`, split into what to commit and what to leave out. */
+export function stageable(porcelainZ: string): { add: string[]; skipped: string[] } {
+  const add: string[] = [];
+  const skipped: string[] = [];
+  const fields = porcelainZ.split("\0");
+  for (let i = 0; i < fields.length; i++) {
+    const f = fields[i];
+    if (f.length < 4) continue;
+    const paths = [f.slice(3)];
+    if (/[RC]/.test(f.slice(0, 2))) paths.push(fields[++i]); // rename/copy: the origin path follows
+    for (const p of paths.filter(Boolean)) (isSensitive(p) ? skipped : add).push(p);
+  }
+  return { add, skipped };
+}
+
+/** A session whose work was merged has no worktree left to run in. */
+export function assertPromptable(info: SessionInfo): void {
+  if (info.worktree && info.ship?.state === "merged")
+    throw new Error(`This session was already merged into ${info.ship.into ?? "your branch"}, so it's closed. Start a new session to keep going.`);
+}
+
+/** A ship the daemon was killed in the middle of: say so, and let it be tried again. */
+export const interruptedShip = (prev: ShipState): ShipState => ({
+  state: "error",
+  how: prev.how,
+  detail: `Interrupted: the daemon restarted while ${prev.how === "pr" ? "opening the PR" : "merging"}. Check your checkout${prev.how === "pr" ? " and GitHub" : ""}, then try again.`,
+  at: Date.now(),
+});
+
+/** Host of a git remote URL (https, ssh://, or scp-like git@host:path). */
+export function remoteHost(url: string): string | undefined {
+  const u = url.trim();
+  const scp = /^(?:[^@/]+@)?([^:/]+):(?!\/\/)/.exec(u);
+  if (scp && !/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return scp[1].toLowerCase();
+  try {
+    return new URL(u).hostname.toLowerCase() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Why a PR can't be opened from `cwd`, checked before anything is pushed. */
+async function prBlocker(cwd: string): Promise<string | undefined> {
+  const origin = await run(cwd, "git", ["remote", "get-url", "origin"]);
+  if (!origin.ok || !origin.out.trim()) return "This repo has no origin remote to push to. Add your GitHub repo (git remote add origin <url>), or merge instead.";
+  const host = remoteHost(origin.out);
+  if (!host) return `origin (${origin.out.trim()}) isn't a GitHub remote. Open the PR from your git host, or merge instead.`;
+  const gh = await run(cwd, "gh", ["--version"]);
+  if (!gh.ok) return gh.err.startsWith("ENOENT") ? "The GitHub CLI isn't installed. Install gh and run gh auth login, then try again." : `The GitHub CLI isn't working: ${tail(gh.err)}`;
+  const auth = await run(cwd, "gh", ["auth", "status", "--hostname", host]);
+  if (!auth.ok) return host === "github.com" || host.endsWith(".github.com") ? "The GitHub CLI isn't signed in. Run gh auth login, then try again." : `origin points at ${host}, which isn't a GitHub host gh is signed in to. Open the PR there, or merge instead.`;
+  return undefined;
+}
 
 export async function ship(info: SessionInfo, how: "merge" | "pr", stop: () => void): Promise<ShipState> {
   const fail = (detail: string): ShipState => ({ state: "error", how, detail, at: Date.now() });
@@ -27,22 +95,34 @@ export async function ship(info: SessionInfo, how: "merge" | "pr", stop: () => v
   const wt = info.cwd;
   const branch = info.branch;
 
-  // What the agent left uncommitted becomes one commit named after the session.
-  await run(wt, "git", ["add", "-A"]);
+  if (how === "pr") {
+    const blocked = await prBlocker(wt);
+    if (blocked) return fail(blocked);
+  }
+
+  // What the agent left uncommitted becomes one commit named after the session. git status already
+  // drops ignored files; secret-looking ones are left in the worktree, uncommitted.
+  const status = await run(wt, "git", ["status", "--porcelain", "-z", "--untracked-files=all"]);
+  if (!status.ok) return fail(`Couldn't read the session's changes: ${tail(status.err)}`);
+  const { add, skipped } = stageable(status.out);
+  for (let i = 0; i < add.length; i += 200) {
+    const a = await run(wt, "git", ["--literal-pathspecs", "add", "-A", "--", ...add.slice(i, i + 200)]);
+    if (!a.ok) return fail(`Couldn't stage the session's changes: ${tail(a.err)}`);
+  }
   if (!(await run(wt, "git", ["diff", "--cached", "--quiet"])).ok) {
     const c = await run(wt, "git", ["commit", "-m", info.title]);
     if (!c.ok) return fail(`Couldn't commit the session's changes: ${tail(c.err || c.out)}`);
   }
+  const left = skipped.length ? `Left out ${skipped.join(", ")} (looks like secrets); ${skipped.length === 1 ? "it's" : "they're"} still in the worktree.` : undefined;
 
   if (how === "pr") {
     const push = await run(wt, "git", ["push", "-u", "origin", branch]);
     if (!push.ok) return fail(`Push failed: ${tail(push.err)}`);
     const args = ["pr", "create", "--head", branch, "--fill", ...(info.baseBranch ? ["--base", info.baseBranch] : [])];
     const pr = await run(wt, "gh", args);
-    if (pr.ok) return { state: "pr", how, url: pr.out.trim().split("\n").pop(), at: Date.now() };
-    if (pr.err.startsWith("ENOENT")) return fail("The GitHub CLI isn't installed. Install gh and run gh auth login, then try again.");
+    if (pr.ok) return { state: "pr", how, url: pr.out.trim().split("\n").pop(), ...(left ? { detail: left } : {}), at: Date.now() };
     const existing = await run(wt, "gh", ["pr", "view", branch, "--json", "url", "-q", ".url"]);
-    if (existing.ok && existing.out.trim()) return { state: "pr", how, url: existing.out.trim(), at: Date.now() };
+    if (existing.ok && existing.out.trim()) return { state: "pr", how, url: existing.out.trim(), ...(left ? { detail: left } : {}), at: Date.now() };
     return fail(`Couldn't open the PR: ${tail(pr.err)}`);
   }
 
@@ -63,7 +143,9 @@ export async function ship(info: SessionInfo, how: "merge" | "pr", stop: () => v
   }
 
   stop();
-  const rm = await run(project, "git", ["worktree", "remove", wt]);
+  // A worktree still holding left-out files isn't removed; the merge itself is done either way.
+  const rm = skipped.length ? { ok: false } : await run(project, "git", ["worktree", "remove", wt]);
   if (rm.ok) await run(project, "git", ["branch", "-d", branch]);
-  return { state: "merged", how, into, ...(rm.ok ? {} : { detail: "Merged. The worktree folder was left in place." }), at: Date.now() };
+  const detail = [left, rm.ok ? undefined : `The worktree folder was left in place: ${wt}`].filter(Boolean).join(" ");
+  return { state: "merged", how, into, ...(detail ? { detail: `Merged. ${detail}` } : {}), at: Date.now() };
 }

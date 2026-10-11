@@ -53,7 +53,11 @@ npm test           # unit tests
 ```
 
 - Browser UI: http://localhost:4318 (try it without agents: http://localhost:4318/?demo)
-- Daemon: http://127.0.0.1:4317
+- Daemon: http://127.0.0.1:4317. Both ports are fixed: if one is taken, the command stops and says so
+  (set `PERZIAN_PORT` to move the daemon).
+- npm 11 skips dependency install scripts unless allowed; `allowScripts` in `package.json` allows Electron's
+  and esbuild's. If `npm run app` says Electron failed to install, delete `node_modules/electron` and run
+  `npm install` again.
 - State lives in `$PERZIAN_HOME` (default `~/.perzian`): event log, worktrees, main-agent folder.
 
 Agents sign in the usual way (`claude auth login`, `codex login`), or add an Anthropic / OpenAI API key under

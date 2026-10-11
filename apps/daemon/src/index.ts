@@ -9,12 +9,13 @@ import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps 
 import * as git from "./git.ts";
 import { listClaudeSessions, toEvents } from "./importer.ts";
 import { mergeProofs } from "./proof.ts";
-import { ship } from "./ship.ts";
+import { assertPromptable, interruptedShip, ship } from "./ship.ts";
 import { doctor, doctorHeaders, installCommand, resetDoctorCache } from "./doctor.ts";
 import { Credentials, PROVIDERS } from "./credentials.ts";
 import { exec } from "node:child_process";
 import { detectChecks } from "./checks.ts";
 import { LeadNotifier, type ChildReport } from "./notify.ts";
+import { trustedOrigin } from "./origin.ts";
 import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
 
 const port = Number(process.env.PERZIAN_PORT ?? DAEMON_PORT);
@@ -32,9 +33,6 @@ const creds = new Credentials(home);
 await creds.load();
 const deps: SessionDeps = { store, daemonUrl, decisions, creds };
 
-// Browsers let any website send requests to 127.0.0.1. Only the desktop app (file://, origin "null") and
-// localhost pages may drive the daemon; non-browser clients (agents, scripts) send no Origin.
-const trustedOrigin = (origin: string | undefined) => !origin || origin === "null" || origin === "file://" || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
 let installing: Promise<InstallResult> | undefined;
 function runInstaller(agent: AgentKind): Promise<InstallResult> {
@@ -69,6 +67,7 @@ const OPEN_TOOL = (status: string) => status !== "completed" && status !== "fail
       s.notice("Interrupted: the daemon restarted during this turn");
       s.setStatus("idle");
     }
+    if (info.ship?.state === "shipping") s.setShip(interruptedShip(info.ship));
   }
 }
 
@@ -150,6 +149,7 @@ async function handleCommand(cmd: Command): Promise<void> {
     }
     case "session.prompt":
       if (!s) throw new Error("Unknown session");
+      assertPromptable(s.info);
       if (s.info.role === "main") notifier.developerPrompted(s.info.id);
       else notifier.childPrompted(s.info.id, false);
       void s.prompt(cmd.prompt);
@@ -256,6 +256,7 @@ async function handleReport(call: ReportCall): Promise<unknown> {
     case "send_to_session": {
       const t = sessions.get(call.args.id);
       if (!t) throw new Error("no such session");
+      assertPromptable(t.info);
       notifier.childPrompted(t.info.id, s.info.role === "main");
       void t.prompt(call.args.prompt);
       return "sent";
@@ -340,6 +341,13 @@ wss.on("connection", (ws) => {
   ws.on("close", unsubscribe);
 });
 
+// A taken port is almost always another daemon; say so and exit non-zero instead of a stack trace.
+const listenFailed = (e: NodeJS.ErrnoException) => {
+  console.error(e.code === "EADDRINUSE" ? `perzian daemon: port ${port} is already in use (another Perzian daemon?). Stop it, or set PERZIAN_PORT to another port.` : `perzian daemon: can't listen on ${daemonUrl}: ${e.message}`);
+  process.exit(1);
+};
+http.on("error", listenFailed);
+wss.on("error", listenFailed); // ws re-emits the server's errors; unhandled, they'd crash with a trace
 http.listen(port, "127.0.0.1", () => console.log(`perzian daemon on ${daemonUrl} (home ${home})`));
 
 const shutdown = () => {

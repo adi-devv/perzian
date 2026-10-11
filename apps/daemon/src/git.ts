@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import type { ChangeKind, FileChange } from "@perzian/protocol";
@@ -33,23 +33,35 @@ export async function head(cwd: string): Promise<string | undefined> {
   }
 }
 
+/** The checked-out branch; undefined on a detached HEAD (git prints "HEAD") or outside a repo. */
 export async function currentBranch(cwd: string): Promise<string | undefined> {
   try {
-    return (await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+    const b = (await git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"])).trim();
+    return b && b !== "HEAD" ? b : undefined;
   } catch {
     return undefined;
   }
 }
 
+/** Why a worktree can't be cut from `project` right now, or undefined when it can. */
+export async function worktreeBlocker(project: string): Promise<string | undefined> {
+  if (!(await head(project))) return `This repo has no commits yet, so there's nothing to branch from. Make a first commit (git add -A && git commit -m "Initial commit"), then start the session.`;
+  if (!(await currentBranch(project))) return "Your checkout is on a detached HEAD, so there's no branch to merge the work back into. Check out a branch (git switch <branch>), then start the session.";
+  return undefined;
+}
+
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "task";
 
-export async function createWorktree(project: string, home: string, title: string, id: string): Promise<{ path: string; branch: string }> {
+export async function createWorktree(project: string, home: string, title: string, id: string): Promise<{ path: string; branch: string; baseBranch: string }> {
+  const blocked = await worktreeBlocker(project);
+  if (blocked) throw new Error(blocked);
+  const baseBranch = (await currentBranch(project))!;
   const branch = `perzian/${slug(title)}-${id.slice(0, 6)}`;
   const dir = join(home, "worktrees", basename(project));
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${slug(title)}-${id.slice(0, 6)}`);
   await git(project, ["worktree", "add", "-b", branch, path, "HEAD"]);
-  return { path, branch };
+  return { path, branch, baseBranch };
 }
 
 const KIND: Record<string, ChangeKind> = { A: "added", M: "modified", D: "deleted", R: "renamed", T: "modified", C: "added" };
@@ -105,7 +117,8 @@ export async function fileDiff(cwd: string, base: string, path: string): Promise
 }
 
 export function fileContent(cwd: string, path: string): string {
-  const full = inside(cwd, path);
+  // Resolve symlinks too: a link inside the worktree must not expose files outside it.
+  const full = inside(realpathSync(cwd), realpathSync(inside(cwd, path)));
   if (statSync(full).size > 1_000_000) return "(file too large to show)";
   return readFileSync(full, "utf8");
 }

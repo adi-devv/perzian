@@ -1,7 +1,7 @@
 import { after, before, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as git from "../src/git.ts";
@@ -132,5 +132,26 @@ describe("git helpers", () => {
   test("createWorktree falls back to 'task' for empty titles", async () => {
     const wt = await git.createWorktree(repo, join(root, "home"), "!!!", "999999xyz");
     assert.equal(wt.branch, "perzian/task-999999");
+    assert.equal(wt.baseBranch, await git.currentBranch(repo));
+  });
+
+  test("fileContent refuses symlinks that point outside the worktree", () => {
+    writeFileSync(join(root, "secret.txt"), "outside\n");
+    symlinkSync(join(root, "secret.txt"), join(repo, "escape.txt"));
+    symlinkSync(join(repo, "keep.txt"), join(repo, "inside-link.txt"));
+    assert.throws(() => git.fileContent(repo, "escape.txt"), /outside/);
+    assert.equal(git.fileContent(repo, "inside-link.txt"), "one\nTWO\nthree\nfour\n");
+  });
+
+  test("createWorktree refuses an empty repo and a detached HEAD with a clear reason", async () => {
+    const empty = join(root, "empty");
+    mkdirSync(empty);
+    run(empty, "init", "-q");
+    await assert.rejects(git.createWorktree(empty, join(root, "home"), "x", "111111"), /no commits yet/);
+
+    run(repo, "checkout", "-q", "--detach");
+    assert.equal(await git.currentBranch(repo), undefined);
+    await assert.rejects(git.createWorktree(repo, join(root, "home"), "x", "222222"), /detached HEAD/);
+    run(repo, "checkout", "-q", "-");
   });
 });
