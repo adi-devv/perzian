@@ -15,7 +15,7 @@ import { fetchText, isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts"
 import { Accounts, DaemonOffline, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, saveProject, withProject } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import type { ThemedToken } from "shiki/core";
-import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, ago, churn, useTick } from "./bits.tsx";
+import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, Usage, ago, churn, cost, useTick } from "./bits.tsx";
 
 type Send = (c: Command) => void;
 
@@ -150,6 +150,7 @@ function retryTarget(items: TranscriptItem[], status: SessionInfo["status"]): { 
 function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, onHelp, onAccounts, connected }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void; connected: boolean }) {
   const counts = { needs_you: 0, working: 0, failed: 0, done: 0, idle: 0 };
   for (const s of workers) counts[s.status]++;
+  const spent = [main, ...workers].reduce((n, s) => n + (s?.usage?.costUsd ?? 0), 0);
   const groups = new Map<string, SessionInfo[]>();
   for (const s of workers) groups.set(s.project, [...(groups.get(s.project) ?? []), s]);
 
@@ -198,6 +199,7 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
       </div>
 
       <div className="side-foot">
+        {spent > 0 && <p className="spent" title="Reported by the agents across all sessions, including Perzian">{cost(spent)} spent</p>}
         <button className="btn new" onClick={onNew}>
           New session <kbd>N</kbd>
         </button>
@@ -384,6 +386,7 @@ function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: 
       <div className="live-meta">
         {s.branch && <code>{s.branch}</code>}
         <span className="agent-badge">{AGENTS[s.agent].label}</span>
+        {s.usage?.costUsd !== undefined && <span className="agent-badge">{cost(s.usage.costUsd)}</span>}
         {s.progress && s.status === "working" && (
           <span className="live-phase">
             {s.progress.phase} · {s.progress.step}/{s.progress.of}
@@ -481,6 +484,7 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
         {s.branch && <code className="chip" title={s.cwd}>{s.worktree ? "⑂ " : ""}{s.branch}</code>}
         <span className="chip">{AGENTS[s.agent].label}</span>
         <ModelPicker s={s} state={state} send={send} />
+        <Usage s={s} />
         <select className="picker" aria-label="Permission mode" value={s.mode ?? "ask"} onChange={(e) => send({ type: "session.setMode", sessionId: s.id, mode: e.target.value as PermissionMode })}>
           {(Object.keys(MODE_LABEL) as PermissionMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
         </select>

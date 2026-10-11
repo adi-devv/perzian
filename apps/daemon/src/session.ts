@@ -23,6 +23,7 @@ import { existsSync } from "node:fs";
 import { adapterEntry, agentEnv } from "./agents.ts";
 import type { Credentials } from "./credentials.ts";
 import { permissionPolicy } from "./permissions.ts";
+import { UsageMeter } from "./usage.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const reportMcpEntry = join(here, "../../../packages/report-mcp/src/index.ts");
@@ -82,6 +83,7 @@ export class AgentSession {
   private outcomeThisTurn = false;
   // Verification commands the agent actually ran this turn, with real exit codes.
   readonly proofs = new ProofTracker();
+  private meter?: UsageMeter;
   private changeTimer?: ReturnType<typeof setTimeout>;
   private modelOptionId?: string;
   private availableModes: string[] = [];
@@ -178,6 +180,8 @@ export class AgentSession {
     console.log(`[${this.info.id.slice(0, 6)}] ${this.info.agent} executable (${agent.resolved.source}): ${agent.resolved.path}`);
     const env: NodeJS.ProcessEnv = { ...process.env, ...agent.env, ...this.deps.creds?.envFor(this.info.agent) };
     if (this.info.agent === "claude-code" && this.info.model) env.ANTHROPIC_MODEL = this.info.model;
+    this.meter ??= new UsageMeter(this.info.usage);
+    this.meter.restart();
     const proc = spawn(process.execPath, [adapterEntry(this.info.agent)], { cwd: this.info.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     this.proc = proc;
     let stderr = "";
@@ -619,6 +623,11 @@ export class AgentSession {
           case "config_option_update":
             this.readConfig({ configOptions: update.configOptions });
             break;
+          case "usage_update": {
+            const usage = this.meter?.read(update);
+            if (usage) this.update({ usage });
+            break;
+          }
           default:
             break;
         }

@@ -20,6 +20,12 @@ export const demoEvents: PerzianEvent[] = [
   { type: "session.created", session: s("d", "Dark mode tokens", "~/code/web", "perzian/dark-tokens", "done", "claude-code", 3_000_000) },
   { type: "session.created", session: s("g", "Bump deps", "~/code/billing", "main", "idle", "claude-code", 6_000_000, { parentId: undefined, worktree: false, live: false }) },
 
+  { type: "session.updated", sessionId: "main", patch: { usage: { costUsd: 0.38, contextUsed: 41_000, contextSize: 200_000 } } },
+  { type: "session.updated", sessionId: "b", patch: { usage: { costUsd: 1.12, contextUsed: 92_000, contextSize: 200_000 } } },
+  { type: "session.updated", sessionId: "a", patch: { usage: { costUsd: 0.41, contextUsed: 38_000, contextSize: 200_000 } } },
+  { type: "session.updated", sessionId: "d", patch: { usage: { costUsd: 0.87, contextUsed: 168_000, contextSize: 200_000 } } },
+  { type: "session.updated", sessionId: "e", patch: { usage: { contextUsed: 61_000, contextSize: 258_000 } } },
+
   { type: "session.progress", sessionId: "b", progress: { phase: "Implement", step: 3, of: 5, note: "middleware" } },
   { type: "session.progress", sessionId: "e", progress: { phase: "Implement", step: 2, of: 4 } },
   { type: "session.progress", sessionId: "a", progress: { phase: "Design", step: 1, of: 4 } },

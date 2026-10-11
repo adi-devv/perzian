@@ -8,6 +8,30 @@ export function ago(ts: number): string {
   return m < 1 ? "now" : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
 }
 
+export function cost(usd: number): string {
+  return usd < 0.01 ? "<$0.01" : usd < 100 ? `$${usd.toFixed(2)}` : `$${Math.round(usd)}`;
+}
+
+const k = (n: number) => (n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(1)}M` : `${Math.round(n / 1000)}k`);
+
+// Spend, plus a hairline meter of how full the context window is.
+export function Usage({ s }: { s: SessionInfo }) {
+  const u = s.usage;
+  if (!u || (u.costUsd === undefined && !u.contextSize)) return null;
+  const pct = u.contextSize && u.contextUsed !== undefined ? Math.min(100, Math.round((u.contextUsed / u.contextSize) * 100)) : undefined;
+  const title = [u.costUsd !== undefined && `${cost(u.costUsd)} spent in this session`, pct !== undefined && `context ${pct}% full (${k(u.contextUsed!)} of ${k(u.contextSize!)} tokens)`].filter(Boolean).join(" · ");
+  return (
+    <span className="usage chip" title={title}>
+      {u.costUsd !== undefined && <span>{cost(u.costUsd)}</span>}
+      {pct !== undefined && (
+        <span className={`ctx ${pct >= 80 ? "full" : ""}`} aria-label={`Context ${pct}% full`}>
+          <i style={{ width: `${pct}%` }} />
+        </span>
+      )}
+    </span>
+  );
+}
+
 // Re-render every 30s so relative times stay fresh.
 export function useTick(ms = 30_000) {
   const [, set] = useState(0);

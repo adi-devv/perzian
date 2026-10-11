@@ -28,8 +28,18 @@ export interface SessionInfo {
   seenAt?: number;
   /** Check commands detected in the project (e.g. "npm test", "npm run typecheck"); named in the worker's brief. */
   checks?: string[];
+  /** What the agent reports it has spent and how full its context is. Codex may report only context. */
+  usage?: SessionUsage;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface SessionUsage {
+  /** Total spent by this session across adapter restarts, in USD. */
+  costUsd?: number;
+  /** Tokens in the context window after the last turn, and the window size. */
+  contextUsed?: number;
+  contextSize?: number;
 }
 
 export interface Progress {
