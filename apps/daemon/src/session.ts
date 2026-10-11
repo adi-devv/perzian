@@ -24,6 +24,7 @@ import { existsSync } from "node:fs";
 import { adapterEntry, agentEnv } from "./agents.ts";
 import type { Credentials } from "./credentials.ts";
 import { permissionPolicy } from "./permissions.ts";
+import { ToolObserver, isWriteCall, outsideOf, parentToolCallId, touchedPaths } from "./observe.ts";
 import { UsageMeter } from "./usage.ts";
 import { SetupGate, readyWorktree } from "./setup.ts";
 import { MAX_FIX_ATTEMPTS, declaredBrief, declaredProofs, fixPrompt, runDeclaredChecks } from "./checks.ts";
@@ -65,7 +66,10 @@ function toolName(update: { _meta?: Record<string, unknown> | null }): string | 
 const OWN_TOOL = /^mcp__perzian__|^perzian[_.]/;
 // Claude loads the developer's and the repo's settings; an allow rule there would answer before the daemon
 // ever sees the request. Ask rules beat allow rules, so these send every shell command and edit to us.
-const CLAUDE_META = { claudeCode: { options: { settings: { permissions: { ask: ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"] } } } } };
+const CLAUDE_ASK = { permissions: { ask: ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"] } };
+// extraDirs go to Claude as additionalDirectories (claude-agent-acp merges _meta.claudeCode.options into the SDK options).
+const claudeMeta = (extraDirs?: string[]) => ({ claudeCode: { options: { settings: CLAUDE_ASK, ...(extraDirs?.length ? { additionalDirectories: extraDirs } : {}) } } });
+const PR_CHECK_MS = 60_000;
 const isTerminal = (status: string) => status === "completed" || status === "failed" || status === "cancelled";
 
 export interface PendingDecision {
@@ -85,6 +89,8 @@ export interface SessionDeps {
   adapter?: { command: string; args: string[] };
   /** Overrides each declared check's timeout, in ms (tests). */
   checkTimeoutMs?: number;
+  /** Looks up the branch's open pull request (tests swap out gh). */
+  prLookup?: (cwd: string) => Promise<{ url: string; state: string } | undefined>;
 }
 
 // One agent session = one adapter process + one ACP connection. Can be dormant (restored from the log)
@@ -95,7 +101,14 @@ export class AgentSession {
   private conn?: acp.ClientSideConnection;
   private starting?: Promise<void>;
   private agentText = "";
-  private tools = new Map<string, { title: string; kind?: string; status: string; own: boolean; hidden: boolean }>();
+  private tools = new Map<string, { title: string; kind?: string; status: string; own: boolean; hidden: boolean; parent?: string }>();
+  // Observed facts (see observe.ts): outside paths, subagents, background processes; and the repo's state.
+  private observer: ToolObserver;
+  private startBranch?: string; // the branch the base was cut from; the base is recomputed against it
+  private repoRunning?: Promise<void>;
+  private repoAgain = false;
+  private repoDirty = false;
+  private lastPrCheck = 0;
   private inflight = 0;
   private outcomeThisTurn = false;
   // Verification commands the agent actually ran this turn, with real exit codes.
@@ -134,10 +147,17 @@ export class AgentSession {
     if (config) this.config = config;
     const files = st.changes[info.id];
     if (files) this.lastChanges = JSON.stringify(files);
+    this.startBranch = info.baseBranch ?? info.branch;
+    this.observer = new ToolObserver(info.cwd, () => this.roots(), info);
+  }
+
+  /** The folders edits are expected in: the session's own and its extra ones. */
+  roots(): string[] {
+    return [this.info.cwd, ...(this.info.extraDirs ?? [])];
   }
 
   static create(
-    opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; baseBranch?: string; id?: string; checks?: string[]; declaredChecks?: DeclaredCheck[]; checksError?: string },
+    opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; baseBranch?: string; id?: string; checks?: string[]; declaredChecks?: DeclaredCheck[]; checksError?: string; extraDirs?: string[] },
     deps: SessionDeps,
   ): AgentSession {
     const now = Date.now();
@@ -158,6 +178,7 @@ export class AgentSession {
       ...(opts.checks?.length ? { checks: opts.checks } : {}),
       ...(opts.declaredChecks?.length ? { declaredChecks: opts.declaredChecks } : {}),
       ...(opts.checksError ? { checksError: opts.checksError } : {}),
+      ...(opts.extraDirs?.length ? { extraDirs: opts.extraDirs } : {}),
       status: "idle",
       createdAt: now,
       updatedAt: now,
@@ -277,7 +298,7 @@ export class AgentSession {
       },
     ];
 
-    const meta = this.info.agent === "claude-code" ? { _meta: CLAUDE_META } : {};
+    const meta = this.info.agent === "claude-code" ? { _meta: claudeMeta(this.info.extraDirs) } : {};
     let res: acp.NewSessionResponse | acp.LoadSessionResponse | undefined;
     if (this.info.acpSessionId && init.agentCapabilities?.loadSession) {
       // Replay is suppressed: we already have the transcript in our log.
@@ -455,6 +476,7 @@ export class AgentSession {
         this.dropDecisions();
         this.closeOpenTools(hit ? "cancelled" : "failed");
         if (hit) {
+          await this.refreshRepo();
           await this.refreshChanges();
           this.pause(hit);
         } else this.setStatus("failed");
@@ -537,10 +559,12 @@ export class AgentSession {
 
   // Tool calls the agent never closed (cancelled turn, crash) would spin forever in the UI.
   private closeOpenTools(status: string): void {
+    const subagents = this.observer.closeOpen(status);
+    if (subagents) this.update(subagents);
     for (const [toolCallId, t] of this.tools) {
       if (t.hidden || isTerminal(t.status)) continue;
       t.status = status;
-      this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "tool", toolCallId, title: t.title, status, toolKind: t.kind, at: Date.now() } });
+      this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "tool", toolCallId, title: t.title, status, toolKind: t.kind, ...(t.parent ? { parentToolCallId: t.parent } : {}), at: Date.now() } });
     }
   }
 
@@ -548,6 +572,7 @@ export class AgentSession {
   private async finishTurn(prompt: string, stopReason: acp.StopReason): Promise<string | undefined> {
     this.dropDecisions();
     this.closeOpenTools(stopReason === "cancelled" ? "cancelled" : "completed");
+    await this.refreshRepo();
     const files = await this.refreshChanges();
     // Stopped by a usage limit: the work isn't finished, so no outcome; it picks up when the limit resets.
     // A normal-looking end only counts when the agent's last words are a limit message with a reset time.
@@ -694,9 +719,96 @@ export class AgentSession {
     }
   }
 
-  private scheduleChanges(): void {
+  /** `repo`: the agent ran a command, so also look at commits, branch, worktrees and PR. */
+  private scheduleChanges(repo = false): void {
+    if (repo) this.repoDirty = true;
     clearTimeout(this.changeTimer);
-    this.changeTimer = setTimeout(() => void this.refreshChanges(), 600);
+    this.changeTimer = setTimeout(() => {
+      const withRepo = this.repoDirty;
+      this.repoDirty = false;
+      void (withRepo ? this.refreshRepo() : Promise.resolve()).then(() => this.refreshChanges());
+    }, 600);
+  }
+
+  // ---- The repo as the agent left it: branch switches, rebases, commits, pushes, PRs, its own worktrees ----
+
+  /** Runs one refresh at a time; a request that arrives meanwhile runs once more afterwards. */
+  refreshRepo(): Promise<void> {
+    if (!this.info.baseSha) return Promise.resolve();
+    if (this.repoRunning) {
+      this.repoAgain = true;
+      return this.repoRunning;
+    }
+    const run = async () => {
+      do {
+        this.repoAgain = false;
+        await this.observeRepo().catch(() => {});
+      } while (this.repoAgain);
+    };
+    this.repoRunning = run().finally(() => (this.repoRunning = undefined));
+    return this.repoRunning;
+  }
+
+  private async observeRepo(): Promise<void> {
+    const cwd = this.info.cwd;
+    const patch: Partial<SessionInfo> = {};
+    let base = this.info.baseSha!;
+
+    // Branch switch or rebase: the change map must still diff against where the work started.
+    const branch = await git.currentBranch(cwd);
+    const switched = branch !== undefined && branch !== this.info.branch;
+    const ancestor = await git.isAncestor(cwd, base, "HEAD");
+    if (switched) patch.branch = branch;
+    if ((ancestor === false || (switched && branch !== this.startBranch)) && this.startBranch) {
+      const mb = await git.mergeBase(cwd, "HEAD", this.startBranch);
+      if (mb && mb !== base) {
+        base = mb;
+        patch.baseSha = mb;
+        this.notice(`Base recomputed after ${switched ? `switching to ${branch}` : "a rebase or reset"}`);
+      }
+    }
+
+    // Commits, push, PR.
+    const ahead = (await git.aheadCount(cwd, base)) ?? 0;
+    const up = await git.upstreamState(cwd);
+    const prUrl = this.info.git?.prUrl;
+    const gitState = { ahead, pushed: up.upstream && up.unpushed === 0, ...(prUrl ? { prUrl } : {}) };
+    if (JSON.stringify(gitState) !== JSON.stringify(this.info.git)) patch.git = gitState;
+
+    // Worktrees the agent made itself: not Perzian's (a session's cwd, the project, perzian/ branches), not another session's.
+    const listed = await git.worktrees(cwd);
+    const known = new Set<string>([git.realish(cwd), git.realish(this.info.project)]);
+    const others = new Set<string>();
+    for (const o of Object.values(this.store.state().sessions)) {
+      if (o.id === this.info.id) continue;
+      known.add(git.realish(o.cwd));
+      for (const w of o.extraWorktrees ?? []) others.add(git.realish(w.path));
+    }
+    const mine = new Set((this.info.extraWorktrees ?? []).map((w) => git.realish(w.path)));
+    const extra: NonNullable<SessionInfo["extraWorktrees"]> = [];
+    for (const [i, w] of listed.entries()) {
+      const real = git.realish(w.path);
+      if (i === 0 || w.bare || w.prunable || known.has(real) || others.has(real) || w.branch?.startsWith("perzian/")) continue;
+      if (!mine.has(real) && !existsSync(w.path)) continue;
+      const changed = await git.changes(w.path, base).then((f) => f.length).catch(() => undefined);
+      extra.push({ path: w.path, ...(w.branch ? { branch: w.branch } : {}), ...(changed !== undefined ? { changed } : {}) });
+    }
+    if (JSON.stringify(extra) !== JSON.stringify(this.info.extraWorktrees ?? [])) patch.extraWorktrees = extra;
+
+    if (Object.keys(patch).length) this.update(patch);
+    if (branch && (ahead > 0 || gitState.pushed)) void this.refreshPr();
+  }
+
+  // gh at most once a minute; no gh, no PR or no sign-in just means no link.
+  private async refreshPr(): Promise<void> {
+    if (Date.now() - this.lastPrCheck < PR_CHECK_MS) return;
+    this.lastPrCheck = Date.now();
+    const pr = await (this.deps.prLookup ?? git.pullRequest)(this.info.cwd).catch(() => undefined);
+    const prUrl = pr && pr.state.toUpperCase() === "OPEN" ? pr.url : undefined;
+    const cur = this.info.git;
+    if (!cur || cur.prUrl === prUrl) return;
+    const { prUrl: _, ...rest } = cur;
+    this.update({ git: { ...rest, ...(prUrl ? { prUrl } : {}) } });
   }
 
   // ---- Usage limits ----
@@ -806,6 +918,11 @@ export class AgentSession {
     this.proc.kill();
   }
 
+  private observeTool(update: Parameters<ToolObserver["onTool"]>[0]): void {
+    const patch = this.observer.onTool(update);
+    if (patch) this.update(patch);
+  }
+
   private flushAgentText(): void {
     if (!this.agentText.trim()) return;
     this.turnText = this.agentText.trim();
@@ -840,6 +957,7 @@ export class AgentSession {
         const raw = params.toolCall.rawInput as Record<string, unknown> | undefined;
         const kind = params.toolCall.kind ?? known?.kind;
         const command = typeof raw?.command === "string" ? raw.command : undefined;
+        const outside = isWriteCall(kind, toolName(params.toolCall)) ? outsideOf(touchedPaths(params.toolCall, this.info.cwd), this.roots()) : [];
         const verdict = permissionPolicy({
           role: this.info.role,
           mode: this.info.mode,
@@ -849,6 +967,7 @@ export class AgentSession {
           // A shell command's title is the command itself, so `perzian_x` there is not our tool.
           own: kind !== "execute" && command === undefined && (OWN_TOOL.test(title) || OWN_TOOL.test(toolName(params.toolCall) ?? "") || !!known?.own),
           declared: this.info.declaredChecks?.map((c) => c.run),
+          outside,
         });
         const pick = (...kinds: acp.PermissionOptionKind[]) => kinds.map((k) => params.options.find((o) => o.kind === k)).find(Boolean);
         if (DEBUG) console.error(`[perm ${this.info.id.slice(0, 6)}] ${kind} ${JSON.stringify(command ?? title).slice(0, 120)} -> ${JSON.stringify(verdict)}`);
@@ -862,7 +981,7 @@ export class AgentSession {
           return reject ? { outcome: { outcome: "selected", optionId: reject.optionId } } : { outcome: { outcome: "cancelled" } };
         }
         const destructive = verdict.action === "ask" ? verdict.destructive : undefined;
-        const detail = command ?? (typeof raw?.file_path === "string" ? raw.file_path : undefined);
+        const detail = command ?? (outside.length ? outside.join(", ") : typeof raw?.file_path === "string" ? raw.file_path : undefined);
         // A destructive command is allowed once at most: an "always" rule would let the next one through unasked.
         const options = params.options.filter((o) => !destructive || o.kind !== "allow_always");
         const optionId = await this.requestDecision({
@@ -871,6 +990,7 @@ export class AgentSession {
           detail: detail && detail !== title ? detail : undefined,
           options: options.map((o) => ({ id: o.optionId, label: o.name, kind: o.kind })),
           ...(destructive ? { destructive } : {}),
+          ...(outside.length ? { outside } : {}),
         });
         return optionId === null ? { outcome: { outcome: "cancelled" } } : { outcome: { outcome: "selected", optionId } };
       },
@@ -890,12 +1010,14 @@ export class AgentSession {
             const own = OWN_TOOL.test(name) || OWN_TOOL.test(update.title);
             // Our own report tools and Claude's ToolSearch (deferred-tool loading) are plumbing, not work.
             const hidden = own || INTERNAL_TOOLS.has(name);
-            this.tools.set(update.toolCallId, { title: update.title, kind: update.kind, status: update.status ?? "pending", own, hidden });
+            const parent = parentToolCallId(update);
+            this.tools.set(update.toolCallId, { title: update.title, kind: update.kind, status: update.status ?? "pending", own, hidden, ...(parent ? { parent } : {}) });
             if (hidden) break;
+            this.observeTool(update);
             this.store.emit({
               type: "session.transcript",
               sessionId: id,
-              item: { kind: "tool", toolCallId: update.toolCallId, title: update.title, status: update.status ?? "pending", toolKind: update.kind, at },
+              item: { kind: "tool", toolCallId: update.toolCallId, title: update.title, status: update.status ?? "pending", toolKind: update.kind, ...(parent ? { parentToolCallId: parent } : {}), at },
             });
             break;
           }
@@ -909,6 +1031,7 @@ export class AgentSession {
             // Deferred: the stop goes out after this update is handled.
             if (update.status && isTerminal(update.status) && this.pauseAfterStep) queueMicrotask(() => this.maybeStopForLimit());
             if (known?.hidden) break;
+            if (known || (update.title && !OWN_TOOL.test(update.title))) this.observeTool(update);
             // An update for a call we never saw (e.g. from before a reattach): without a title it would
             // blank the transcript entry, and it may be one of our own tools.
             if (!known && (!update.title || OWN_TOOL.test(update.title) || OWN_TOOL.test(toolName(update) ?? ""))) break;
@@ -922,12 +1045,16 @@ export class AgentSession {
                   title: update.title || known?.title || "",
                   status: update.status ?? known?.status ?? "in_progress",
                   toolKind: update.kind ?? known?.kind,
+                  ...((parentToolCallId(update) ?? known?.parent) ? { parentToolCallId: parentToolCallId(update) ?? known?.parent } : {}),
                   at,
                 },
               });
             }
             const k = update.kind ?? known?.kind;
-            if (update.status === "completed" && (k === "edit" || k === "delete" || k === "move" || k === "execute")) this.scheduleChanges();
+            const done = update.status === "completed" || update.status === "failed";
+            if (update.status === "completed" && (k === "edit" || k === "delete" || k === "move" || k === "execute")) this.scheduleChanges(k === "execute");
+            // A command that failed may still have committed or switched branches; Claude's worktree tools aren't commands.
+            else if (done && (k === "execute" || /worktree/i.test(toolName(update) ?? ""))) this.scheduleChanges(true);
             break;
           }
           case "current_mode_update":

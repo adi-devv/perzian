@@ -34,7 +34,9 @@ describe("ship", () => {
     assert.ok(stopped);
     assert.equal(readFileSync(join(project, "hello.txt"), "utf8"), "hi\n");
     assert.ok(!existsSync(info.cwd), "worktree removed");
-    assert.equal(git(project, "branch", "--list", info.branch!), "", "merged branch deleted");
+    assert.equal(r.worktreeRemoved, true, "the removal is recorded");
+    assert.match(git(project, "branch", "--list", info.branch!), /perzian\//, "the branch is kept");
+    assert.ok(!git(project, "worktree", "list").includes(info.cwd), "git no longer lists the worktree");
   });
 
   test("a conflict aborts the merge and names the files", async () => {

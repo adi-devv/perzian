@@ -45,8 +45,55 @@ export interface SessionInfo {
   setup?: SetupState;
   /** Set while status is "paused": the usage limit it stopped at and when it resumes. */
   pause?: PauseInfo;
+  // ---- Observed facts: things the agent did on its own, recorded by the daemon (see observe.ts). ----
+  /** Folders besides `cwd` the agent may edit without a card (passed to Claude as additional directories). */
+  extraDirs?: string[];
+  /** Absolute paths outside `cwd` and `extraDirs` the agent edited, deleted or moved (symlinks resolved). */
+  outsidePaths?: string[];
+  /** Worktrees the agent created itself (worktree add, Claude's worktree tools); Perzian's own aren't listed. */
+  extraWorktrees?: ExtraWorktree[];
+  /** Claude subagents (Task/Agent tool calls) this session started. */
+  subagents?: Subagent[];
+  /** Commits, push and PR the agent made itself. */
+  git?: GitState;
+  /** Commands the agent left running in the background (dev servers, watchers). */
+  background?: BackgroundProc[];
   createdAt: number;
   updatedAt: number;
+}
+
+export interface ExtraWorktree {
+  path: string;
+  branch?: string;
+  /** Files changed there, against this session's baseSha. */
+  changed?: number;
+}
+
+export interface Subagent {
+  /** The Task/Agent tool call's id; transcript tool items with `parentToolCallId` = this id ran inside it. */
+  id: string;
+  description: string;
+  status: "running" | "done" | "failed";
+}
+
+export interface GitState {
+  /** Commits on HEAD beyond baseSha. */
+  ahead: number;
+  /** The branch has an upstream and nothing is left unpushed. */
+  pushed: boolean;
+  /** Open pull request for the branch, when gh is available. */
+  prUrl?: string;
+}
+
+export interface BackgroundProc {
+  /** The Bash tool call that started it. */
+  id: string;
+  command: string;
+  port?: number;
+  /** The agent's own id for the background task, when it reported one. */
+  taskId?: string;
+  /** Killed, or failed to start. */
+  ended?: boolean;
 }
 
 /** One entry of perzian.json `checks`: `{ "name": "unit", "run": "npm test", "timeoutSec": 600 }`. */
@@ -88,6 +135,8 @@ export interface ShipState {
   /** Files that conflicted when merging. */
   files?: string[];
   detail?: string;
+  /** Merge only: the session's worktree folder was removed (the branch is kept). */
+  worktreeRemoved?: boolean;
   at: number;
 }
 
@@ -155,6 +204,8 @@ export interface Decision {
   recommended?: string;
   /** Set by the daemon on a destructive command (e.g. "git push --force"): always asked, never auto-allowed. */
   destructive?: string;
+  /** Set by the daemon on an edit, delete or move outside the session's folders: the resolved paths. */
+  outside?: string[];
   createdAt: number;
 }
 
@@ -214,7 +265,8 @@ export type TranscriptItem =
   // system: sent by the daemon (e.g. "sessions finished" updates to the lead), not typed by the developer.
   | { kind: "user"; text: string; at: number; system?: true }
   | { kind: "agent"; text: string; at: number }
-  | { kind: "tool"; toolCallId: string; title: string; status: string; toolKind?: string; at: number }
+  // parentToolCallId: the Claude subagent (Task/Agent call, see SessionInfo.subagents) this call ran inside.
+  | { kind: "tool"; toolCallId: string; title: string; status: string; toolKind?: string; parentToolCallId?: string; at: number }
   | { kind: "spawn"; childId: string; title: string; at: number }
   | { kind: "notice"; text: string; at: number };
 
@@ -234,7 +286,9 @@ export type PerzianEvent =
   | { type: "session.changes"; sessionId: string; files: FileChange[]; at: number }
   | { type: "decision.requested"; decision: Decision }
   | { type: "decision.resolved"; decisionId: string; sessionId: string; optionId: string | null }
-  | { type: "outcome.reported"; outcome: Outcome };
+  | { type: "outcome.reported"; outcome: Outcome }
+  // The global default permission mode: what a new session starts in when its creator doesn't say.
+  | { type: "settings.defaultMode"; mode: PermissionMode; at: number };
 
 export interface CreateSessionArgs {
   project: string;
@@ -244,6 +298,8 @@ export interface CreateSessionArgs {
   model?: string;
   mode?: PermissionMode;
   worktree?: boolean;
+  /** Extra folders the session may edit besides its own (absolute or ~/ paths). */
+  extraDirs?: string[];
 }
 
 // UI -> daemon
@@ -258,6 +314,7 @@ export type Command =
   | { type: "session.archive"; sessionId: string }
   | { type: "session.ship"; sessionId: string; how: "merge" | "pr" }
   | { type: "session.runChecks"; sessionId: string }
+  | { type: "settings.setDefaultMode"; mode: PermissionMode }
   // After a failed worktree setup: run it again, or start the agent without it.
   | { type: "session.setup"; sessionId: string; action: "retry" | "skip" }
   | { type: "main.start"; model?: string; agent?: AgentKind; prompt?: string }

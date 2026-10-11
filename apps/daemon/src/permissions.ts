@@ -6,6 +6,7 @@
 // - Destructive commands (rm -rf, force pushes, hard resets, dropping databases...) always get a card,
 //   in every mode. Our "edits" and "auto" modes are enforced here rather than by the agent's own
 //   accept-edits/bypass modes, because an agent in those modes doesn't ask before running rm -rf.
+// - Edits, deletes and moves outside the session's folder (and its extra folders) always get a card.
 
 export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | "other" | string;
 
@@ -21,17 +22,20 @@ export interface PermissionRequest {
   own?: boolean;
   /** Commands the repo declares as checks (perzian.json `run`); a worker runs exactly these without a card. */
   declared?: string[];
+  /** For edit/delete/move: resolved target paths outside the session's folders (session.ts computes them). */
+  outside?: string[];
 }
 
 export type PermissionVerdict =
   | { action: "allow"; why: "own" | "read" | "check" | "declared" | "edits" | "auto" }
   | { action: "deny"; why: "lead-edit" | "lead-exec" }
-  | { action: "ask"; destructive?: string };
+  | { action: "ask"; destructive?: string; outside?: string[] };
 
 const LEAD_DENY = new Set(["edit", "delete", "move"]);
 const LEAD_ALLOW = new Set(["read", "search", "think"]);
 // What "Auto-accept edits" accepts; shell commands still ask unless they're plain checks.
 const WORKER_EDITS = new Set(["edit", "delete", "move", "read", "search", "think"]);
+const WRITES = new Set(["edit", "delete", "move"]);
 
 export function permissionPolicy(req: PermissionRequest): PermissionVerdict {
   if (req.own) return { action: "allow", why: "own" };
@@ -45,6 +49,9 @@ export function permissionPolicy(req: PermissionRequest): PermissionVerdict {
   }
   const destructive = (req.command !== undefined ? destructiveReason(req.command) : null) ?? (req.toolKind === "execute" && req.title ? destructiveReason(req.title) : null);
   if (destructive) return { action: "ask", destructive };
+  // An edit, delete or move outside the session's folders is a normal card in every mode, even where
+  // edits are otherwise accepted. Reads outside stay allowed.
+  if (req.outside?.length && req.toolKind && WRITES.has(req.toolKind)) return { action: "ask", outside: req.outside };
   if (req.toolKind === "execute" && req.command !== undefined && isVerificationCommand(req.command)) return { action: "allow", why: "check" };
   // Exactly a declared check's command (surrounding whitespace aside); anything added to it asks as usual.
   if (req.toolKind === "execute" && req.command !== undefined && req.declared?.includes(req.command.trim())) return { action: "allow", why: "declared" };

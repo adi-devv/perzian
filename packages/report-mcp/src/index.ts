@@ -95,31 +95,33 @@ server.tool(
   },
 );
 
+server.tool(
+  "spawn_session",
+  "Start a worker coding session in a project folder; returns its id. The worker has not seen this conversation, so prompt must be a complete brief: " +
+    "Goal (the request restated in full), Context (relevant files), Constraints (the developer's don'ts, verbatim), Done when (criteria + checks that must pass). " +
+    "Spawn independent units in the same turn so they run in parallel; keep coupled work in one session. " +
+    "Sessions nest at most 2 levels below the lead; you are told when a session you start finishes.",
+  {
+    project: z.string().describe("Absolute path (or ~/...) of the project folder"),
+    prompt: z.string().describe("Complete brief: Goal, Context, Constraints, Done when (including which checks must pass)"),
+    title: z.string().optional().describe("Short tile title, 2-5 words"),
+    agent: z.enum(["claude-code", "codex"]).optional(),
+    model: z
+      .string()
+      .optional()
+      .describe("Omit for the default. Exact ids only: claude-haiku-5-5 (mechanical), claude-sonnet-5-5, claude-opus-5-5 (hard design/algorithms/debugging)"),
+    mode: z.enum(["ask", "edits", "plan", "auto"]).optional().describe("Omit for the developer's default. plan = analysis only, no edits; auto = only if the developer asked for hands-off"),
+    worktree: z.boolean().optional().describe("true whenever two or more sessions work on the same repo at once (isolated git worktree)"),
+    extraDirs: z.array(z.string()).optional().describe("Absolute paths of extra folders (besides project) the session may edit without asking, e.g. a sibling package"),
+  },
+  async (args) => text(await send({ tool: "spawn_session", sessionId, args })),
+);
 if (role === "main") {
   server.tool("list_sessions", "List the developer's coding sessions with status, progress, changed files, outcomes and detected check commands.", {}, async () =>
     text(await send({ tool: "list_sessions", sessionId, args: {} })),
   );
   server.tool("get_session", "Get one session's status, progress, changed files, outcome (with observed proof), detected check commands and last message. Call this before reporting status or results the developer asks for.", { id: z.string() }, async (args) =>
     text(await send({ tool: "get_session", sessionId, args })),
-  );
-  server.tool(
-    "spawn_session",
-    "Start a worker coding session in a project folder; returns its id. The worker has not seen this conversation, so prompt must be a complete brief: " +
-      "Goal (the request restated in full), Context (relevant files), Constraints (the developer's don'ts, verbatim), Done when (criteria + checks that must pass). " +
-      "Spawn independent units in the same turn so they run in parallel; keep coupled work in one session.",
-    {
-      project: z.string().describe("Absolute path (or ~/...) of the project folder"),
-      prompt: z.string().describe("Complete brief: Goal, Context, Constraints, Done when (including which checks must pass)"),
-      title: z.string().optional().describe("Short tile title, 2-5 words"),
-      agent: z.enum(["claude-code", "codex"]).optional(),
-      model: z
-        .string()
-        .optional()
-        .describe("Omit for the default. Exact ids only: claude-haiku-5-5 (mechanical), claude-sonnet-5-5, claude-opus-5-5 (hard design/algorithms/debugging)"),
-      mode: z.enum(["ask", "edits", "plan", "auto"]).optional().describe("Omit for the developer's default. plan = analysis only, no edits; auto = only if the developer asked for hands-off"),
-      worktree: z.boolean().optional().describe("true whenever two or more sessions work on the same repo at once (isolated git worktree)"),
-    },
-    async (args) => text(await send({ tool: "spawn_session", sessionId, args })),
   );
   server.tool("send_to_session", "Send a follow-up to an existing session; it keeps its context, branch and worktree. Use this, not a new spawn, for changes to work that session already did.", { id: z.string(), prompt: z.string() }, async (args) =>
     text(await send({ tool: "send_to_session", sessionId, args })),

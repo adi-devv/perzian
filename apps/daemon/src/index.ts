@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DAEMON_PORT, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
+import { DAEMON_PORT, PERMISSION_MODES, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
 import { EventStore } from "./store.ts";
 import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps } from "./session.ts";
 import * as git from "./git.ts";
@@ -15,6 +15,7 @@ import { Credentials, PROVIDERS } from "./credentials.ts";
 import { exec } from "node:child_process";
 import { allChecks, detectChecks, loadDeclaredChecks } from "./checks.ts";
 import { LeadNotifier, type ChildReport } from "./notify.ts";
+import { spawnBlocker } from "./observe.ts";
 import { ResumeQueue } from "./resume.ts";
 import { loadDesktopToken, trustedOrigin } from "./origin.ts";
 import { Devices, PairingCodes, PhoneAccess } from "./phone.ts";
@@ -115,11 +116,13 @@ const notifier = new LeadNotifier({
     if (lead && !lead.info.archived) void lead.prompt(text, { system: true }).catch((e) => console.error(`[${leadId}]`, e));
   },
   notice: (leadId, text) => sessions.get(leadId)?.notice(text),
+  // A worker that started sessions of its own hears about them too, worded for a worker.
+  audience: (leadId) => (sessions.get(leadId)?.info.role === "main" ? "lead" : "worker"),
 });
 store.subscribe((e) => {
   if (e.type === "session.paused" || e.type === "session.resumed") {
     const info = store.state().sessions[e.sessionId];
-    if (info?.role === "main" && e.type === "session.resumed") setImmediate(() => notifier.leadIdle(info.id));
+    if (info && e.type === "session.resumed") setImmediate(() => notifier.leadIdle(info.id));
     if (!info?.parentId) return;
     if (e.type === "session.paused") setImmediate(() => notifier.childPaused(info.parentId!, info.id));
     // Resumed by the reset or "Resume now"; a developer's own message to the child isn't news for the lead.
@@ -131,7 +134,8 @@ store.subscribe((e) => {
   if (!info) return;
   // Deferred: delivering prompts the lead, which emits events, and we're inside an emit.
   if (info.parentId && (e.status === "done" || e.status === "failed")) setImmediate(() => notifier.childSettled(info.parentId!, info.id));
-  if (info.role === "main" && e.status !== "working" && e.status !== "needs_you") setImmediate(() => notifier.leadIdle(info.id));
+  // Any session may be a parent (workers can start sessions); nothing pending makes this a no-op.
+  if (e.status !== "working" && e.status !== "needs_you") setImmediate(() => notifier.leadIdle(info.id));
 });
 
 // Sessions paused at a usage limit resume by themselves when it resets: same session, same worktree, a
@@ -152,6 +156,8 @@ resumeQueue.attach(store);
 const expand = (p: string) => resolve(p.replace(/^~(?=$|\/)/, homedir()));
 
 async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "worker"; parentId?: string } = {}): Promise<AgentSession> {
+  const extraDirs = (args.extraDirs ?? []).filter((d) => typeof d === "string" && d.trim()).map((d) => expand(d.trim()));
+  for (const d of extraDirs) if (!existsSync(d) || !statSync(d).isDirectory()) throw new Error(`Extra folder not found: ${d}`);
   // An empty path would resolve to the daemon's own folder.
   if (!args.project?.trim()) throw new Error("No project folder given");
   const project = expand(args.project.trim());
@@ -163,7 +169,7 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   const declared = loadDeclaredChecks(ws.cwd, project);
   const checks = allChecks(detectChecks(ws.cwd), declared.checks);
   const s = AgentSession.create(
-    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode, checks, declaredChecks: declared.checks, checksError: declared.error, ...extra },
+    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode ?? store.state().settings.defaultMode, ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, checksError: declared.error, ...extra },
     deps,
   );
   if (args.worktree && !ws.worktree) s.notice("This folder isn't a git repo, so the session works in it directly (no worktree)");
@@ -208,8 +214,8 @@ async function handleCommand(cmd: Command): Promise<void> {
     case "session.prompt":
       if (!s) throw new Error("Unknown session");
       assertPromptable(s.info);
-      if (s.info.role === "main") notifier.developerPrompted(s.info.id);
-      else notifier.childPrompted(s.info.id, false);
+      notifier.developerPrompted(s.info.id);
+      if (s.info.role !== "main") notifier.childPrompted(s.info.id, false);
       void s.prompt(cmd.prompt);
       break;
     case "session.cancel":
@@ -250,6 +256,10 @@ async function handleCommand(cmd: Command): Promise<void> {
       s.setShip(result);
       break;
     }
+    case "settings.setDefaultMode":
+      if (!PERMISSION_MODES.includes(cmd.mode)) throw new Error(`Unknown mode: ${String(cmd.mode)}`);
+      if (store.state().settings.defaultMode !== cmd.mode) store.emit({ type: "settings.defaultMode", mode: cmd.mode, at: Date.now() });
+      break;
     case "session.runChecks":
       if (!s) throw new Error("Unknown session");
       void s.rerunChecks().catch((e) => console.error(`[${s.info.id}]`, e));
@@ -329,6 +339,8 @@ async function handleReport(call: ReportCall): Promise<unknown> {
       return brief(t.info);
     }
     case "spawn_session": {
+      const blocked = spawnBlocker(s.info.id, (id) => sessions.get(id)?.info);
+      if (blocked) throw new Error(blocked);
       const child = await createSession(call.args, { parentId: s.info.id });
       return { id: child.info.id, title: child.info.title, cwd: child.info.cwd, branch: child.info.branch };
     }
@@ -394,6 +406,10 @@ const http = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/report") {
       const out = await handleReport(JSON.parse(await readBody(req)));
       res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(out));
+      return;
+    }
+    if (url.pathname === "/api/worktrees/leftover" && req.method === "GET") {
+      json(200, git.leftoverWorktrees(home, [...sessions.values()].map((x) => x.info)));
       return;
     }
     if (url.pathname === "/api/doctor") {

@@ -155,3 +155,86 @@ describe("git helpers", () => {
     run(repo, "checkout", "-q", "-");
   });
 });
+
+describe("git observation helpers", () => {
+  let root: string;
+  let repo: string;
+  let base: string;
+  before(() => {
+    ({ root, repo, base } = makeRepo());
+  });
+  after(() => rmSync(root, { recursive: true, force: true }));
+
+  test("parseWorktrees reads the porcelain list", () => {
+    const list = git.parseWorktrees("worktree /r\nHEAD abc\nbranch refs/heads/main\n\nworktree /r-side\nHEAD def\ndetached\n\nworktree /gone\nHEAD 000\nbranch refs/heads/x\nprunable gitdir file points to non-existent location\n");
+    assert.deepEqual(list.map((w) => [w.path, w.branch, w.prunable]), [["/r", "main", undefined], ["/r-side", undefined, undefined], ["/gone", "x", true]]);
+  });
+
+  test("worktrees lists the main one first, then ones added by hand", async () => {
+    const side = join(root, "side");
+    run(repo, "worktree", "add", "-q", "-b", "side", side);
+    const list = await git.worktrees(repo);
+    assert.equal(list.length, 2);
+    assert.equal(git.realish(list[0].path), git.realish(repo));
+    assert.equal(list[1].branch, "side");
+    assert.equal((await git.worktrees(side)).length, 2, "same list from inside the other worktree");
+  });
+
+  test("aheadCount, isAncestor, mergeBase", async () => {
+    assert.equal(await git.aheadCount(repo, base), 0);
+    writeFileSync(join(repo, "n.txt"), "n\n");
+    run(repo, "add", "-A");
+    run(repo, "commit", "-q", "-m", "next");
+    assert.equal(await git.aheadCount(repo, base), 1);
+    assert.equal(await git.isAncestor(repo, base, "HEAD"), true);
+    assert.equal(await git.isAncestor(repo, "HEAD", base), false);
+    assert.equal(await git.isAncestor(repo, "deadbeef", "HEAD"), undefined);
+    assert.equal(await git.mergeBase(repo, "HEAD", base), base);
+  });
+
+  test("upstreamState: none, then pushed, then ahead of the upstream", async () => {
+    assert.deepEqual(await git.upstreamState(repo), { upstream: false, unpushed: 0 });
+    const remote = join(root, "remote.git");
+    run(root, "init", "-q", "--bare", remote);
+    run(repo, "remote", "add", "origin", remote);
+    run(repo, "push", "-q", "-u", "origin", "HEAD");
+    assert.deepEqual(await git.upstreamState(repo), { upstream: true, unpushed: 0 });
+    writeFileSync(join(repo, "m.txt"), "m\n");
+    run(repo, "add", "-A");
+    run(repo, "commit", "-q", "-m", "more");
+    assert.deepEqual(await git.upstreamState(repo), { upstream: true, unpushed: 1 });
+  });
+
+  test("realish resolves symlinks of the nearest existing folder", () => {
+    const real = join(root, "real");
+    mkdirSync(real);
+    symlinkSync(real, join(root, "ln"));
+    assert.equal(git.realish(join(root, "ln", "new", "f.ts")), join(git.realish(real), "new", "f.ts"));
+  });
+});
+
+describe("leftoverWorktrees", () => {
+  test("lists worktree folders no live session works in", () => {
+    const home = mkdtempSync(join(tmpdir(), "perzian-left-"));
+    try {
+      const wt = (name: string) => {
+        const p = join(home, "worktrees", "app", name);
+        mkdirSync(p, { recursive: true });
+        return p;
+      };
+      const live = wt("live-aaaaaa"), archived = wt("archived-bbbbbb"), merged = wt("merged-cccccc");
+      wt("orphan-dddddd");
+      const sessions = [
+        { id: "1", cwd: live, worktree: true },
+        { id: "2", cwd: archived, worktree: true, archived: true },
+        { id: "3", cwd: merged, worktree: true, ship: { state: "merged" as const, how: "merge" as const, at: 0 } },
+      ];
+      const left = git.leftoverWorktrees(home, sessions);
+      assert.deepEqual(left.map((l) => [l.name, l.sessionId]).sort(), [["archived-bbbbbb", "2"], ["merged-cccccc", "3"], ["orphan-dddddd", undefined]]);
+      assert.equal(left[0].repo, "app");
+      assert.deepEqual(git.leftoverWorktrees(join(home, "nope"), sessions), []);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

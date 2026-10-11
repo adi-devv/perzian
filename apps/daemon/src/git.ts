@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { basename, join, resolve, sep } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import type { ChangeKind, FileChange } from "@perzian/protocol";
+import type { ChangeKind, FileChange, SessionInfo } from "@perzian/protocol";
 
 const exec = promisify(execFile);
 
@@ -121,4 +121,137 @@ export function fileContent(cwd: string, path: string): string {
   const full = inside(realpathSync(cwd), realpathSync(inside(cwd, path)));
   if (statSync(full).size > 1_000_000) return "(file too large to show)";
   return readFileSync(full, "utf8");
+}
+
+// ---- Observation: what the agent did to the repo on its own (see observe.ts, session.ts) ----
+
+/** Runs git and returns its exit code and output without throwing on a non-zero exit. */
+async function gitCode(cwd: string, args: string[]): Promise<{ code: number | undefined; out: string }> {
+  try {
+    const { stdout } = await exec("git", args, { cwd, maxBuffer: 32 * 1024 * 1024 });
+    return { code: 0, out: stdout };
+  } catch (e) {
+    const err = e as { code?: unknown; stdout?: string };
+    return { code: typeof err.code === "number" ? err.code : undefined, out: err.stdout ?? "" };
+  }
+}
+
+export interface WorktreeEntry {
+  path: string;
+  branch?: string;
+  head?: string;
+  bare?: boolean;
+  prunable?: boolean;
+}
+
+/** `git worktree list --porcelain` parsed. The first entry is the repo's main working tree. */
+export function parseWorktrees(porcelain: string): WorktreeEntry[] {
+  const out: WorktreeEntry[] = [];
+  for (const block of porcelain.split(/\n\s*\n/)) {
+    let cur: WorktreeEntry | undefined;
+    for (const line of block.split("\n")) {
+      if (line.startsWith("worktree ")) cur = { path: line.slice("worktree ".length) };
+      else if (!cur) continue;
+      else if (line.startsWith("HEAD ")) cur.head = line.slice(5);
+      else if (line.startsWith("branch ")) cur.branch = line.slice(7).replace(/^refs\/heads\//, "");
+      else if (line === "bare") cur.bare = true;
+      else if (line.startsWith("prunable")) cur.prunable = true;
+    }
+    if (cur) out.push(cur);
+  }
+  return out;
+}
+
+export async function worktrees(cwd: string): Promise<WorktreeEntry[]> {
+  const r = await gitCode(cwd, ["worktree", "list", "--porcelain"]);
+  return r.code === 0 ? parseWorktrees(r.out) : [];
+}
+
+/** Commits on HEAD beyond `base`. */
+export async function aheadCount(cwd: string, base: string): Promise<number | undefined> {
+  const r = await gitCode(cwd, ["rev-list", "--count", `${base}..HEAD`]);
+  return r.code === 0 ? Number(r.out.trim()) : undefined;
+}
+
+/** Whether the branch has an upstream, and how many commits on HEAD it doesn't have yet. */
+export async function upstreamState(cwd: string): Promise<{ upstream: boolean; unpushed: number }> {
+  const up = await gitCode(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
+  if (up.code !== 0) return { upstream: false, unpushed: 0 };
+  const n = await gitCode(cwd, ["rev-list", "--count", "@{u}..HEAD"]);
+  return { upstream: true, unpushed: n.code === 0 ? Number(n.out.trim()) : 0 };
+}
+
+/** True/false when `a` is/isn't an ancestor of `b`; undefined when git can't tell (unknown commit). */
+export async function isAncestor(cwd: string, a: string, b: string): Promise<boolean | undefined> {
+  const r = await gitCode(cwd, ["merge-base", "--is-ancestor", a, b]);
+  return r.code === 0 ? true : r.code === 1 ? false : undefined;
+}
+
+export async function mergeBase(cwd: string, a: string, b: string): Promise<string | undefined> {
+  const r = await gitCode(cwd, ["merge-base", a, b]);
+  const sha = r.out.trim();
+  return r.code === 0 && sha ? sha : undefined;
+}
+
+/** The branch's pull request via gh, or undefined (no gh, no PR, not signed in: all ignored). */
+export async function pullRequest(cwd: string): Promise<{ url: string; state: string } | undefined> {
+  try {
+    const { stdout } = await exec("gh", ["pr", "view", "--json", "url,state"], { cwd, timeout: 10_000, maxBuffer: 1024 * 1024 });
+    const pr = JSON.parse(stdout) as { url?: string; state?: string };
+    return pr.url && pr.state ? { url: pr.url, state: pr.state } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A path with symlinks resolved, even when it doesn't exist yet (its nearest existing ancestor is resolved). */
+export function realish(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {}
+  const abs = resolve(p);
+  const rest: string[] = [];
+  let cur = abs;
+  for (;;) {
+    try {
+      return join(realpathSync(cur), ...rest.reverse());
+    } catch {
+      const up = dirname(cur);
+      if (up === cur) return abs;
+      rest.push(basename(cur));
+      cur = up;
+    }
+  }
+}
+
+export interface LeftoverWorktree {
+  path: string;
+  repo: string;
+  name: string;
+  /** The archived or merged session that owned it, when known. */
+  sessionId?: string;
+}
+
+/** Folders under $PERZIAN_HOME/worktrees (<repo>/<name>) no live session works in: archived or merged sessions leave them behind. */
+export function leftoverWorktrees(home: string, sessions: Pick<SessionInfo, "id" | "cwd" | "worktree" | "archived" | "ship">[]): LeftoverWorktree[] {
+  const root = join(home, "worktrees");
+  const owner = new Map<string, (typeof sessions)[number]>();
+  for (const s of sessions) if (s.worktree) owner.set(realish(s.cwd), s);
+  const dirs = (d: string) => {
+    try {
+      return readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+    } catch {
+      return [];
+    }
+  };
+  const out: LeftoverWorktree[] = [];
+  for (const repo of dirs(root)) {
+    for (const name of dirs(join(root, repo))) {
+      const path = join(root, repo, name);
+      const s = owner.get(realish(path));
+      if (s && !s.archived && s.ship?.state !== "merged") continue; // live
+      out.push({ path, repo, name, ...(s ? { sessionId: s.id } : {}) });
+    }
+  }
+  return out;
 }

@@ -26,7 +26,7 @@
 | Path | Purpose |
 |---|---|
 | `packages/protocol` | Shared types (`SessionInfo`, `PerzianEvent`, `Command`, `ReportCall`), the pure `reduce`/`fold` in `fold.ts`, `byAttention`, agent instructions. Single source of truth for UI ↔ daemon. |
-| `packages/report-mcp` | Stdio MCP server injected into every session. Worker tools: `report_progress`, `ask_decision`, `report_outcome`. Main-agent tools: `list_sessions`, `get_session`, `spawn_session`, `send_to_session`. Forwards calls to the daemon's `/report`. |
+| `packages/report-mcp` | Stdio MCP server injected into every session. Worker tools: `report_progress`, `ask_decision`, `report_outcome`. `spawn_session` is for workers too (2 levels below the lead at most). Main-agent-only tools: `list_sessions`, `get_session`, `send_to_session`. Forwards calls to the daemon's `/report`. |
 | `apps/daemon` | Session lifecycle, ACP clients, worktrees, change maps, event store, WS + HTTP on `:4317`. |
 | `apps/web` | The UI. |
 | `apps/desktop` | Electron shell. `main.js` reuses a running daemon on `:4317` or spawns one (`tsx apps/daemon/src/index.ts` with `ELECTRON_RUN_AS_NODE=1`), then loads `apps/web/dist` — or `PERZIAN_WEB_URL` in dev. |
@@ -63,6 +63,7 @@ passes through one policy:
 | worker: destructive command (`rm -rf`, force push, `reset --hard`, `clean -f`, dropping a database…) | always a card, flagged `destructive`, no "always allow" option |
 | worker: one plain check command (`npm test`, `npm run typecheck`, `tsc --noEmit`, `pytest`, `cargo test`, `go test`…; no `;` `&&` `\|` `$(` redirects) | allowed once |
 | worker: exactly a `run` command declared in `perzian.json` (read at spawn) | allowed once |
+| worker: edit/delete/move whose target resolves (symlinks, `..`) outside the session folder and its `extraDirs` | always a card in every mode, with the `outside` paths; reads outside stay allowed |
 | worker in `edits`: edits and reads | allowed once |
 | worker in `auto`: anything else | allowed once |
 | otherwise | a card |
@@ -102,6 +103,20 @@ After each turn, and shortly after edit/delete/move/execute tool calls complete,
 it as a change map; `/api/diff` and `/api/file` serve a per-file diff or content, read-only, confined to the
 session's `cwd`. Note: a rename is only detected when both paths are tracked (e.g. `git mv`); a plain `mv`
 shows as deleted + added.
+
+## Observation
+
+Agents are never restricted, but the daemon records what they do as events so the UI can replay it. Tool calls
+and git state are observed (`observe.ts`, `SessionInfo` fields): `outsidePaths` (edits outside the folders),
+`extraDirs` (extra folders, passed to Claude as `additionalDirectories`), `subagents` (Task/Agent calls; nested
+tool items carry `parentToolCallId`), `background` (`run_in_background` or trailing `&`, with a `--port`/`:N`
+port), `extraWorktrees` (worktrees the agent made itself, found with `git worktree list --porcelain` after
+execute calls and turns), `git` (`ahead`, `pushed`, `prUrl` from `gh pr view`, at most once a minute, failures
+ignored). After a branch switch or rebase that drops `baseSha` from HEAD, the base is recomputed with merge-base
+against the original base branch. Merging removes the session's worktree (no `--force`) but keeps the branch
+(`ShipState.worktreeRemoved`); `GET /api/worktrees/leftover` lists worktree folders under `$PERZIAN_HOME/worktrees`
+with no live session. The global default permission mode is the `settings.setDefaultMode` command and
+`settings.defaultMode` event (`State.settings.defaultMode`, default `ask`); sessions created without a mode use it.
 
 ## Main agent "Perzian"
 

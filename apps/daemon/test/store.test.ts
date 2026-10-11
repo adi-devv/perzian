@@ -89,6 +89,7 @@ function expected(state: State, keep = TRANSCRIPT_KEEP): State {
     outcomes: pick(state.outcomes),
     changes: pick(state.changes),
     configs: pick(state.configs),
+    settings: state.settings,
   };
 }
 
@@ -221,5 +222,39 @@ describe("EventStore", () => {
     assert.deepEqual(Object.keys(st.sessions).sort(), Object.keys(s.state().sessions).filter((id) => id !== "old-archived").sort());
     assert.ok(Object.values(st.transcripts).every((t) => t.length <= TRANSCRIPT_KEEP + 1));
     s.close();
+  });
+});
+
+describe("settings.defaultMode", () => {
+  const set = (mode: "ask" | "edits" | "plan" | "auto", at = 1): PerzianEvent => ({ type: "settings.defaultMode", mode, at });
+
+  test("defaults to ask, and the latest event wins in fold and replay", () => {
+    assert.equal(fold([]).settings.defaultMode, "ask");
+    assert.equal(replay([]).settings.defaultMode, "ask");
+    const events = [set("edits"), set("auto", 2)];
+    assert.equal(fold(events).settings.defaultMode, "auto");
+    assert.equal(replay(events).settings.defaultMode, "auto");
+  });
+
+  test("survives compaction and the WS snapshot (only a non-default value is written)", () => {
+    assert.equal(compact(fold([set("ask")]), { now: NOW }).length, 0);
+    assert.equal(fold(compact(fold([set("plan")]), { now: NOW })).settings.defaultMode, "plan");
+  });
+
+  test("is persisted in the log under the store's home across restarts", () => {
+    const dir = mkdtempSync(join(tmpdir(), "perzian-settings-"));
+    try {
+      const a = new EventStore(dir, { compact: "never" });
+      a.emit(set("edits"));
+      assert.equal(a.state().settings.defaultMode, "edits");
+      a.close();
+      const b = new EventStore(dir, { compact: "always" });
+      assert.equal(b.state().settings.defaultMode, "edits", "replayed on boot");
+      assert.equal(fold(b.snapshot()).settings.defaultMode, "edits", "included in the snapshot sent to the UI");
+      b.close();
+      assert.equal(new EventStore(dir, { compact: "never" }).state().settings.defaultMode, "edits", "and after compaction rewrote the log");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

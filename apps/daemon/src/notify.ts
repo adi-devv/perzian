@@ -70,7 +70,8 @@ export function formatChildLine(c: ChildReport, now = Date.now(), timeZone?: str
 
 const sessions = (n: number) => (n === 1 ? "a session" : `${n} sessions`);
 
-export function formatChildFinished(children: ChildReport[], now = Date.now(), timeZone?: string): string {
+/** `worker`: the recipient is a session that started these (not the lead), so it carries on with its own task. */
+export function formatChildFinished(children: ChildReport[], now = Date.now(), timeZone?: string, audience: "lead" | "worker" = "lead"): string {
   const count = (e: ChildEvent) => children.filter((c) => (c.event ?? "finished") === e).length;
   const what = [
     count("finished") && `${sessions(count("finished"))} finished`,
@@ -80,7 +81,9 @@ export function formatChildFinished(children: ChildReport[], now = Date.now(), t
   return [
     `${NOTIFY_PREFIX} Automatic update, not from the developer: ${what.join("; ")}.`,
     ...children.map((c) => formatChildLine(c, now, timeZone)),
-    "Reply to the developer in one short line (under 20 words): result, proof, what needs them. Don't start new work from this update; the developer decides what's next.",
+    audience === "worker"
+      ? "These are sessions you started. Carry on with your own task using the result; don't reply to the developer about this update."
+      : "Reply to the developer in one short line (under 20 words): result, proof, what needs them. Don't start new work from this update; the developer decides what's next.",
   ].join("\n");
 }
 
@@ -91,6 +94,8 @@ export interface NotifierDeps {
   report(childId: string): ChildReport | undefined;
   deliver(leadId: string, text: string): void;
   notice(leadId: string, text: string): void;
+  /** Who the recipient is; default "lead". */
+  audience?(leadId: string): "lead" | "worker";
   debounceMs?: number;
   maxAutoTurns?: number;
 }
@@ -187,6 +192,6 @@ export class LeadNotifier {
     this.ready.delete(leadId);
     if (!reports.length) return;
     this.autoTurns.set(leadId, n + 1);
-    this.deps.deliver(leadId, formatChildFinished(reports));
+    this.deps.deliver(leadId, formatChildFinished(reports, Date.now(), undefined, this.deps.audience?.(leadId)));
   }
 }

@@ -177,3 +177,13 @@ describe("LeadNotifier", () => {
     mock.timers.reset();
   });
 });
+
+describe("formatChildFinished: audience", () => {
+  const child: ChildReport = { id: "c1", title: "Sub task", status: "done", changedFiles: 1 };
+  test("a worker that started sessions is told to carry on, not to reply to the developer", () => {
+    const worker = formatChildFinished([child], Date.now(), undefined, "worker");
+    assert.match(worker, /Carry on with your own task/);
+    assert.doesNotMatch(worker, /Reply to the developer/);
+    assert.match(formatChildFinished([child]), /Reply to the developer/);
+  });
+});

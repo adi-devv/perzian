@@ -1,4 +1,7 @@
-import type { AgentConfig, Decision, FileChange, Outcome, PerzianEvent, SessionInfo, TranscriptItem } from "./index.ts";
+import type { AgentConfig, Decision, FileChange, Outcome, PerzianEvent, PermissionMode, SessionInfo, TranscriptItem } from "./index.ts";
+
+export const PERMISSION_MODES: readonly PermissionMode[] = ["ask", "edits", "plan", "auto"];
+export const DEFAULT_PERMISSION_MODE: PermissionMode = "ask";
 
 export interface State {
   sessions: Record<string, SessionInfo>;
@@ -7,9 +10,11 @@ export interface State {
   outcomes: Record<string, Outcome>; // latest per session
   changes: Record<string, FileChange[]>; // latest per session
   configs: Record<string, AgentConfig>;
+  /** Global settings, folded from settings.* events. */
+  settings: { defaultMode: PermissionMode };
 }
 
-export const emptyState: State = { sessions: {}, transcripts: {}, decisions: {}, outcomes: {}, changes: {}, configs: {} };
+export const emptyState: State = { sessions: {}, transcripts: {}, decisions: {}, outcomes: {}, changes: {}, configs: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE } };
 
 function patchSession(s: State, id: string, patch: Partial<SessionInfo>): State {
   const cur = s.sessions[id];
@@ -59,6 +64,8 @@ export function reduce(s: State, e: PerzianEvent): State {
     }
     case "outcome.reported":
       return { ...s, outcomes: { ...s.outcomes, [e.outcome.sessionId]: e.outcome } };
+    case "settings.defaultMode":
+      return { ...s, settings: { ...s.settings, defaultMode: e.mode } };
   }
 }
 

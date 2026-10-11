@@ -1,7 +1,7 @@
 import { closeSync, copyFileSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { reduce, type PerzianEvent, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
+import { DEFAULT_PERMISSION_MODE, reduce, type PerzianEvent, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
 
 export const TRANSCRIPT_KEEP = 400;
 export const ARCHIVED_TTL_MS = 7 * 24 * 3600_000;
@@ -28,6 +28,7 @@ export function compact(state: State, opts: CompactOptions = {}): PerzianEvent[]
   for (const s of Object.values(state.sessions)) if (!(s.archived && now - s.updatedAt > ttl)) kept.add(s.id);
 
   const out: PerzianEvent[] = [];
+  if (state.settings.defaultMode !== DEFAULT_PERMISSION_MODE) out.push({ type: "settings.defaultMode", mode: state.settings.defaultMode, at: now });
   for (const id of kept) {
     const session = state.sessions[id];
     const sessionId = id;
@@ -53,7 +54,7 @@ export function replay(events: PerzianEvent[]): State {
   const sessions: Record<string, SessionInfo> = {};
   const transcripts: Record<string, TranscriptItem[]> = {};
   const toolIndex = new Map<string, Map<string, number>>(); // sessionId -> toolCallId -> index
-  const st: State = { sessions, transcripts, decisions: {}, outcomes: {}, changes: {}, configs: {} };
+  const st: State = { sessions, transcripts, decisions: {}, outcomes: {}, changes: {}, configs: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE } };
   const patch = (id: string, p: Partial<SessionInfo>) => {
     if (sessions[id]) Object.assign(sessions[id], p);
   };
@@ -110,6 +111,9 @@ export function replay(events: PerzianEvent[]): State {
         break;
       case "outcome.reported":
         st.outcomes[e.outcome.sessionId] = e.outcome;
+        break;
+      case "settings.defaultMode":
+        st.settings = { ...st.settings, defaultMode: e.mode };
         break;
       default: {
         const unhandled: never = e; // a new event type must be handled here and in protocol `reduce`

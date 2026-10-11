@@ -321,3 +321,20 @@ describe("permissionPolicy", () => {
     assert.deepEqual(permissionPolicy({ role: "worker", mode: "auto", toolKind: "fetch" }), { action: "allow", why: "auto" });
   });
 });
+
+describe("permissionPolicy: edits outside the session's folders", () => {
+  const outside = ["/elsewhere/a.ts"];
+  test("an outside edit, delete or move is a card in every mode, with the paths", () => {
+    for (const mode of ["ask", "edits", "auto"] as const)
+      for (const toolKind of ["edit", "delete", "move"])
+        assert.deepEqual(permissionPolicy({ role: "worker", mode, toolKind, outside }), { action: "ask", outside });
+  });
+  test("reads outside stay allowed, and edits inside are unchanged", () => {
+    assert.deepEqual(permissionPolicy({ role: "worker", mode: "edits", toolKind: "read", outside }), { action: "allow", why: "edits" });
+    assert.deepEqual(permissionPolicy({ role: "worker", mode: "edits", toolKind: "edit", outside: [] }), { action: "allow", why: "edits" });
+    assert.deepEqual(permissionPolicy({ role: "worker", mode: "edits", toolKind: "edit" }), { action: "allow", why: "edits" });
+  });
+  test("destructive commands keep their own card", () => {
+    assert.deepEqual(permissionPolicy({ role: "worker", mode: "auto", toolKind: "execute", command: "rm -rf build", outside }), { action: "ask", destructive: "rm -rf" });
+  });
+});

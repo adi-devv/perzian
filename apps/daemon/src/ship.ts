@@ -156,9 +156,9 @@ export async function ship(info: SessionInfo, how: "merge" | "pr", stop: () => v
   }
 
   stop();
-  // A worktree still holding left-out files isn't removed; the merge itself is done either way.
+  // The merged work now lives in the checkout. Remove the session's worktree folder (never with --force:
+  // a worktree still holding left-out files stays) and keep the branch. The result records which.
   const rm = skipped.length ? { ok: false } : await run(project, "git", ["worktree", "remove", wt]);
-  if (rm.ok) await run(project, "git", ["branch", "-d", branch]);
   const detail = [left, rm.ok ? undefined : `The worktree folder was left in place: ${wt}`].filter(Boolean).join(" ");
-  return { state: "merged", how, into, ...(detail ? { detail: `Merged. ${detail}` } : {}), at: Date.now() };
+  return { state: "merged", how, into, worktreeRemoved: rm.ok, ...(detail ? { detail: `Merged. ${detail}` } : {}), at: Date.now() };
 }

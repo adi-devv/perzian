@@ -29,6 +29,12 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    (`perzian.json` `"ship"` overrides), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
 3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
 4. **Ready worktrees, later:** per-repo custom setup steps.
+5. **Observation UI (daemon side is done, see docs/ARCHITECTURE.md).** Draw the new `SessionInfo` fields: `outsidePaths` and `Decision.outside`
+   on the card, `subagents` with nested tool items (`parentToolCallId`), `background` (port link, ended), `extraWorktrees` (changed count),
+   `git` (ahead, pushed, PR link), `ship.worktreeRemoved`, a leftover-worktrees list (`GET /api/worktrees/leftover`), a default-mode
+   control (`settings.setDefaultMode`), and an Extra folders field on New session (`extraDirs`).
+   Not done: background processes are marked ended only from the agent's own exit/kill report, not by detecting a `kill <pid>` command;
+   `createSession`'s default-mode fallback in `apps/daemon/src/index.ts` has no test (it is a script); Codex gets no `additionalDirectories`.
 
 ## Brand
 - **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).
