@@ -1,7 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type Command, type CredentialStatus, type DoctorReport, type InstallResult, type PerzianEvent, type ServerMessage, type State } from "@perzian/protocol";
 import { demoEvents } from "./demo.ts";
-import { demoSend } from "./demoScript.ts";
+import { demoAutoplay, demoSend } from "./demoScript.ts";
 
 // In the desktop app (file://) talk to the daemon directly; in dev go through the Vite proxy.
 const direct = location.protocol === "file:";
@@ -30,7 +30,7 @@ export function useDaemon() {
   useEffect(() => {
     if (isDemo) {
       dispatch({ kind: "reset", events: demoEvents });
-      return;
+      return demoAutoplay(() => stateRef.current, (e) => dispatch({ kind: "event", event: e }));
     }
     let retry: ReturnType<typeof setTimeout>;
     let closed = false;

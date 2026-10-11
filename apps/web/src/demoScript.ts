@@ -8,6 +8,15 @@ type Emit = (e: PerzianEvent) => void;
 let runs = 0;
 let toldScripted = false;
 const waiting = new Map<string, () => void>(); // decision id → rest of the run
+let touched = false; // the visitor did something; autoplay stands down
+
+/** Plays one run by itself shortly after the demo opens, unless the visitor starts one first. */
+export function demoAutoplay(getState: () => State, emit: Emit): () => void {
+  const t = setTimeout(() => {
+    if (!touched && runs === 0) leadRun("Add a login page with email sign-in", getState(), emit, true);
+  }, 1800);
+  return () => clearTimeout(t);
+}
 
 const later = (ms: number, fn: () => void) => setTimeout(fn, ms);
 
@@ -16,9 +25,12 @@ function titleFrom(prompt: string): string {
     .replace(/^(hey|hi|please|pls|can you|could you|i want you to|i want to|let's|lets)\b[\s,]*/i, "")
     .replace(/[.?!]+$/, "")
     .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 5);
-  const t = words.join(" ") || "New feature";
+    .filter(Boolean);
+  // Stop at the first connector after the core phrase ("Add a login page | with email sign-in").
+  const cut = words.findIndex((w, i) => i >= 2 && /^(with|for|that|which|using|so|and|via)$/i.test(w));
+  const core = words.slice(0, cut > 0 ? Math.min(cut, 6) : 6);
+  while (core.length > 1 && /^(a|an|the|of|with|for|and|to)$/i.test(core[core.length - 1])) core.pop();
+  const t = core.join(" ") || "New feature";
   return t[0].toUpperCase() + t.slice(1);
 }
 
@@ -33,6 +45,7 @@ const slugFrom = (title: string) =>
 
 export function demoSend(cmd: Command, s: State, emit: Emit): void {
   const at = Date.now();
+  if (cmd.type === "decision.answer" || cmd.type === "session.prompt" || cmd.type === "main.start") touched = true;
   if (cmd.type === "decision.answer") {
     const d = s.decisions[cmd.decisionId];
     if (!d) return;
@@ -69,7 +82,7 @@ function workerReply(id: string, emit: Emit) {
   });
 }
 
-function leadRun(prompt: string, s: State, emit: Emit) {
+function leadRun(prompt: string, s: State, emit: Emit, auto = false) {
   const n = ++runs;
   const id = `demo-${n}`;
   const title = titleFrom(prompt);
@@ -79,9 +92,15 @@ function leadRun(prompt: string, s: State, emit: Emit) {
   const project = "~/code/web";
   const lead = s.sessions.main;
 
-  if (!toldScripted) {
+  if (auto) {
+    tr("main", { kind: "notice", text: "Demo: a sample run plays by itself. Type your own request to try one.", at: now() });
+  } else if (!toldScripted) {
     toldScripted = true;
     tr("main", { kind: "notice", text: "Demo: this run is scripted. Install Perzian to run real agents.", at: now() });
+  }
+  if (auto) {
+    emit({ type: "session.transcript", sessionId: "main", item: { kind: "user", text: prompt, at: now() } });
+    emit({ type: "session.status", sessionId: "main", status: "working", at: now() });
   }
 
   const files: FileChange[] = [
@@ -125,6 +144,15 @@ function leadRun(prompt: string, s: State, emit: Emit) {
     });
     emit({ type: "session.status", sessionId: id, status: "needs_you", at: now() });
     waiting.set(decisionId, finish);
+    // Autoplay makes the call itself if the visitor doesn't, so the run always finishes.
+    if (auto)
+      later(4500, () => {
+        if (!waiting.has(decisionId)) return;
+        waiting.delete(decisionId);
+        emit({ type: "decision.resolved", decisionId, sessionId: id, optionId: "small" });
+        emit({ type: "session.status", sessionId: id, status: "working", at: now() });
+        finish();
+      });
   });
 
   function finish() {
