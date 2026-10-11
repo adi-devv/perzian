@@ -73,6 +73,28 @@ interface Doctor {
 
 type Creds = ReturnType<typeof useCredentials>;
 
+const shellQuote = (s: string) => (/^[\w@%+=:,./~-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
+
+/** Whether the first task can start, and if not, the one thing to do first. Gates every way to start. */
+export function readiness(report: DoctorReport | null, project: string): { ready: boolean; blocker: string } {
+  const claude = report?.agents.find((a) => a.kind === "claude-code");
+  const proj = report?.project && report.project.input === project.trim() ? report.project : undefined;
+  const blocker = !report
+    ? "Checking your setup…"
+    : !claude?.installed
+      ? "Install Claude Code to start."
+      : claude.signedIn === false
+        ? "Sign in to start."
+        : !proj?.exists
+          ? "Pick a project folder to start."
+          : proj.noCommits
+            ? "Make a first commit in your project to start."
+            : proj.detached
+              ? "Check out a branch in your project to start."
+              : "";
+  return { ready: !blocker, blocker };
+}
+
 export function Onboarding({ doctor, project, setProject, onStart }: { doctor: Doctor; project: string; setProject: (p: string) => void; onStart: (prompt: string) => void }) {
   const { report, loading, failed, recheck } = doctor;
   const creds = useCredentials(true);
@@ -114,7 +136,10 @@ export function Onboarding({ doctor, project, setProject, onStart }: { doctor: D
   let projMeta: string | undefined;
   if (project.trim()) {
     if (!proj) projMark = "wait";
-    else if (proj.exists) {
+    else if (proj.exists && (proj.noCommits || proj.detached)) {
+      projMark = "bad";
+      projMeta = proj.noCommits ? "git repo · no commits yet" : "git repo · detached HEAD";
+    } else if (proj.exists) {
       projMark = "ok";
       projMeta = proj.gitRoot ? "git repo" : "not a git repo";
     } else {
@@ -123,8 +148,7 @@ export function Onboarding({ doctor, project, setProject, onStart }: { doctor: D
     }
   }
 
-  const ready = !!claude?.installed && claude.signedIn !== false && !!proj?.exists;
-  const blocker = !claude?.installed ? "Install Claude Code to start." : claude.signedIn === false ? "Sign in to start." : !proj?.exists ? "Pick a project folder to start." : "";
+  const { ready, blocker } = readiness(report, project);
   const codex = report?.agents.find((a) => a.kind === "codex");
 
   return (
@@ -153,6 +177,20 @@ export function Onboarding({ doctor, project, setProject, onStart }: { doctor: D
           />
           {proj && !proj.exists && <p className="step-note">Nothing at {proj.path}. Paste the full path to a folder on this machine.</p>}
           {proj?.exists && !proj.gitRoot && <p className="step-note">Works, but without git Perzian can't isolate sessions in worktrees or map changes.</p>}
+          {proj?.noCommits && (
+            <div className="step-fix">
+              <p>Sessions branch from your latest commit, and this repo has none yet. Make a first commit, then check again.</p>
+              <CopyCmd cmd={`cd ${shellQuote(proj.path)} && git add -A && git commit -m "Initial commit"`} />
+              {again}
+            </div>
+          )}
+          {proj?.detached && (
+            <div className="step-fix">
+              <p>Your checkout isn't on a branch, so finished work has nowhere to merge. Switch back to the branch you were on (or the one you work on), then check again.</p>
+              <CopyCmd cmd={`cd ${shellQuote(proj.path)} && git switch -`} />
+              {again}
+            </div>
+          )}
         </Step>
       </ol>
 
@@ -313,6 +351,20 @@ export function Accounts({ onClose }: { onClose: () => void }) {
 
 /* ───────────── Daemon offline ───────────── */
 
+/** The daemon answered but refused this page: it only takes Perzian's own UI. */
+export function DaemonRefused() {
+  return (
+    <div className="onboard">
+      <span className="offline-mark" aria-hidden />
+      <h2>The daemon is running, but refused this page</h2>
+      <p className="onboard-sub">
+        Perzian only takes requests from its own window, so other pages on this machine can't drive your agents. Open it at{" "}
+        <a href="http://localhost:4318">http://localhost:4318</a> or use the desktop app.
+      </p>
+    </div>
+  );
+}
+
 export function DaemonOffline() {
   return (
     <div className="onboard">
@@ -401,6 +453,9 @@ export function friendlyError(msg: string): { what: string; fix: string } {
   if (/codex CLI not found/i.test(msg)) return { what: "Codex isn't installed.", fix: "Install it from Accounts & API keys, or run npm install -g @openai/codex, then try again." };
   if (/CLI not found/i.test(msg)) return { what: "Claude Code isn't installed.", fix: "Install it from Accounts & API keys, or run curl -fsSL https://claude.ai/install.sh | bash, then try again." };
   if (/agent exited/i.test(msg)) return { what: "The agent stopped while starting.", fix: "Check it's installed and signed in under Accounts & API keys, then try again." };
+  // Daemon messages that already say what to do: first sentence is what happened, the rest is the fix.
+  const split = /^(.*?(?:no commits yet|detached HEAD|already merged)[^.]*\.)\s*(.*)$/i.exec(msg);
+  if (split) return { what: split[1], fix: split[2] || "Start a new session." };
   if (/not a git repo|worktree/i.test(msg)) return { what: msg.replace(/\.$/, "") + ".", fix: "Turn off “own git worktree” or pick a git repo." };
   return { what: msg.replace(/\.$/, "") + ".", fix: "Try again; if it keeps happening, check the daemon's terminal output." };
 }

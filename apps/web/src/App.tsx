@@ -13,7 +13,7 @@ import {
   type TranscriptItem,
 } from "@perzian/protocol";
 import { fetchText, isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
-import { Accounts, DaemonOffline, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, saveProject, withProject } from "./onboarding.tsx";
+import { Accounts, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, readiness, saveProject, withProject } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import type { ThemedToken } from "shiki/core";
 import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, Usage, ago, churn, cost, pauseTitle, resumeTime, statusText, useTick } from "./bits.tsx";
@@ -41,8 +41,32 @@ export function App() {
   useEffect(() => {
     if (projectPath) saveProject(project.trim());
   }, [projectPath]);
+  // The same checks gate the example buttons and the free-text composer on first run.
+  const gate = firstRun ? readiness(doctor.report, project) : { ready: true, blocker: "" };
   const startLead = (prompt: string) => {
+    if (!gate.ready) return;
     send({ type: "main.start", prompt: firstRun && projectPath ? withProject(prompt, projectPath) : prompt });
+  };
+
+  // New session: keep the dialog (and what was typed) open until the daemon creates the session; an
+  // error shows inside it instead of throwing the task away.
+  const [pendingCreate, setPendingCreate] = useState<Set<string> | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingCreate) return;
+    if (Object.values(state.sessions).some((s) => !pendingCreate.has(s.id) && !s.parentId && s.role === "worker")) {
+      setPendingCreate(null);
+      setCreating(false);
+    } else if (error) {
+      setPendingCreate(null);
+      setCreateError(error);
+      clearError();
+    }
+  }, [state.sessions, error, pendingCreate]);
+  const closeCreate = () => {
+    setCreating(false);
+    setPendingCreate(null);
+    setCreateError(null);
   };
 
   // Errors fade on their own; clicking dismisses sooner.
@@ -67,7 +91,7 @@ export function App() {
       if (e.key === "Escape") {
         if (help) setHelp(false);
         else if (viewing) setViewing(null);
-        else if (creating) setCreating(false);
+        else if (creating) closeCreate();
         else setSelected(null);
         return;
       }
@@ -104,16 +128,34 @@ export function App() {
         decisions={decisions}
         link={link}
         onStart={startLead}
+        blocked={gate.ready ? undefined : gate.blocker}
         firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} onStart={startLead} /> : null}
       />
 
       {sel && <Drawer key={sel.id} s={sel} state={state} send={send} onClose={() => setSelected(null)} onFile={(path) => setViewing({ session: sel.id, path })} onOpen={open} />}
 
-      {creating && <NewSession onClose={() => setCreating(false)} onCreate={(cmd) => { send(cmd); setCreating(false); }} />}
+      {creating && (
+        <NewSession
+          pending={!!pendingCreate}
+          error={createError}
+          onClose={closeCreate}
+          onCreate={(cmd) => {
+            if (isDemo) {
+              send(cmd);
+              setCreating(false);
+              return;
+            }
+            setCreateError(null);
+            clearError();
+            setPendingCreate(new Set(Object.keys(state.sessions)));
+            send(cmd);
+          }}
+        />
+      )}
       {viewing && <FileViewer {...viewing} onClose={() => setViewing(null)} />}
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}
       {accounts && <Accounts onClose={() => setAccounts(false)} />}
-      {error && <Toast message={error} onClose={clearError} />}
+      {error && !pendingCreate && <Toast message={error} onClose={clearError} />}
     </div>
   );
 }
@@ -224,7 +266,7 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
 
 /* ───────────── Thread: the main agent conversation, made of cards ───────────── */
 
-function Thread({ state, main, send, onOpen, decisions, link, onStart, firstRun }: { state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; link: Link; onStart: (prompt: string) => void; firstRun: React.ReactNode }) {
+function Thread({ state, main, send, onOpen, decisions, link, onStart, blocked, firstRun }: { state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; link: Link; onStart: (prompt: string) => void; blocked?: string; firstRun: React.ReactNode }) {
   const items = main ? (state.transcripts[main.id] ?? []) : [];
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
@@ -243,9 +285,10 @@ function Thread({ state, main, send, onOpen, decisions, link, onStart, firstRun 
       </div>
 
       <div className="thread-scroll">
+        {link === "refused" && <DaemonRefused />}
         {link === "offline" && (empty ? <DaemonOffline /> : <OfflineBanner />)}
         {firstRun}
-        {!main && !firstRun && !(link === "offline" && empty) && link !== "connecting" && <Welcome />}
+        {!main && !firstRun && !(link === "offline" && empty) && link !== "connecting" && link !== "refused" && <Welcome />}
         <SinceYouLeft state={state} onOpen={onOpen} />
         <ThreadItems items={items} state={state} onOpen={onOpen} retry={retry && main ? { index: retry.index, run: () => send({ type: "session.prompt", sessionId: main.id, prompt: retry.prompt }) } : undefined} />
         <div ref={end} />
@@ -269,6 +312,7 @@ function Thread({ state, main, send, onOpen, decisions, link, onStart, firstRun 
           id="main-composer"
           placeholder={main ? "Ask Perzian, or tell it what to build…" : firstRun ? "Or describe your own task…" : "What are we working on? Perzian will split it into sessions."}
           busy={main?.status === "working"}
+          blocked={main ? undefined : blocked}
           onSubmit={(text) => (main ? send({ type: "session.prompt", sessionId: main.id, prompt: text }) : onStart(text))}
           onStop={main ? () => send({ type: "session.cancel", sessionId: main.id }) : undefined}
         />
@@ -309,8 +353,8 @@ function Welcome() {
       <p>Describe the work. Perzian starts coding sessions in your repos, watches them, and only brings you decisions and results.</p>
       <ul>
         <li><span className="dot s-needs_you" /> Amber means it needs you</li>
-        <li><span className="dot s-working" /> Blue pulses while it works</li>
-        <li><span className="dot s-done" /> Green is done, with proof</li>
+        <li><span className="dot s-working" /> A slow pulse means it's working</li>
+        <li><span className="dot s-done" /> A still dot is done, with proof</li>
         <li><span className="dot s-failed" /> Red failed; open it to see why</li>
       </ul>
     </div>
@@ -424,10 +468,11 @@ function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: 
   );
 }
 
-function Composer({ id, placeholder, busy, onSubmit, onStop }: { id: string; placeholder: string; busy?: boolean; onSubmit: (t: string) => void; onStop?: () => void }) {
+/** `blocked`: why sending isn't possible yet; typing still works and the text is kept. */
+function Composer({ id, placeholder, busy, blocked, onSubmit, onStop }: { id: string; placeholder: string; busy?: boolean; blocked?: string; onSubmit: (t: string) => void; onStop?: () => void }) {
   const [text, setText] = useState("");
   const submit = () => {
-    if (!text.trim()) return;
+    if (!text.trim() || blocked) return;
     onSubmit(text.trim());
     setText("");
   };
@@ -449,7 +494,7 @@ function Composer({ id, placeholder, busy, onSubmit, onStop }: { id: string; pla
       {busy && onStop ? (
         <button type="button" className="btn ghost" onClick={onStop}>Stop</button>
       ) : (
-        <button className="btn primary" disabled={!text.trim()}>Send</button>
+        <button className="btn primary" disabled={!text.trim() || !!blocked} title={blocked}>Send</button>
       )}
     </form>
   );
@@ -470,13 +515,14 @@ function ModelPicker({ s, state, send }: { s: SessionInfo; state: State; send: S
 /* ───────────── Ship it: land a worktree session's work ───────────── */
 
 function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send }) {
+  const [confirming, setConfirming] = useState(false);
   if (!s.worktree || !s.branch) return null;
   const sh = s.ship;
   if (sh?.state === "merged")
     return (
       <section className="ship shipped">
         <b>✓ Merged into {sh.into}</b>
-        <span>{sh.detail ?? "The worktree and branch were cleaned up."}</span>
+        <span>{sh.detail ?? "The worktree and branch were cleaned up."} This session is closed; start a new one to keep going.</span>
       </section>
     );
   if (sh?.state === "pr")
@@ -484,16 +530,33 @@ function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send
       <section className="ship shipped">
         <b>✓ Pull request opened</b>
         {sh.url && <a className="btn small" href={sh.url} target="_blank" rel="noopener">View on GitHub ↗</a>}
+        {sh.detail && <span>{sh.detail}</span>}
       </section>
     );
   if (s.status === "working" || s.status === "needs_you" || (files === 0 && !sh)) return null;
   const busy = sh?.state === "shipping";
   const into = s.baseBranch ?? "your branch";
+  // Merging writes into the developer's own checkout, so it takes one quiet confirm.
+  if (confirming && !busy)
+    return (
+      <section className="ship">
+        <h3 className="eyebrow">Ship it</h3>
+        <p className="ship-confirm">
+          Merge {files} changed file{files === 1 ? "" : "s"} into <code>{into}</code> in <code>{s.project}</code>? The session's worktree is removed afterwards.
+        </p>
+        <div className="ship-row">
+          <button className="btn primary" autoFocus onClick={() => { setConfirming(false); send({ type: "session.ship", sessionId: s.id, how: "merge" }); }}>
+            Merge
+          </button>
+          <button className="btn ghost" onClick={() => setConfirming(false)}>Cancel</button>
+        </div>
+      </section>
+    );
   return (
     <section className="ship">
       <h3 className="eyebrow">Ship it</h3>
       <div className="ship-row">
-        <button className="btn primary" disabled={busy} onClick={() => send({ type: "session.ship", sessionId: s.id, how: "merge" })}>
+        <button className="btn primary" disabled={busy} onClick={() => setConfirming(true)}>
           {busy && sh.how === "merge" ? "Merging…" : `Merge into ${into}`}
         </button>
         <button className="btn" disabled={busy} onClick={() => send({ type: "session.ship", sessionId: s.id, how: "pr" })}>
@@ -629,7 +692,9 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
   const decisions = Object.values(state.decisions).filter((d) => d.sessionId === s.id);
   const lastAgent = [...transcript].reverse().find((t) => t.kind === "agent");
   const parent = s.parentId ? state.sessions[s.parentId] : undefined;
-  const retry = retryTarget(transcript, s.status);
+  // Merged: the work landed and the worktree is gone, so the session takes no more prompts.
+  const closed = !!s.worktree && s.ship?.state === "merged";
+  const retry = closed ? null : retryTarget(transcript, s.status);
   const failure = retry ? transcript[retry.index] : undefined;
 
   return (
@@ -684,7 +749,7 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
             <p className="outcome-intent">{outcome.intent}</p>
             <ProofPills o={outcome} />
             {outcome.risks.map((r, i) => <p key={i} className="risk">⚠ {r}</p>)}
-            {outcome.followups.length > 0 && (
+            {outcome.followups.length > 0 && !closed && (
               <div className="followups">
                 {outcome.followups.map((f, i) => (
                   <button key={i} className="followup" onClick={() => send({ type: "session.prompt", sessionId: s.id, prompt: f })} title="Send to this session as the next task">
@@ -744,7 +809,11 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
       </div>
 
       <div className="drawer-foot">
-        <Composer id="session-composer" placeholder={`Tell ${s.title}…`} busy={s.status === "working"} onSubmit={(text) => send({ type: "session.prompt", sessionId: s.id, prompt: text })} onStop={() => send({ type: "session.cancel", sessionId: s.id })} />
+        {closed ? (
+          <p className="closed-note">Merged into {s.ship?.into ?? s.baseBranch ?? "your branch"}. This session is closed; start a new one to keep going.</p>
+        ) : (
+          <Composer id="session-composer" placeholder={`Tell ${s.title}…`} busy={s.status === "working"} onSubmit={(text) => send({ type: "session.prompt", sessionId: s.id, prompt: text })} onStop={() => send({ type: "session.cancel", sessionId: s.id })} />
+        )}
         <button className="btn ghost small" onClick={() => { send({ type: "session.archive", sessionId: s.id }); onClose(); }}>Archive</button>
       </div>
     </aside>
@@ -844,7 +913,7 @@ function FileViewer({ session, path, onClose }: { session: string; path: string;
 
 /* ───────────── New session ───────────── */
 
-function NewSession({ onClose, onCreate }: { onClose: () => void; onCreate: (c: Command) => void }) {
+function NewSession({ onClose, onCreate, pending, error }: { onClose: () => void; onCreate: (c: Command) => void; pending: boolean; error: string | null }) {
   const remembered = loadProject();
   const [project, setProject] = useState(remembered);
   const [prompt, setPrompt] = useState("");
@@ -901,9 +970,14 @@ function NewSession({ onClose, onCreate }: { onClose: () => void; onCreate: (c: 
           <input id="ns-worktree" type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} />
           Run in its own git worktree <span className="quiet">(safe for parallel work)</span>
         </label>
+        {error && (
+          <p className="sheet-error" role="alert">
+            {friendlyError(error).what} {friendlyError(error).fix}
+          </p>
+        )}
         <div className="sheet-actions">
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary">Start session</button>
+          <button className="btn primary" disabled={pending}>{pending ? "Starting…" : "Start session"}</button>
         </div>
       </form>
     </div>

@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import type { AgentCheck, AgentKind, DoctorReport, ProjectCheck } from "@perzian/protocol";
 import { adapterEntry, detectAgents, type AgentAvailability } from "./agents.ts";
 import type { Credentials } from "./credentials.ts";
+import { corsOrigin } from "./origin.ts";
 
 const home = homedir();
 
@@ -82,7 +83,14 @@ export async function checkProject(input: string): Promise<ProjectCheck> {
     exists = statSync(path).isDirectory();
   } catch {}
   const top = exists ? await run("git", ["rev-parse", "--show-toplevel"], { cwd: path, timeout: 3000 }) : undefined;
-  return { input, path, exists, gitRoot: top?.ok && top.out ? top.out : undefined };
+  const gitRoot = top?.ok && top.out ? top.out : undefined;
+  if (!gitRoot) return { input, path, exists, gitRoot };
+  // `git init` alone passes the check above, but worktrees need a commit to branch from.
+  const [commit, branch] = await Promise.all([
+    run("git", ["rev-parse", "--verify", "--quiet", "HEAD"], { cwd: path, timeout: 3000 }),
+    run("git", ["symbolic-ref", "--quiet", "HEAD"], { cwd: path, timeout: 3000 }),
+  ]);
+  return { input, path, exists, gitRoot, ...(commit.ok ? {} : { noCommits: true }), ...(commit.ok && !branch.ok ? { detached: true } : {}) };
 }
 
 // Agent/git probes spawn processes; reuse them briefly so typing a project path stays cheap.
@@ -112,6 +120,7 @@ export async function doctor(perzianHome: string, opts: { project?: string; fres
 // Only those, never arbitrary websites, may read the report.
 export function doctorHeaders(origin: string | undefined): Record<string, string> {
   const h: Record<string, string> = { "content-type": "application/json", "cache-control": "no-store" };
-  if (origin === "null" || (origin && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))) h["access-control-allow-origin"] = origin;
+  const allow = corsOrigin(origin);
+  if (allow) h["access-control-allow-origin"] = allow;
   return h;
 }

@@ -7,5 +7,7 @@ const daemon = `127.0.0.1:${process.env.PERZIAN_PORT ?? 4317}`;
 export default defineConfig({
   plugins: [react()],
   base: "./",
-  server: { port: 4318, proxy: { "/ws": { target: `ws://${daemon}`, ws: true }, "/api": `http://${daemon}` } },
+  // strictPort: fail loudly if 4318 is taken instead of drifting to 4319, which the README URL and the
+  // daemon's trusted origins wouldn't match.
+  server: { port: 4318, strictPort: true, proxy: { "/ws": { target: `ws://${daemon}`, ws: true }, "/api": `http://${daemon}` } },
 });

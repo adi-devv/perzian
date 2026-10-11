@@ -13,8 +13,20 @@ export const isDemo = new URLSearchParams(location.search).has("demo");
 /** Shown when the daemon can't be reached. */
 export const DAEMON_ADDR = direct ? `127.0.0.1:${port}` : "the local daemon";
 
-/** connecting: no answer yet · online · offline: the socket closed (the daemon isn't running or restarted). */
-export type Link = "connecting" | "online" | "offline";
+/** connecting: no answer yet · online · offline: the socket closed (the daemon isn't running or restarted)
+ *  · refused: the daemon is up but won't take this page (opened from an origin it doesn't trust). */
+export type Link = "connecting" | "online" | "offline" | "refused";
+
+// A WebSocket the daemon rejects closes just like one to a dead port. Ask over HTTP to tell them apart:
+// a 401/403 means it's running and saying no; a network error or proxy 5xx means it's down.
+async function refused(): Promise<boolean> {
+  try {
+    const r = await fetch(`${API_BASE}/api/ping`, { cache: "no-store" });
+    return r.status === 401 || r.status === 403;
+  } catch {
+    return false;
+  }
+}
 
 type Action = { kind: "event"; event: PerzianEvent } | { kind: "reset"; events: PerzianEvent[] };
 const reducer = (s: State, a: Action): State => (a.kind === "reset" ? fold(a.events) : reduce(s, a.event));
@@ -39,10 +51,14 @@ export function useDaemon() {
       ws.current = sock;
       // A replaced socket (reconnect, hot reload) may close after its successor opened; ignore it.
       sock.onopen = () => ws.current === sock && setLink("online");
-      sock.onclose = () => {
+      let opened = false;
+      sock.addEventListener("open", () => (opened = true));
+      sock.onclose = async () => {
         if (ws.current !== sock) return;
-        setLink("offline");
-        if (!closed) retry = setTimeout(connect, 1200);
+        const no = !opened && (await refused());
+        if (ws.current !== sock || closed) return;
+        setLink(no ? "refused" : "offline");
+        retry = setTimeout(connect, no ? 4000 : 1200);
       };
       sock.onmessage = (m) => {
         const msg = JSON.parse(m.data) as ServerMessage;

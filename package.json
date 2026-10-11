@@ -7,6 +7,7 @@
     "apps/*"
   ],
   "scripts": {
+    "postinstall": "node scripts/ensure-electron.mjs",
     "app": "npm run build --workspace=@perzian/web && electron apps/desktop",
     "app:dev": "npm run dev --workspace=@perzian/web & PERZIAN_WEB_URL=http://localhost:4318 electron apps/desktop",
     "dev": "npm run dev --workspace=@perzian/daemon & npm run dev --workspace=@perzian/web",
@@ -29,5 +30,10 @@
     "typescript": "^5.6.3"
   },
   "author": "Aadit Singal",
-  "license": "MIT"
+  "license": "MIT",
+  "allowScripts": {
+    "electron": true,
+    "esbuild": true,
+    "fsevents": true
+  }
 }

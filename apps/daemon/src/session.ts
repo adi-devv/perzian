@@ -929,7 +929,7 @@ export async function prepareWorkspace(project: string, home: string, title: str
   if (!(await git.isRepo(project))) return { cwd: project, branch: undefined, baseSha: undefined, worktree: false };
   if (worktree) {
     const wt = await git.createWorktree(project, home, title, id);
-    return { cwd: wt.path, branch: wt.branch, baseSha: await git.head(wt.path), worktree: true, baseBranch: await git.currentBranch(project) };
+    return { cwd: wt.path, branch: wt.branch, baseSha: await git.head(wt.path), worktree: true, baseBranch: wt.baseBranch };
   }
   return { cwd: project, branch: await git.currentBranch(project), baseSha: await git.head(project), worktree: false };
 }
