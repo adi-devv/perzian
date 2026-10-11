@@ -25,8 +25,16 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    ✓/✕ per check. Tested with temp repos and a scripted fake ACP agent; not yet run with a real agent.
    Next: the site card; a "Run checks" button; ready worktrees will make first runs pass.
 1. **Ship it: try it for real.** Built: "Merge into <base>" / "Open PR" in the session drawer, conflicts listed with
-   "Ask the agent to resolve", worktree removed after a merge. Unit-tested on temp repos; not yet run from the app on a real project.
-2. **Crew summary.** Ask the lead "what's going on?" and get a short digest of what's done, blocked and needs you,
+   "Ask the agent to resolve", worktree removed after a merge. Merge commits only what the agent changed (never `.env`/keys),
+   asks once first; Open PR checks origin + `gh` auth before pushing; merged sessions are closed.
+   Unit-tested on temp repos; not yet run from the app on a real project.
+1b. **Branches for teams (in progress).** Teams don't ship straight to main, so:
+   - **Base picker:** New session picks the base branch (default: repo default branch); the lead can pass `base` to workers.
+   - **Fresh start:** fetch, then branch from `origin/<base>`; offline falls back to local with a note.
+   - **PR is the default action;** Merge moves to a menu. No GitHub remote → Merge stays primary. `perzian.json` `"ship"` overrides.
+   Next: **"Base moved"** (N behind, one-click Update by rebase/merge) and **stacking** (start from another session's
+   branch, or an existing branch/PR).
+2. **Crew summary (in progress).** Ask the lead "what's going on?" and get a short digest of what's done, blocked and needs you,
    built from `list_sessions` and outcomes (roadmap: "Main agent summarizes crew state into decisions").
 3. **Calm visuals, follow-through.** The app now keeps color only for needs you (amber) and failed (red).
    Apply the same rule to the site's feature mockups (`apps/site`), and review the app with real sessions for leftover noise.
@@ -41,25 +49,26 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    `paused` with `pause.resumeAt` in the event store; `ResumeQueue` (`resume.ts`) polls the wall clock and sends a short
    "continue" to the same session/worktree at reset + jitter, also after a daemon restart; the lead gets batched
    paused/resumed lines; UI shows "Paused · resumes 17:40" (no new color) and "Resume now" in the drawer.
-   Unverified: not yet run against a real Claude limit hit; Codex detection is best-effort from its error text and
+   Merged locally. Unverified: not yet run against a real Claude limit hit; Codex detection is best-effort from its error text and
    has no early pause (its usage snapshots aren't sent over ACP), TBD.
    **Marketing:** "Hit your limit at 2 am? Perzian picks up when it resets." Lead with it on the site as a feature card.
 5. **Phone access (after trying the Mac app).** QR code + one-time pairing token opens the UI on your phone,
    on the same Wi-Fi or through Tailscale. Mainly for answering decision cards. Needs token auth on the daemon.
 
 ## Brand
-- **Logo.** Direction: "one center, many orbits": a core (the lead) with a ring and two or three small satellites (the agents).
-  Monochrome, Persian-blue core. Must read at 16px (tab icon, menu bar) and as the app icon. Replace `assets/mark.svg` + app icon.
-- **Thinking animation from the logo** (like Claude's spark): satellites orbit the core while the lead works; one satellite
-  per active session. Use it for the lead's "working" state instead of the generic spinner, and on the site hero.
+- **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).
+- **Logo (pick pending).** Orbit/fan mark dropped (overused); minimal marks too plain. Rich options on the design board:
+  Simurgh in flight, Simurgh in a tile arch, illuminated feather, thirty birds. After the pick: replace `apps/site/assets/mark.svg`,
+  app icon, favicon; switch site/app accent to turquoise. Needs a simplified 16px version.
+- **Thinking animation from the logo** (like Claude's spark), for the lead's "working" state and the site hero. Design after the pick.
 
 ## From competitors (Conductor, Vibe Kanban, Cursor, Zed)
-- **PR + CI status on the session** after "Open PR": checks passing/failing, merged.
+- **PR + CI status on the session** after "Open PR": checks passing/failing, merged. (In progress.)
 - **Run the app from a session:** start its dev server on its own port to try the change before merging.
 - **Checkpoints:** roll a session back to before a given turn.
 - **Sessions from issues:** pick a GitHub/Linear issue; it becomes the brief.
 - **Comment on a diff line:** goes to the agent as the next task (code view stays read-only).
-- **GitHub connect, not login:** first-run check shows "Connected as <user>" via `gh`, or how to run `gh auth login`.
+- **GitHub connect, not login:** first-run check shows "Connected as <user>" via `gh`, or how to run `gh auth login`. (In progress.)
 
 ## Known gaps
 - Destructive-command cards aren't guaranteed for Codex: its own auto mode runs commands without asking.
