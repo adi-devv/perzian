@@ -52,7 +52,15 @@ export function tileLine(s: SessionInfo, state: State, pending: Decision[]): str
     if (s.progress) return `${s.progress.phase} ${s.progress.step}/${s.progress.of}${s.progress.note ? ` · ${s.progress.note}` : ""}`;
     return "Planning";
   }
-  if (s.status === "idle") return s.live === false ? "Asleep" : "Ready";
+  if (s.status === "idle") {
+    // A turn cut short by a daemon restart waits for Retry in the session; say so instead of "Asleep".
+    for (let i = items.length - 1; i >= 0; i--) {
+      const it = items[i];
+      if (it.kind === "user") break;
+      if (it.kind === "notice" && it.text.startsWith("Interrupted")) return "Interrupted · open to retry";
+    }
+    return s.live === false ? "Asleep" : "Ready";
+  }
   // done
   if (s.ship?.state === "merged") return `Merged into ${s.ship.into ?? "main"}`;
   if (s.ship?.state === "pr") return "PR opened";
@@ -80,7 +88,8 @@ function TileAnswer({ d, send }: { d: Decision; send: Send }) {
       <div className={`t-ans ${perm ? "row" : "stack"}`}>
         {d.options.map((o) => {
           const isDeny = deny?.id === o.id;
-          const primary = deny ? isDeny : o.kind === "allow_once";
+          // The agent's recommended choice stands out the way Allow does on a permission ask.
+          const primary = deny ? isDeny : perm ? o.kind === "allow_once" : d.recommended === o.id;
           return (
             <button key={o.id} ref={isDeny ? ref : undefined} className={`btn small ${primary ? "primary" : ""}`} title={[o.label, o.tradeoff].filter(Boolean).join(" · ")} onClick={() => answer(o.id)}>
               <span className="lab">{o.label}</span>
@@ -268,6 +277,11 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
             <section key={project} className="crew-group">
               <h3 className="grp-h" title={project}>
                 <span>{base(project)}</span>
+                {list.length > 0 && (
+                  <button className="btn grp-new" onClick={() => onUseProject(project)} title={`Tell Perzian what to build in ${base(project)}`} aria-label={`New task in ${base(project)}`}>
+                    + Task
+                  </button>
+                )}
               </h3>
               {list.length === 0 && (
                 <button className="btn small ghost empty-proj" onClick={() => onUseProject(project)}>Tell Perzian what to build here</button>

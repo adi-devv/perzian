@@ -123,7 +123,8 @@ describe("install detection", () => {
 describe("readyWorktree", () => {
   test("copies, runs the install, and falls back from npm ci to npm install", async () => {
     const { project, wt } = await repo({ ".gitignore": ".env\n", "package-lock.json": "{}\n" }, { ".env": "A=1\n" });
-    const bin = fakeBin({ npm: 'if [ "$1" = ci ]; then echo "npm ERR! ci broke" >&2; exit 1; fi\necho "$1 CI=$CI" > installed.txt' });
+    // npm install also rewrites the lockfile, as it does when package.json and the lock disagree.
+    const bin = fakeBin({ npm: 'if [ "$1" = ci ]; then echo "npm ERR! ci broke" >&2; exit 1; fi\necho "$1 CI=$CI" > installed.txt; echo rewritten > package-lock.json' });
     const seen: SetupState[] = [];
     const st = await readyWorktree(project, wt, { env: pathWith(bin), onUpdate: (s) => seen.push(s) });
     assert.equal(st.state, "ok");
@@ -131,6 +132,9 @@ describe("readyWorktree", () => {
     assert.deepEqual(st.install, ["npm ci"]);
     assert.deepEqual(st.notes, ["npm ci failed (exit 1); ran npm install"]);
     assert.equal(readFileSync(join(wt, "installed.txt"), "utf8"), "install CI=1\n");
+    // The committed lockfile is put back: setup never shows up as a change of the session's own.
+    assert.equal(readFileSync(join(wt, "package-lock.json"), "utf8"), "{}\n");
+    assert.equal(git(wt, "status", "--porcelain", "--untracked-files=no"), "");
     assert.deepEqual(seen.map((s) => s.current).filter(Boolean), ["npm ci", "npm install"]);
     assert.ok(seen.every((s) => s.state === "running"));
   });

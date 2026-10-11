@@ -392,6 +392,14 @@ export function crewStatus(sessions: SessionInfo[]): { key: CrewKey; count: numb
   return CREW_KEYS.map((key) => ({ key, count: sessions.filter((s) => crewMatch(key, s)).length })).filter((c) => c.count > 0);
 }
 
+/** The last 5 distinct project folders, newest first: ones added by hand, then those of worker sessions.
+ * The lead's own folder (<PERZIAN_HOME>/main) is Perzian's, not a project. */
+export function recentProjects(state: { sessions: Record<string, SessionInfo>; settings: { projects: string[] } }): string[] {
+  const out: string[] = [...state.settings.projects].reverse();
+  for (const s of Object.values(state.sessions).reverse()) if (s.role !== "main" && s.project && !out.includes(s.project)) out.push(s.project);
+  return out.slice(0, 5);
+}
+
 export const REPORT_INSTRUCTIONS = `You are a worker session inside Perzian, a visual dashboard. The developer watches tiles and cards, not prose. Report through the perzian MCP tools:
 1. report_progress at each phase change (explore, implement, verify) with step/of. Not per tool call.
 2. ask_decision only for a genuine fork the code and brief can't settle: conflicting requirements, destructive or irreversible steps, public API changes. 2-3 options, a one-line tradeoff each, and a recommended one that respects the brief's constraints. It blocks until answered. Otherwise take the sensible default and note it under risks.

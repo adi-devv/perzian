@@ -8,6 +8,8 @@
 //   accept-edits/bypass modes, because an agent in those modes doesn't ask before running rm -rf.
 // - Edits, deletes and moves outside the session's folder (and its extra folders) always get a card.
 
+import { isAbsolute, relative } from "node:path";
+
 export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | "other" | string;
 
 export interface PermissionRequest {
@@ -483,4 +485,21 @@ export function destructiveReason(cmd: string): string | null {
   const del = /\bdelete\s+from\s+[\w"`.]+([^;]*)/i.exec(cmd);
   if (del && !/\bwhere\b/i.test(del[1])) return "deletes every row";
   return null;
+}
+
+/**
+ * The second line of a permission card: the command, the paths outside the project, or the file. A file
+ * inside the session's folder is shown relative to it (a worktree's absolute path is long noise), and
+ * nothing is shown when the title already says it.
+ */
+export function permissionDetail(p: { title: string; command?: string; outside: string[]; filePath?: string; cwd: string }): string | undefined {
+  let detail = p.command ?? (p.outside.length ? p.outside.join(", ") : p.filePath);
+  if (detail === undefined) return undefined;
+  if (p.command === undefined && !p.outside.length && isAbsolute(detail)) {
+    const rel = relative(p.cwd, detail);
+    if (rel && !rel.startsWith("..") && !isAbsolute(rel)) detail = rel;
+  }
+  const names = (x: string) => p.title === x || p.title.endsWith(` ${x}`) || p.title.endsWith(`/${x}`);
+  if (names(detail) || (p.command === undefined && p.filePath && names(p.filePath))) return undefined;
+  return detail;
 }

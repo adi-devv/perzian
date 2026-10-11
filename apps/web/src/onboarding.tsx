@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AgentCheck, ApiKeyProvider, CredentialStatus, DoctorReport, State } from "@perzian/protocol";
+import type { AgentCheck, ApiKeyProvider, CredentialStatus, DoctorReport } from "@perzian/protocol";
 import { DAEMON_ADDR, installAgent, isDesktop, useCredentials, useDoctor } from "./daemon.ts";
 
 /* ───────────── Project folder memory (shared with New session) ───────────── */
@@ -23,12 +23,7 @@ declare global {
   }
 }
 
-/** The last 5 distinct project folders, newest first: ones added by hand, then those of sessions (which fold in creation order). */
-export function recentProjects(state: State): string[] {
-  const out: string[] = [...state.settings.projects].reverse();
-  for (const s of Object.values(state.sessions).reverse()) if (s.project && !out.includes(s.project)) out.push(s.project);
-  return out.slice(0, 5);
-}
+export { recentProjects } from "@perzian/protocol";
 
 /** Folder choice: native picker button (desktop), recent-project chips, typed path as the small fallback. */
 export function FolderPicker({ id, project, setProject, recent, onPicked, autoFocus, inputClass, first }: { id: string; project: string; setProject: (p: string) => void; recent: string[]; onPicked: () => void; autoFocus?: boolean; inputClass?: string; first?: boolean }) {
@@ -59,6 +54,10 @@ export function FolderPicker({ id, project, setProject, recent, onPicked, autoFo
         required
         value={project}
         onChange={(e) => setProject(e.target.value)}
+        // Enter on a typed path moves on to the task box, like picking a chip (in a form it also submits).
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && project.trim()) onPicked();
+        }}
         placeholder={pick ? "Or type a path, e.g. ~/code/app" : "Type a project path, e.g. ~/code/app"}
         spellCheck={false}
         autoComplete="off"

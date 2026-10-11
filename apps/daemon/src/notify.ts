@@ -73,9 +73,12 @@ const sessions = (n: number) => (n === 1 ? "a session" : `${n} sessions`);
 /** `worker`: the recipient is a session that started these (not the lead), so it carries on with its own task. */
 export function formatChildFinished(children: ChildReport[], now = Date.now(), timeZone?: string, audience: "lead" | "worker" = "lead"): string {
   const count = (e: ChildEvent) => children.filter((c) => (c.event ?? "finished") === e).length;
+  // An early pause (near the limit, after its current step) isn't "hit the limit"; say which, so the lead doesn't.
+  const near = children.filter((c) => c.event === "paused" && c.pause?.early).length;
   const what = [
     count("finished") && `${sessions(count("finished"))} finished`,
-    count("paused") && `${sessions(count("paused"))} paused at a usage limit (resumes by itself; nothing to do)`,
+    count("paused") - near && `${sessions(count("paused") - near)} paused at a usage limit (resumes by itself; nothing to do)`,
+    near && `${sessions(near)} paused just before a usage limit (resumes by itself; nothing to do)`,
     count("resumed") && `${sessions(count("resumed"))} resumed after a usage limit reset`,
   ].filter(Boolean);
   return [

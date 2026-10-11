@@ -2,7 +2,7 @@
 // carry over (gitignored .env files and a few local config files), then installs dependencies with the
 // tool the lockfile names. Without this, the first test run in a new worktree fails.
 import { execFile, spawn } from "node:child_process";
-import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync } from "node:fs";
+import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import type { SetupState } from "@perzian/protocol";
@@ -95,8 +95,9 @@ export interface InstallStep {
   /** Shown to the developer, e.g. "npm ci". */
   label: string;
   argv: string[];
-  /** Tried when `argv` fails, e.g. npm install after npm ci. */
-  fallback?: { label: string; argv: string[] };
+  /** Tried when `argv` fails, e.g. npm install after npm ci. `keep`: files it may rewrite that are put back
+   * afterwards, so a lockfile the fallback updated doesn't show up as the session's own change. */
+  fallback?: { label: string; argv: string[]; keep?: string[] };
 }
 
 export function onPath(bin: string, env: NodeJS.ProcessEnv = process.env): boolean {
@@ -138,7 +139,7 @@ export function detectInstall(dir: string, source = dir, env: NodeJS.ProcessEnv 
   else if (has("yarn.lock")) add("yarn", { label: "yarn install --frozen-lockfile", argv: ["yarn", "install", "--frozen-lockfile"] });
   else if (has("bun.lockb") || has("bun.lock")) add("bun", { label: "bun install", argv: ["bun", "install"] });
   else if (has("package-lock.json"))
-    add("npm", { label: "npm ci", argv: ["npm", "ci", "--no-audit", "--no-fund"], fallback: { label: "npm install", argv: ["npm", "install", "--no-audit", "--no-fund"] } });
+    add("npm", { label: "npm ci", argv: ["npm", "ci", "--no-audit", "--no-fund"], fallback: { label: "npm install", argv: ["npm", "install", "--no-audit", "--no-fund"], keep: ["package-lock.json"] } });
 
   if (has("uv.lock")) add("uv", { label: "uv sync", argv: ["uv", "sync"] });
   else if (has("poetry.lock")) add("poetry", { label: "poetry install", argv: ["poetry", "install"] });
@@ -221,7 +222,9 @@ export async function readyWorktree(source: string, dest: string, opts: SetupOpt
       const first = r;
       label = step.fallback.label;
       set({ current: label, notes: [...(st.notes ?? []), `${step.label} failed (exit ${first.code}); ran ${label}`] });
+      const kept = (step.fallback.keep ?? []).map((f) => [f, readOr(join(dest, f))] as const);
       r = await runCommand(step.fallback.argv, dest, env, timeoutMs);
+      for (const [f, before] of kept) if (before !== undefined && readOr(join(dest, f)) !== before) writeFileSync(join(dest, f), before);
     }
     if (r.code !== 0) {
       set({ state: "failed", current: undefined, error: { command: label, tail: tail(r.output) || `exited with code ${r.code}` } });
@@ -230,6 +233,14 @@ export async function readyWorktree(source: string, dest: string, opts: SetupOpt
   }
   set({ state: "ok", current: undefined });
   return clean(st);
+}
+
+function readOr(path: string): string | undefined {
+  try {
+    return readFileSync(path, "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 // Drops empty/undefined fields so the logged state stays small.

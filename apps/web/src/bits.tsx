@@ -19,6 +19,8 @@ export function resumeTime(p: NonNullable<SessionInfo["pause"]>): string {
 
 /** The status in words: "Paused · resumes 3:40 pm" for a session waiting out a usage limit. */
 export function statusText(s: SessionInfo): string {
+  // An archived session keeps its last status in the log; it won't resume or finish any more.
+  if (s.archived) return "Archived";
   return s.status === "paused" && s.pause ? `Paused · resumes ${resumeTime(s.pause)}` : statusLabel(s);
 }
 

@@ -64,7 +64,7 @@ export function SessionDetail({ s, state, send, onBack, onOpen, leadNew }: { s: 
   const shippable = !!s.worktree && !!s.branch;
   let primary: React.ReactNode = null;
   if (s.status === "failed") primary = <button className="btn primary" onClick={fix}>Ask agent to fix</button>;
-  else if (s.status === "done" && s.ship?.state !== "merged" && s.ship?.state !== "pr")
+  else if (s.status === "done" && files.length > 0 && s.ship?.state !== "merged" && s.ship?.state !== "pr")
     primary = <button className="btn primary" onClick={review}>{shippable ? "Review & ship" : "Review changes"}</button>;
   else if (s.status === "paused") primary = <button className="btn primary" onClick={() => send({ type: "session.resume", sessionId: s.id })}>Resume now</button>;
 
@@ -99,7 +99,7 @@ export function SessionDetail({ s, state, send, onBack, onOpen, leadNew }: { s: 
           <ModePicker value={s.mode ?? "ask"} onChange={(mode) => send({ type: "session.setMode", sessionId: s.id, mode })} />
           <Usage s={s} />
           <span className="sp" />
-          <button className="btn small ghost" onClick={() => { send({ type: "session.archive", sessionId: s.id }); onBack(); }}>Archive</button>
+          <ArchiveButton s={s} files={files.length} send={send} onDone={onBack} />
         </div>
 
         <Facts s={s} quietOutside={pending.some((p) => p.item.outside?.length)} />
@@ -408,7 +408,8 @@ function ChecksTab({ s, outcome, send, fix }: { s: SessionInfo; outcome?: Outcom
   const failed = (run?.results ?? []).some((r) => r.state === "failed") || rows.some((r) => r.state === "failed");
   return (
     <div className="pane">
-      {s.checksError && !checkPlan(s).length && <p className="checks-error">✕ {s.checksError}</p>}
+      {/* A broken perzian.json means its checks don't run, even when detected ones still do: always say so. */}
+      {s.checksError && <p className="checks-error">✕ {s.checksError}. Declared checks won't run until it's fixed.</p>}
       {rows.length ? <ProofList rows={rows} /> : <p className="empty">No checks for this project. Add them to perzian.json and they run when the agent finishes.</p>}
       <div className="row-btns">
         {checkPlan(s).length > 0 && (
@@ -602,6 +603,32 @@ function classify(l: string, diff: boolean): LineKind {
   return "";
 }
 
+/** Archive, with one extra click when the session has changes that were never merged or opened as a PR. */
+function ArchiveButton({ s, files, send, onDone }: { s: SessionInfo; files: number; send: Send; onDone: () => void }) {
+  const [sure, setSure] = useState(false);
+  useEffect(() => {
+    if (!sure) return;
+    const t = setTimeout(() => setSure(false), 5000);
+    return () => clearTimeout(t);
+  }, [sure]);
+  const unshipped = files > 0 && s.ship?.state !== "merged" && s.ship?.state !== "pr";
+  const archive = () => {
+    send({ type: "session.archive", sessionId: s.id });
+    onDone();
+  };
+  if (sure)
+    return (
+      <button className="btn small" onClick={archive} title="The branch and its files stay on disk">
+        Archive with {files} unshipped file{files === 1 ? "" : "s"}?
+      </button>
+    );
+  return (
+    <button className="btn small ghost" onClick={() => (unshipped ? setSure(true) : archive())}>
+      Archive
+    </button>
+  );
+}
+
 function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send }) {
   const [confirming, setConfirming] = useState(false);
   if (!s.worktree || !s.branch) return null;
@@ -624,19 +651,23 @@ function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send
   if (s.status === "working" || s.status === "needs_you" || (files === 0 && !sh)) return null;
   const busy = sh?.state === "shipping";
   const into = s.baseBranch ?? "your branch";
+  // Required checks that fail on this branch: merging is still allowed, but never the default.
+  const failing = (s.checkRun?.results ?? []).filter((r) => r.state === "failed").map((r) => r.name);
+  const red = failing.length > 0 || s.status === "failed";
   // Merging writes into the developer's own checkout, so it takes one quiet confirm.
   if (confirming && !busy)
     return (
       <section className="ship">
         <h3 className="eyebrow">Ship it</h3>
         <p className="ship-confirm">
-          Merge {files} changed file{files === 1 ? "" : "s"} into <code>{into}</code> in <code>{s.project}</code>? The session's worktree is removed afterwards.
+          Merge {files} changed file{files === 1 ? "" : "s"} into <code>{into}</code> in <code title={s.project}>{s.project.split("/").filter(Boolean).pop() ?? s.project}</code>? The session's worktree is removed afterwards.
         </p>
+        {red && <p className="ship-warn">{failing.length ? `Failing on this branch: ${failing.join(", ")}.` : "This session failed."}</p>}
         <div className="ship-row">
-          <button className="btn primary" autoFocus onClick={() => { setConfirming(false); send({ type: "session.ship", sessionId: s.id, how: "merge" }); }}>
-            Merge
+          <button className={`btn${red ? "" : " primary"}`} autoFocus={!red} onClick={() => { setConfirming(false); send({ type: "session.ship", sessionId: s.id, how: "merge" }); }}>
+            {red ? "Merge anyway" : "Merge"}
           </button>
-          <button className="btn ghost" onClick={() => setConfirming(false)}>Cancel</button>
+          <button className="btn" autoFocus={red} onClick={() => setConfirming(false)}>Cancel</button>
         </div>
       </section>
     );
@@ -644,7 +675,7 @@ function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send
     <section className="ship">
       <h3 className="eyebrow">Ship it</h3>
       <div className="ship-row">
-        <button id="ship-primary" className="btn primary" disabled={busy} onClick={() => setConfirming(true)}>
+        <button id="ship-primary" className={`btn${red ? "" : " primary"}`} disabled={busy} onClick={() => setConfirming(true)}>
           {busy && sh.how === "merge" ? "Merging…" : `Merge into ${into}`}
         </button>
         <button className="btn" disabled={busy} onClick={() => send({ type: "session.ship", sessionId: s.id, how: "pr" })}>

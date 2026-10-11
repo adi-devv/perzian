@@ -45,7 +45,7 @@ describe("formatChildFinished: usage-limit pauses", () => {
       "UTC",
     );
     const lines = text.split("\n");
-    assert.equal(lines[0], "[perzian] Automatic update, not from the developer: a session finished; 2 sessions paused at a usage limit (resumes by itself; nothing to do); a session resumed after a usage limit reset.");
+    assert.equal(lines[0], "[perzian] Automatic update, not from the developer: a session finished; a session paused at a usage limit (resumes by itself; nothing to do); a session paused just before a usage limit (resumes by itself; nothing to do); a session resumed after a usage limit reset.");
     assert.equal(lines[2], '- id=p title="Task p" status=paused resumes_at="Sun 12:05 PM" resumes_in=2h5m limit=five_hour files=2');
     assert.equal(lines[3], '- id=q title="Task q" status=paused resumes_at="Wed 10:00 AM" resumes_in=~3d0h limit=seven_day early=true files=2');
     assert.equal(lines[4], '- id=r title="Task r" status=resumed files=2');

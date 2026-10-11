@@ -54,7 +54,11 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 - **GitHub connect, not login:** first-run check shows "Connected as <user>" via `gh`, or how to run `gh auth login`. (In progress.)
 
 ## Known gaps
-- Not yet run for real (marked ⚠️ in FEATURES.md): ready worktrees, declared checks, ship, usage-limit pause. Try each on a real project.
+- Not yet run for real (marked ⚠️ in FEATURES.md): Open PR past its pre-push checks, auto-resume at a real limit reset.
+- From dev testing, not fixed yet: a single session the lead starts works in the checkout (no worktree), so there's
+  nothing to Merge or PR and the change lands uncommitted (decide: worktree by default?); the crew summary says
+  "All quiet" while a session waits for Retry after a restart; the answered decision isn't in the transcript;
+  the user bubble shows the full "Project folder: /path" line.
 - Destructive-command cards aren't guaranteed for Codex: its own auto mode runs commands without asking.
 - Pending "session finished" updates for the lead are in memory; a daemon restart drops them.
 - In edits mode a worker could change a test script and run it without a card (edits are already trusted there).
