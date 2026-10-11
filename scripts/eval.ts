@@ -1,11 +1,12 @@
 // Prompt eval harness for the lead agent ("Perzian") and its workers.
 //
 // For each case in evals/cases/*.json: generate a tiny git repo, start an isolated daemon (own port and
-// PERZIAN_HOME), send main.start with the case prompt, auto-answer every decision (recommended option, or
-// allow_once for permissions), wait until main and every child settle, then score deterministically from
-// the event log plus a tap on the report MCP's tool calls.
+// PERZIAN_HOME), send main.start with the case prompt, auto-answer every decision card (recommended option,
+// or allow_once for permissions; checks are auto-allowed by the daemon and never reach a card), wait until
+// main and every child settle (including the lead's reply to the daemon's "sessions finished" update),
+// then score deterministically from the event log plus a tap on the report MCP's tool calls.
 //
-// Usage: npx tsx scripts/eval.ts [--case a,b] [--concurrency 2] [--label baseline] [--timeout 420] [--keep]
+// Usage: npx tsx scripts/eval.ts [--case a,b] [--concurrency 2] [--label baseline] [--timeout 420] [--keep] [--workdir dir]
 // Writes evals/results/<timestamp>[-label].json. Every daemon (and its agents) is killed when its case ends.
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -77,6 +78,7 @@ const label = opt("label") ?? "";
 const defaultTimeout = Number(opt("timeout") ?? 420);
 const keep = argv.includes("--keep");
 const portBase = Number(opt("port") ?? 4337);
+const workdir = opt("workdir") ?? tmpdir();
 
 const casesDir = join(root, "evals/cases");
 const cases: Case[] = readdirSync(casesDir)
@@ -330,12 +332,20 @@ function score(c: Case, r: RunResult, repo: string, tapDir: string) {
   const mainTap = readTap(tapDir, mainId);
   const transcript = st.transcripts[mainId] ?? [];
 
-  // Main's text per turn: everything it said after the i-th user message.
+  // Main's text per turn: everything it said after the i-th user message. System turns answer the daemon's
+  // "sessions finished" updates.
   const turns: string[] = [];
+  const systemTurn: boolean[] = [];
+  const updates: string[] = [];
   for (const t of transcript) {
-    if (t.kind === "user") turns.push("");
-    else if (t.kind === "agent" && turns.length) turns[turns.length - 1] += (turns[turns.length - 1] ? "\n" : "") + t.text;
+    if (t.kind === "user") {
+      turns.push("");
+      systemTurn.push(!!t.system);
+      if (t.system) updates.push(t.text);
+    } else if (t.kind === "agent" && turns.length) turns[turns.length - 1] += (turns[turns.length - 1] ? "\n" : "") + t.text;
   }
+  const devTurns = turns.filter((_, i) => !systemTurn[i]);
+  const updateReplies = turns.filter((_, i) => systemTurn[i]);
 
   add("settled", !r.timedOut && !r.error, r.timedOut ? "timeout" : r.error);
   // A usage/rate limit or auth failure says nothing about the prompts: flag the case so it can be rerun.
@@ -363,14 +373,13 @@ function score(c: Case, r: RunResult, repo: string, tapDir: string) {
   // Signal form: no session ids, absolute paths or code blocks in what the developer reads.
   const noise = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-|(^|\s|`)\/(private|var|tmp|Users|home)\/|```/;
   add("signal form", frac(turns.map((t) => !noise.test(t))), turns.find((t) => noise.test(t))?.match(noise)?.[0]);
-  if (x.replyMatches) add("reply content", new RegExp(x.replyMatches, "i").test(turns.at(-1) ?? ""), (turns.at(-1) ?? "").slice(0, 80));
+  if (x.replyMatches) add("reply content", new RegExp(x.replyMatches, "i").test(devTurns.at(-1) ?? ""), (devTurns.at(-1) ?? "").slice(0, 80));
 
-  // The lead is not woken when a child finishes, so promising to follow up on its own is a lie.
-  const promise = /\b(I'll|I will|will) (check back|let you know|report back|update you|notify you|ping you|follow up)\b/i;
-  add("no unkeepable promise", frac(turns.map((t) => !promise.test(t))), turns.find((t) => promise.test(t))?.match(promise)?.[0]);
-
-  const mainEdits = transcript.filter((t) => t.kind === "tool" && (t.toolKind === "edit" || t.toolKind === "delete" || t.toolKind === "move"));
-  add("main never edits", mainEdits.length === 0, mainEdits.length ? mainEdits.map((t) => (t.kind === "tool" ? t.title : "")).join("; ").slice(0, 80) : undefined);
+  // The daemon blocks the lead's edits; an edit that completed anyway is a hole in that.
+  const editKind = (t: (typeof transcript)[number]) => t.kind === "tool" && (t.toolKind === "edit" || t.toolKind === "delete" || t.toolKind === "move");
+  const mainEdits = transcript.filter((t) => editKind(t) && t.kind === "tool" && t.status === "completed");
+  const blocked = transcript.filter((t) => t.kind === "notice" && t.text.startsWith("Blocked: the lead")).length;
+  add("main never edits", mainEdits.length === 0, mainEdits.length ? mainEdits.map((t) => (t.kind === "tool" ? t.title : "")).join("; ").slice(0, 80) : blocked ? `${blocked} blocked` : undefined);
 
   // Work that should have been delegated but wasn't scores zero on every worker check, not "skipped".
   const expectsWork = (x.spawns?.[0] ?? 0) > 0;
@@ -428,6 +437,14 @@ function score(c: Case, r: RunResult, repo: string, tapDir: string) {
     const dirs = [repo, ...new Set(kids.map((k) => k.cwd))];
     add("nothing changed", frac(dirs.map((d) => tryRun("git status --porcelain", d).out.trim() === "")));
   }
+  // The lead hears when its sessions finish, and answers the update in one short line.
+  const settledKids = kids.filter((k) => k.status === "done" || k.status === "failed");
+  if (settledKids.length) {
+    add("lead notified", frac(settledKids.map((k) => updates.some((u) => u.includes(`id=${k.id}`)))), `${updates.length} updates`);
+    const oneLine = (t: string) => !!t.trim() && !t.trim().includes("\n") && words(t) <= 30;
+    add("update reply one line", updateReplies.length ? frac(updateReplies.map(oneLine)) : 0, updateReplies.map(words).join("/") || "none");
+  }
+
   if (x.monitor) {
     const later = mainTap.filter((t) => t.at >= (r.turnStarts[1] ?? Infinity) && (t.name === "get_session" || t.name === "list_sessions"));
     add("monitors sessions", later.length > 0, `${later.length} get/list calls`);
@@ -445,7 +462,10 @@ function score(c: Case, r: RunResult, repo: string, tapDir: string) {
     max: checks.length,
     spawns: kids.length,
     mainAsks: mainAsks.length,
+    permissionCards: r.events.filter((e) => e.type === "decision.requested" && e.decision.source === "permission").length,
+    blockedLeadAttempts: blocked,
     replies: turns,
+    updates,
     mainTools: mainTap.map((t) => t.name),
     children: kids.map((k) => {
       const o = st.outcomes[k.id];
@@ -471,7 +491,8 @@ type CaseResult = ReturnType<typeof score> & { name: string; durationSec: number
 
 async function runCase(c: Case, port: number): Promise<CaseResult> {
   const t0 = Date.now();
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), `perzian-eval-${c.name}-`)));
+  mkdirSync(workdir, { recursive: true });
+  const dir = realpathSync(mkdtempSync(join(workdir, `perzian-eval-${c.name}-`)));
   const repo = join(dir, "repo");
   const home = join(dir, "home");
   const tapDir = join(dir, "tap");
@@ -516,10 +537,10 @@ async function main() {
   results.sort((a, b) => a.name.localeCompare(b.name));
 
   const pad = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s.padEnd(n));
-  console.log(`\n${pad("case", 22)} ${pad("spawns", 7)} ${pad("asks", 5)} ${pad("reply words", 12)} ${pad("outcomes", 22)} score`);
+  console.log(`\n${pad("case", 22)} ${pad("spawns", 7)} ${pad("asks", 5)} ${pad("perms", 6)} ${pad("reply words", 12)} ${pad("outcomes", 22)} score`);
   for (const r of results) {
     const outs = r.children.map((k) => (k.outcome ? (k.outcome.derived ? "derived" : k.outcome.status) : "none")).join(",");
-    console.log(`${pad(r.name, 22)} ${pad(String(r.spawns), 7)} ${pad(String(r.mainAsks), 5)} ${pad(r.replies.map(words).join("/"), 12)} ${pad(outs || "-", 22)} ${r.score.toFixed(2)}/${r.max}`);
+    console.log(`${pad(r.name, 22)} ${pad(String(r.spawns), 7)} ${pad(String(r.mainAsks), 5)} ${pad(String(r.permissionCards), 6)} ${pad(r.replies.map(words).join("/"), 12)} ${pad(outs || "-", 22)} ${r.score.toFixed(2)}/${r.max}`);
   }
   const total = results.reduce((a, r) => a + r.score, 0);
   const max = results.reduce((a, r) => a + r.max, 0);
