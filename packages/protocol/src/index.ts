@@ -257,6 +257,7 @@ export type Command =
   | { type: "session.seen"; sessionId: string }
   | { type: "session.archive"; sessionId: string }
   | { type: "session.ship"; sessionId: string; how: "merge" | "pr" }
+  | { type: "session.runChecks"; sessionId: string }
   // After a failed worktree setup: run it again, or start the agent without it.
   | { type: "session.setup"; sessionId: string; action: "retry" | "skip" }
   | { type: "main.start"; model?: string; agent?: AgentKind; prompt?: string }
@@ -310,6 +311,25 @@ export function byAttention(a: SessionInfo, b: SessionInfo): number {
 
 export function isUnseen(s: SessionInfo): boolean {
   return (s.status === "done" || s.status === "failed") && (s.seenAt ?? 0) < s.updatedAt;
+}
+
+/** Every check a session can run: its declared ones, then detected commands not already declared (named by their command). */
+export function checkPlan(s: Pick<SessionInfo, "declaredChecks" | "checks">): DeclaredCheck[] {
+  const declared = s.declaredChecks ?? [];
+  const have = new Set(declared.map((c) => c.run));
+  return [...declared, ...(s.checks ?? []).filter((run) => !have.has(run)).map((run) => ({ name: run, run }))];
+}
+
+/** The crew status strip's groups. "done" means finished since you last looked (unseen); the rest are current status. */
+export type CrewKey = "needs_you" | "failed" | "working" | "paused" | "done";
+export const CREW_KEYS: CrewKey[] = ["needs_you", "failed", "working", "paused", "done"];
+export function crewMatch(key: CrewKey, s: SessionInfo): boolean {
+  if (s.role !== "worker" || s.archived) return false;
+  return key === "done" ? s.status === "done" && isUnseen(s) : s.status === key;
+}
+/** Counts per group, folded from session state alone. Empty groups are omitted. */
+export function crewStatus(sessions: SessionInfo[]): { key: CrewKey; count: number }[] {
+  return CREW_KEYS.map((key) => ({ key, count: sessions.filter((s) => crewMatch(key, s)).length })).filter((c) => c.count > 0);
 }
 
 export const REPORT_INSTRUCTIONS = `You are a worker session inside Perzian, a visual dashboard. The developer watches tiles and cards, not prose. Report through the perzian MCP tools:

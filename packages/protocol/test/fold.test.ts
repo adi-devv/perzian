@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { byAttention, emptyState, fold, isUnseen, reduce } from "../src/index.ts";
+import { byAttention, checkPlan, crewMatch, crewStatus, emptyState, fold, isUnseen, reduce } from "../src/index.ts";
 import type { Decision, Outcome, PerzianEvent, SessionInfo, SessionStatus } from "../src/index.ts";
 
 const session = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
@@ -189,4 +189,33 @@ test("daemon-sent user items keep their system flag through the fold", () => {
   assert.equal(items.length, 2);
   assert.equal(items[0].kind === "user" && items[0].system, undefined);
   assert.equal(items[1].kind === "user" && items[1].system, true);
+});
+
+test("crewStatus counts workers by group, 'done' only when unseen, ignoring lead and archived", () => {
+  const sessions = [
+    session("a", { status: "working" }),
+    session("b", { status: "working" }),
+    session("c", { status: "needs_you" }),
+    session("d", { status: "done", updatedAt: 5, seenAt: 3 }),
+    session("e", { status: "done", updatedAt: 5, seenAt: 9 }),
+    session("f", { status: "failed", updatedAt: 5 }),
+    session("g", { status: "working", archived: true }),
+    session("main", { status: "working", role: "main" }),
+  ];
+  assert.deepEqual(crewStatus(sessions), [
+    { key: "needs_you", count: 1 },
+    { key: "failed", count: 1 },
+    { key: "working", count: 2 },
+    { key: "done", count: 1 },
+  ]);
+  assert.deepEqual(crewStatus([session("m", { role: "main" })]), []);
+  assert.ok(crewMatch("done", sessions[3]) && !crewMatch("done", sessions[4]));
+});
+
+test("checkPlan lists declared checks first, then detected commands not already declared", () => {
+  assert.deepEqual(checkPlan({}), []);
+  assert.deepEqual(checkPlan({ declaredChecks: [{ name: "unit", run: "npm test", timeoutSec: 9 }], checks: ["npm test", "npm run typecheck"] }), [
+    { name: "unit", run: "npm test", timeoutSec: 9 },
+    { name: "npm run typecheck", run: "npm run typecheck" },
+  ]);
 });

@@ -459,3 +459,15 @@ code.chip { font-size: 11px; }
 .step-fix .opts { align-self: stretch; }
 .step-fix .opts .key-form { margin-top: 8px; }
 .onboard > .step-input { margin-top: 10px; }
+
+/* crew status strip: grey, amber only for needs-you */
+.crew { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 32px 0; }
+.crew-btn { color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.crew-btn b { font-weight: 600; color: var(--fg); }
+.crew-btn.on { background: var(--hover); border-color: var(--fg-3); }
+.crew-btn.s-needs_you { border-color: var(--needs); color: var(--needs); }
+.crew-btn.s-needs_you b { color: var(--needs); }
+.crew-btn:not(.s-needs_you):not(.s-failed) .dot { background: var(--idle); animation: none; }
+.side-filter { margin: 6px 10px; }
+.checks + .btn { margin: 0 8px 8px 0; }
+@media (max-width: 760px) { .crew { padding-inline: 16px; } }

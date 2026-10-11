@@ -1,4 +1,4 @@
-import type { Command, FileChange, PerzianEvent, Proof, SessionInfo, State } from "@perzian/protocol";
+import { checkPlan, type CheckResult, type CheckRun, type Command, type FileChange, type PerzianEvent, type Proof, type SessionInfo, type State } from "@perzian/protocol";
 
 // A scripted run for ?demo: ask the lead for something and watch a session start, work, ask for a call,
 // verify and report. Same events the daemon sends; no agent runs.
@@ -77,6 +77,13 @@ export function demoSend(cmd: Command, s: State, emit: Emit): void {
         patch: { ship: how === "merge" ? { state: "merged", how, into: "main", at: Date.now() } : { state: "pr", how, url: "https://github.com/adi-devv/perzian/pulls", at: Date.now() } },
       }),
     );
+  } else if (cmd.type === "session.runChecks") {
+    const cur = s.sessions[cmd.sessionId];
+    const plan = cur ? checkPlan(cur) : [];
+    if (!plan.length) return;
+    const run = (state: CheckRun["state"], results: CheckResult[]) => emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { checkRun: { state, attempt: 0, maxAttempts: 2, results, at: Date.now() } } });
+    run("running", plan.map((c) => ({ name: c.name, run: c.run, state: "running" })));
+    later(1400, () => run("passed", plan.map((c) => ({ name: c.name, run: c.run, state: "passed", exitCode: 0, durationMs: 1400 }))));
   } else if (cmd.type === "session.archive") {
     emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { archived: true } });
   }

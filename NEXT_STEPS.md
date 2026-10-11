@@ -14,15 +14,11 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    - Keep the Mac awake while agents work.
    - Same Wi-Fi without Tailscale is a view-only fallback (no HTTPS, so no push).
    - Later, if people want zero setup: a Cloudflare Durable Objects relay with end-to-end encryption, possibly paid. Firebase rejected (data at Google, per-event cost).
-2. **Crew status, always visible (not asked).** A live strip at the top of the lead view, e.g. "2 working · 1 needs you · 3 done since you left",
-   folded from session state; the model only writes one-line labels. This is the vision's "where was I" card.
-   The user should never have to ask "what's going on?".
-3. **Branches for teams (in progress).** Teams don't ship straight to main. Next: base picker on New session (lead can pass `base`),
+2. **Branches for teams (in progress).** Teams don't ship straight to main. Next: base picker on New session (lead can pass `base`),
    fetch and branch from `origin/<base>` (offline falls back to local with a note), PR as the default action with Merge in a menu
    (`perzian.json` `"ship"` overrides), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
-4. **Declared checks, follow-through.** A "Run checks" button.
-5. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
-6. **Ready worktrees, later:** per-repo custom setup steps.
+3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
+4. **Ready worktrees, later:** per-repo custom setup steps.
 
 ## Brand
 - **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).

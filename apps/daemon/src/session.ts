@@ -27,7 +27,7 @@ import { permissionPolicy } from "./permissions.ts";
 import { UsageMeter } from "./usage.ts";
 import { SetupGate, readyWorktree } from "./setup.ts";
 import { MAX_FIX_ATTEMPTS, declaredBrief, declaredProofs, fixPrompt, runDeclaredChecks } from "./checks.ts";
-import type { CheckResult, CheckRun, DeclaredCheck } from "@perzian/protocol";
+import { checkPlan, type CheckResult, type CheckRun, type DeclaredCheck } from "@perzian/protocol";
 import { hitFromReading, limitFromError, parseLimitText, pauseThreshold, readRateLimit, resumeTime, type LimitHit } from "./limits.ts";
 
 /** Sent to a session when its usage limit resets. */
@@ -604,6 +604,25 @@ export class AgentSession {
     }
     this.setStatus(stopReason === "cancelled" ? "idle" : stopReason === "refusal" ? "failed" : "done");
     return undefined;
+  }
+
+  /** "Run checks": reruns the declared and detected checks on request. No fix rounds; the results are the answer. */
+  async rerunChecks(): Promise<void> {
+    if (this.checksAbort || this.info.status === "working") return;
+    const plan = checkPlan(this.info);
+    if (!plan.length) return;
+    const publish = (state: CheckRun["state"], results: CheckResult[]) => this.update({ checkRun: { state, attempt: 0, maxAttempts: MAX_FIX_ATTEMPTS, results, at: Date.now() } });
+    const abort = new AbortController();
+    this.checksAbort = abort;
+    publish("running", plan.map((c) => ({ name: c.name, run: c.run, state: "pending" })));
+    try {
+      const results = await runDeclaredChecks(plan, this.info.cwd, (r) => publish("running", r), { signal: abort.signal, timeoutMs: this.deps.checkTimeoutMs });
+      if (abort.signal.aborted) return publish("cancelled", results);
+      this.attachCheckProofs(results);
+      publish(results.some((r) => r.state === "failed") ? "failed" : "passed", results);
+    } finally {
+      if (this.checksAbort === abort) this.checksAbort = undefined;
+    }
   }
 
   /** Runs the declared checks in the session's worktree and decides what follows. */

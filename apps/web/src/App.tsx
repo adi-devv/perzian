@@ -3,10 +3,14 @@ import {
   AGENTS,
   MODE_LABEL,
   byAttention,
+  checkPlan,
+  crewMatch,
+  crewStatus,
   isUnseen,
   type AgentKind,
   type CheckRun,
   type Command,
+  type CrewKey,
   type PermissionMode,
   type SessionInfo,
   type State,
@@ -28,6 +32,7 @@ export function App() {
   const [help, setHelp] = useState(false);
   const [accounts, setAccounts] = useState(false);
   const [project, setProject] = useState(loadProject);
+  const [crewFilter, setCrewFilter] = useState<CrewKey | null>(null);
   useTick();
 
   const all = Object.values(state.sessions).filter((s) => !s.archived);
@@ -118,9 +123,11 @@ export function App() {
 
   return (
     <div className={`app ${sel ? "with-drawer" : ""}`}>
-      <Sidebar state={state} main={main} workers={workers} selected={selected} onSelect={open} onNew={() => setCreating(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} onAccounts={() => setAccounts(true)} connected={connected} />
+      <Sidebar state={state} main={main} workers={workers} selected={selected} onSelect={open} onNew={() => setCreating(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} onAccounts={() => setAccounts(true)} connected={connected} filter={crewFilter} onClearFilter={() => setCrewFilter(null)} />
 
       <Thread
+        crewFilter={crewFilter}
+        onCrewFilter={setCrewFilter}
         state={state}
         main={main}
         send={send}
@@ -192,12 +199,12 @@ function retryTarget(items: TranscriptItem[], status: SessionInfo["status"]): { 
 
 /* ───────────── Sidebar: every session at a glance ───────────── */
 
-function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, onHelp, onAccounts, connected }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void; connected: boolean }) {
+function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, onHelp, onAccounts, connected, filter, onClearFilter }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void; connected: boolean; filter: CrewKey | null; onClearFilter: () => void }) {
   const counts = { needs_you: 0, working: 0, failed: 0, done: 0, idle: 0, paused: 0 };
   for (const s of workers) counts[s.status]++;
   const spent = [main, ...workers].reduce((n, s) => n + (s?.usage?.costUsd ?? 0), 0);
   const groups = new Map<string, SessionInfo[]>();
-  for (const s of workers) groups.set(s.project, [...(groups.get(s.project) ?? []), s]);
+  for (const s of workers.filter((w) => !filter || crewMatch(filter, w))) groups.set(s.project, [...(groups.get(s.project) ?? []), s]);
 
   return (
     <nav className="sidebar" aria-label="Sessions">
@@ -241,6 +248,11 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
             ))}
           </section>
         ))}
+        {filter && (
+          <button className="btn small side-filter" onClick={onClearFilter}>
+            Showing {CREW_LABEL[filter].toLowerCase()} · show all
+          </button>
+        )}
         {workers.length === 0 && <p className="quiet side-empty">Sessions you or Perzian start show up here.</p>}
       </div>
 
@@ -267,7 +279,7 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
 
 /* ───────────── Thread: the main agent conversation, made of cards ───────────── */
 
-function Thread({ state, main, send, onOpen, decisions, link, onStart, blocked, focus, firstRun }: { state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode }) {
+function Thread({ crewFilter, onCrewFilter, state, main, send, onOpen, decisions, link, onStart, blocked, focus, firstRun }: { crewFilter: CrewKey | null; onCrewFilter: (k: CrewKey | null) => void; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode }) {
   const items = main ? (state.transcripts[main.id] ?? []) : [];
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
@@ -278,6 +290,7 @@ function Thread({ state, main, send, onOpen, decisions, link, onStart, blocked, 
 
   return (
     <main className="thread">
+      <CrewStrip state={state} filter={crewFilter} onFilter={onCrewFilter} onOpen={onOpen} />
       <div className="thread-head drag">
         <h1>{main ? "Perzian" : "Talk to Perzian"}</h1>
         {main && <ModelPicker s={main} state={state} send={send} />}
@@ -320,6 +333,34 @@ function Thread({ state, main, send, onOpen, decisions, link, onStart, blocked, 
         />
       </div>
     </main>
+  );
+}
+
+const CREW_LABEL: Record<CrewKey, string> = { needs_you: "needs you", failed: "failed", working: "working", paused: "paused", done: "done since you left" };
+
+// Always-visible crew status: counts folded from session state; each count filters the sidebar (a single match opens it).
+function CrewStrip({ state, filter, onFilter, onOpen }: { state: State; filter: CrewKey | null; onFilter: (k: CrewKey | null) => void; onOpen: (id: string) => void }) {
+  const counts = crewStatus(Object.values(state.sessions));
+  if (!counts.length) return null;
+  return (
+    <div className="crew" role="status" aria-label="Crew status">
+      {counts.map(({ key, count }) => (
+        <button
+          key={key}
+          className={`btn small crew-btn s-${key} ${filter === key ? "on" : ""}`}
+          aria-pressed={filter === key}
+          title={filter === key ? "Show all sessions" : `Show only: ${CREW_LABEL[key]}`}
+          onClick={() => {
+            onFilter(filter === key ? null : key);
+            const only = Object.values(state.sessions).filter((s) => crewMatch(key, s));
+            if (filter !== key && only.length === 1) onOpen(only[0].id);
+          }}
+        >
+          <span className="dot" />
+          <b>{count}</b> {CREW_LABEL[key]}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -629,8 +670,8 @@ const RUN_LABEL: Record<CheckRun["state"], (r: CheckRun) => string> = {
 };
 
 function DeclaredChecks({ s, send }: { s: SessionInfo; send: Send }) {
-  const declared = s.declaredChecks ?? [];
-  if (s.checksError) {
+  const declared = checkPlan(s);
+  if (s.checksError && !declared.length) {
     return (
       <section>
         <h3 className="eyebrow">Checks</h3>
@@ -664,6 +705,9 @@ function DeclaredChecks({ s, send }: { s: SessionInfo; send: Send }) {
           );
         })}
       </ul>
+      <button className="btn small" disabled={run?.state === "running" || s.status === "working"} onClick={() => send({ type: "session.runChecks", sessionId: s.id })}>
+        {run?.state === "running" ? "Running…" : "Run checks"}
+      </button>
       {run?.state === "failed" && failed.length > 0 && (
         <button
           className="btn small"

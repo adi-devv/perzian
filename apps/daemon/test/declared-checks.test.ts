@@ -256,3 +256,24 @@ describe("declared checks loop (fake agent)", () => {
     }
   });
 });
+
+describe("Run checks (rerun on request)", () => {
+  const ok = node("process.exit(0)");
+  const bad = node("console.log('boom'); process.exit(1)");
+  test("runs declared plus detected checks, running first, then passed or failed, with no fix round", async () => {
+    const cwd = repo([{ name: "unit", run: ok }]);
+    const { s, store } = session(cwd, "never");
+    s.info.checks = [ok, bad]; // detected: one repeats the declared command, one fails
+    const states: string[] = [];
+    store.subscribe((e) => void (e.type === "session.updated" && e.patch.checkRun && states.push(e.patch.checkRun.state)));
+    await s.rerunChecks();
+    assert.equal(states[0], "running");
+    const run = store.state().sessions[s.info.id].checkRun!;
+    assert.equal(run.state, "failed");
+    assert.deepEqual(run.results.map((r) => [r.name, r.state]), [["unit", "passed"], [bad, "failed"]]);
+    assert.equal(run.attempt, 0);
+    s.info.checks = [ok];
+    await s.rerunChecks();
+    assert.equal(store.state().sessions[s.info.id].checkRun!.state, "passed");
+  });
+});

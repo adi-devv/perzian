@@ -248,6 +248,10 @@ async function handleCommand(cmd: Command): Promise<void> {
       s.setShip(result);
       break;
     }
+    case "session.runChecks":
+      if (!s) throw new Error("Unknown session");
+      void s.rerunChecks().catch((e) => console.error(`[${s.info.id}]`, e));
+      break;
     case "session.setup":
       if (!s) throw new Error("Unknown session");
       // The held first prompt came from the lead when it spawned this session: report the result to it.

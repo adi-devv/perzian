@@ -10,6 +10,7 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ Spawned sessions show as live mini-tiles in the main thread, with outcome cards.
 - ✅ The lead is told, in batches, when its sessions finish, pause or resume (with loop guards).
 - ✅ Sessions list ordered by attention: working, needs you, done, failed, idle (color only for needs-you and failed).
+- ✅ Crew status strip atop the lead view ("2 working · 1 needs you · 3 done since you left"), folded from session state; each count filters the sidebar.
 - ✅ Import existing Claude Code sessions from `~/.claude` (read-only), then resume them.
 
 ## Sessions and worktrees
@@ -25,6 +26,7 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ Outcome cards with observed proof: the daemon records the tests, builds, typechecks and lints the agent really ran, with real exit codes.
 - ✅ Change map by symbol (tree-sitter plus `git diff`), a read-only diff/file viewer, activity and full transcript in the drawer.
 - ⚠️ Declared checks: `perzian.json` lists your own checks; the daemon runs them when an agent says it's done, sends failures back (2 rounds), and allows them without a card.
+- ✅ "Run checks" in the session drawer reruns the declared and detected checks (running, then ✓/✕).
 
 ## Ship
 - ⚠️ "Merge into <base>" or "Open PR" from the drawer; merges only what the agent changed (never `.env`/keys), asks first, removes the worktree.
