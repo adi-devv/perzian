@@ -128,28 +128,16 @@ type Creds = ReturnType<typeof useCredentials>;
 
 const shellQuote = (s: string) => (/^[\w@%+=:,./~-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
 
-/** Whether the first task can start, and if not, the one thing to do first. Gates every way to start. */
-export function readiness(report: DoctorReport | null, project: string): { ready: boolean; blocker: string } {
+/** Whether the lead can be talked to, and if not, the one thing to do first. No project is needed: the lead asks for one when it must. */
+export function readiness(report: DoctorReport | null): { ready: boolean; blocker: string } {
   const claude = report?.agents.find((a) => a.kind === "claude-code");
-  const proj = report?.project && report.project.input === project.trim() ? report.project : undefined;
-  const blocker = !report
-    ? "Checking your setup…"
-    : !claude?.installed
-      ? "Install Claude Code to start."
-      : claude.signedIn === false
-        ? "Sign in to start."
-        : !proj?.exists
-          ? "Pick a project folder to start."
-          : proj.noCommits
-            ? "Make a first commit in your project to start."
-            : proj.detached
-              ? "Check out a branch in your project to start."
-              : "";
+  const blocker = !report ? "Checking your setup…" : !claude?.installed ? "Install Claude Code to start." : claude.signedIn === false ? "Sign in to start." : "";
   return { ready: !blocker, blocker };
 }
 
-/** First run shows the folder and whatever is actually broken, each with one fix. Nothing when all is well. */
-export function Onboarding({ doctor, project, setProject, recent }: { doctor: Doctor; project: string; setProject: (p: string) => void; recent: string[] }) {
+/** First run shows whatever is actually broken, each with one fix, above the lead's chat. Nothing when all is well.
+ *  `project` is the chip picked as a hint, if any. */
+export function Onboarding({ doctor, project }: { doctor: Doctor; project: string }) {
   const { report, loading, failed, recheck } = doctor;
   const creds = useCredentials(true);
   const claude = report?.agents.find((a) => a.kind === "claude-code");
@@ -163,18 +151,6 @@ export function Onboarding({ doctor, project, setProject, recent }: { doctor: Do
 
   return (
     <div className="onboard">
-      <h2 className="onboard-h">Pick a project to start</h2>
-      <FolderPicker
-        first
-        id="onboard-project"
-        inputClass="step-input"
-        project={project}
-        setProject={setProject}
-        recent={recent}
-        onPicked={() => setTimeout(() => document.getElementById("main-composer")?.focus(), 0)}
-        autoFocus={!project}
-      />
-      {proj && !proj.exists && <p className="step-note bad">Folder not found</p>}
 
       {(failed && !report) || (claude && !claude.installed) || sign.fix || proj?.noCommits || proj?.detached ? (
         <ol className="steps">

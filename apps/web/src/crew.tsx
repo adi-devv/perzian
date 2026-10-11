@@ -279,7 +279,7 @@ function Summary({ workers }: { workers: SessionInfo[] }) {
 
 const DONE_FOLD = 3;
 
-export function Crew({ state, workers, selected, onOpen, send, connected, onAddProject, onImport, onHelp, onAccounts, onUseProject }: { state: State; workers: SessionInfo[]; selected: string | null; onOpen: (id: string) => void; send: Send; connected: boolean; onAddProject: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void; onUseProject: (path: string) => void }) {
+export function Crew({ state, workers, selected, onOpen, send, connected, onAddProject, onImport, onHelp, onAccounts, onUseProject, onWelcome }: { state: State; workers: SessionInfo[]; selected: string | null; onOpen: (id: string) => void; send: Send; connected: boolean; onAddProject: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void; onUseProject: (path: string) => void; onWelcome: () => void }) {
   // While the pointer is over the column the order holds still, so a tile never moves out from under a click.
   // New orders queue and apply on mouseleave.
   const [held, setHeld] = useState(false);
@@ -369,6 +369,7 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
               <button className="btn small" onClick={onImport} title="Show your recent Claude Code sessions here; open one to continue it">Import Claude Code sessions</button>
               {!isDemo && <button className="btn small" onClick={onAccounts}>Accounts &amp; API keys</button>}
               <PhoneButton />
+              {!isDemo && <button className="btn small" onClick={onWelcome}>Welcome</button>}
               <button className="btn small" onClick={onHelp}>Keyboard shortcuts <kbd>?</kbd></button>
             </div>
           </details>

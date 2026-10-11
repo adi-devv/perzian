@@ -7,6 +7,8 @@ import * as acp from "@agentclientprotocol/sdk";
 import {
   FOLLOWUP_REMINDER,
   MAIN_INSTRUCTIONS,
+  knownProjects,
+  leadProjectsBrief,
   REPORT_INSTRUCTIONS,
   type AgentConfig,
   type AgentKind,
@@ -580,7 +582,7 @@ export class AgentSession {
   // What the agent receives: instructions on the first turn, plus for workers the detected checks; a
   // one-line rules reminder on later worker turns, since long sessions drift.
   private promptBody(text: string, first: boolean): string {
-    if (this.info.role === "main") return first ? `${MAIN_INSTRUCTIONS}\n\n---\n\n${text}` : text;
+    if (this.info.role === "main") return first ? `${MAIN_INSTRUCTIONS}\n\n${leadProjectsBrief(knownProjects(this.store.state()))}\n\n---\n\n${text}` : text;
     if (!first) return `${FOLLOWUP_REMINDER}\n\n${text}`;
     const checks = this.info.checks?.length ? `\n\nChecks available: ${this.info.checks.join(", ")}` : "";
     const required = declaredBrief(this.info.declaredChecks);

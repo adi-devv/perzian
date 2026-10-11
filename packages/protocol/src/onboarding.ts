@@ -69,6 +69,15 @@ export interface GitHubCheck {
   signInCommand: string;
 }
 
+/** "Connect GitHub" (POST/GET/DELETE /api/github/login): gh's browser device flow, run by the daemon. The developer
+ * enters `code` at `url` in their own browser; poll until `done`, then re-read the doctor. No token ever reaches us. */
+export interface GitHubLogin {
+  state: "idle" | "waiting" | "done" | "failed";
+  code?: string;
+  url?: string;
+  error?: string;
+}
+
 export interface DoctorReport {
   agents: AgentCheck[];
   git: { installed: boolean; version?: string };

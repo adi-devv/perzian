@@ -802,3 +802,37 @@ a.mchip { text-decoration: none; }
 .ps-actions .btn { min-height: 44px; flex: 1; font-size: 15px; }
 .ps-actions:empty { display: none; }
 .ps-foot { font-size: 12px; }
+
+/* Welcome splash: a centered card over the dimmed app. */
+.splash-back { z-index: 20; }
+.splash { width: min(640px, 100%); background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35); display: flex; flex-direction: column; overflow: hidden; }
+.splash-top { display: flex; align-items: center; gap: 14px; padding: 20px 22px; border-bottom: 1px solid var(--line); }
+.splash-top h2 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+.splash-ver { font-size: 12px; font-weight: 400; color: var(--fg-3); margin-left: 6px; font-family: var(--mono); }
+.splash-tag { margin: 2px 0 0; color: var(--fg-2); font-size: 13px; }
+.mark.big { width: 26px; height: 26px; border-width: 2px; }
+.mark.big::after { inset: 5px; }
+.splash-cols { display: grid; grid-template-columns: 1.3fr 1fr; gap: 0; }
+.splash-col { padding: 16px 22px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.splash-col + .splash-col { border-left: 1px solid var(--line); }
+.splash-col h3 { margin: 0; font-size: 11px; font-weight: 500; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.sp-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+.sp-k { color: var(--fg-2); }
+.sp-v { color: var(--fg); text-align: right; }
+.sp-opt { color: var(--fg-3); font-size: 11px; margin-left: 4px; }
+.sp-quiet { margin: 0; font-size: 12px; color: var(--fg-3); line-height: 1.5; }
+.sp-agents, .sp-gh, .sp-agent { display: flex; flex-direction: column; gap: 6px; }
+.sp-gh { padding-top: 8px; border-top: 1px solid var(--line-soft); }
+.sp-code { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.code-big { font-family: var(--mono); font-size: 16px; letter-spacing: 0.08em; padding: 3px 8px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.splash-links { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: auto; padding-top: 8px; font-size: 13px; }
+.splash-foot { display: flex; align-items: center; justify-content: space-between; padding: 12px 22px; border-top: 1px solid var(--line); }
+.sp-check { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-2); }
+.folder-recent.chips { justify-content: center; }
+.project-card .folder-pick { display: flex; gap: 8px; margin-top: 8px; }
+.project-card .folder-pick input { flex: 1; min-width: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .splash { animation: splash-in 0.15s ease-out; }
+  @keyframes splash-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+}
+@media (max-width: 640px) { .splash-cols { grid-template-columns: 1fr; } .splash-col + .splash-col { border-left: 0; border-top: 1px solid var(--line); } }

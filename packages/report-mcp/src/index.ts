@@ -121,6 +121,13 @@ server.tool(
   async (args) => text(await send({ tool: "spawn_session", sessionId, args })),
 );
 if (role === "main") {
+  server.tool(
+    "ask_project",
+    "Ask the developer which project (folder) the work is about; blocks until they answer and returns its absolute path. You start with no repo. " +
+      "Call it before spawn_session or reading code unless the developer named a known project or path, or exactly one project is known. Never guess between several projects, and never ask in plain text instead.",
+    { reason: z.string().describe("One short line the developer sees under \"Which project?\", e.g. \"To fix the login bug\"") },
+    async (args) => text(`Project folder: ${JSON.parse(await send({ tool: "ask_project", sessionId, args })) as string}`),
+  );
   server.tool("list_sessions", "List the developer's coding sessions with status, progress, changed files, outcomes and detected check commands.", {}, async () =>
     text(await send({ tool: "list_sessions", sessionId, args: {} })),
   );

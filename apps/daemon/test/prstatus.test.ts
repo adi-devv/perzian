@@ -201,7 +201,8 @@ describe("a session folds PR state and base-moved into git", () => {
 
     (s as unknown as { lastBaseFetch: number }).lastBaseFetch = Date.now() - 121_000;
     await s.refreshRepo();
-    await new Promise((r) => setTimeout(r, 200));
+    // A real git fetch: poll instead of a fixed wait, which flakes when the suite runs in parallel.
+    for (let i = 0; i < 60 && s.info.git?.behind !== 2; i++) await new Promise((r) => setTimeout(r, 50));
     assert.equal(fetches, 2);
     assert.equal(s.info.git?.behind, 2);
 
