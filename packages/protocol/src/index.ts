@@ -182,7 +182,7 @@ export type ReportCall =
 
 export const DAEMON_PORT = 4317;
 
-export const AGENTS: Record<AgentKind, { label: string; models: { id: string; label: string }[] }> = {
+export const AGENTS: Record<AgentKind, { label: string; experimental?: boolean; models: { id: string; label: string }[] }> = {
   "claude-code": {
     label: "Claude",
     models: [
@@ -193,7 +193,7 @@ export const AGENTS: Record<AgentKind, { label: string; models: { id: string; la
       { id: "claude-fable-5-1", label: "Fable 5.1" },
     ],
   },
-  codex: { label: "Codex", models: [{ id: "", label: "Default" }] },
+  codex: { label: "Codex", experimental: true, models: [{ id: "", label: "Default" }] },
 };
 
 export const MODE_LABEL: Record<PermissionMode, string> = {

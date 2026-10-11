@@ -483,7 +483,7 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
 
       <div className="chips">
         {s.branch && <code className="chip" title={s.cwd}>{s.worktree ? "⑂ " : ""}{s.branch}</code>}
-        <span className="chip">{AGENTS[s.agent].label}</span>
+        <span className="chip" title={AGENTS[s.agent].experimental ? "Experimental: less tested than Claude Code" : undefined}>{AGENTS[s.agent].label}{AGENTS[s.agent].experimental ? " · experimental" : ""}</span>
         <ModelPicker s={s} state={state} send={send} />
         <Usage s={s} />
         <select className="picker" aria-label="Permission mode" value={s.mode ?? "ask"} onChange={(e) => send({ type: "session.setMode", sessionId: s.id, mode: e.target.value as PermissionMode })}>
@@ -701,7 +701,7 @@ function NewSession({ onClose, onCreate }: { onClose: () => void; onCreate: (c: 
           <label>
             Agent
             <select id="ns-agent" value={agent} onChange={(e) => { setAgent(e.target.value as AgentKind); setModel(""); }}>
-              {(Object.keys(AGENTS) as AgentKind[]).map((a) => <option key={a} value={a}>{AGENTS[a].label}</option>)}
+              {(Object.keys(AGENTS) as AgentKind[]).map((a) => <option key={a} value={a}>{AGENTS[a].label}{AGENTS[a].experimental ? " (experimental)" : ""}</option>)}
             </select>
           </label>
           <label>
