@@ -20,6 +20,8 @@ resume after a daemon restart.
 Perzian drives existing agents (Claude Code; Codex is experimental) over the
 [Agent Client Protocol](https://agentclientprotocol.com). It's the surface around the agent, not another agent.
 
+What works today: [FEATURES.md](FEATURES.md).
+
 > Status: early. Core loop, main agent and desktop shell work. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Install
