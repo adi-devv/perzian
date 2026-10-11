@@ -9,6 +9,9 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    Fix: Settings → Pages → Custom domain → `www.perzian.dev` → Save, wait for HTTPS, then switch back to `perzian.dev` if preferred.
 
 ## Features
+0. **Ready worktrees (do first).** Before the agent's first message: copy `.env*` and other local-only files from the
+   checkout, run the install for the lockfile (npm/pnpm/yarn/bun, uv…), show "Setting up…", Retry on failure.
+   Later: per-repo custom setup steps. Without this, first test runs fail in fresh worktrees.
 1. **Ship it: try it for real.** Built: "Merge into <base>" / "Open PR" in the session drawer, conflicts listed with
    "Ask the agent to resolve", worktree removed after a merge. Unit-tested on temp repos; not yet run from the app on a real project.
 2. **Crew summary.** Ask the lead "what's going on?" and get a short digest of what's done, blocked and needs you,
@@ -23,6 +26,14 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    **Marketing:** "Hit your limit at 2 am? Perzian picks up when it resets." Lead with it on the site as a feature card.
 5. **Phone access (after trying the Mac app).** QR code + one-time pairing token opens the UI on your phone,
    on the same Wi-Fi or through Tailscale. Mainly for answering decision cards. Needs token auth on the daemon.
+
+## From competitors (Conductor, Vibe Kanban, Cursor, Zed)
+- **PR + CI status on the session** after "Open PR": checks passing/failing, merged.
+- **Run the app from a session:** start its dev server on its own port to try the change before merging.
+- **Checkpoints:** roll a session back to before a given turn.
+- **Sessions from issues:** pick a GitHub/Linear issue; it becomes the brief.
+- **Comment on a diff line:** goes to the agent as the next task (code view stays read-only).
+- **GitHub connect, not login:** first-run check shows "Connected as <user>" via `gh`, or how to run `gh auth login`.
 
 ## Known gaps
 - Destructive-command cards aren't guaranteed for Codex: its own auto mode runs commands without asking.
