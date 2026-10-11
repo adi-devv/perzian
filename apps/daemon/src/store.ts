@@ -68,6 +68,17 @@ export function replay(events: PerzianEvent[]): State {
       case "session.status":
         patch(e.sessionId, { status: e.status, updatedAt: e.at });
         break;
+      case "session.paused":
+        patch(e.sessionId, { status: "paused", pause: e.pause, updatedAt: e.pause.at });
+        break;
+      case "session.resumed": {
+        const cur = sessions[e.sessionId];
+        if (!cur) break;
+        delete cur.pause;
+        if (cur.status === "paused") cur.status = "idle";
+        cur.updatedAt = e.at;
+        break;
+      }
       case "session.progress":
         patch(e.sessionId, { progress: e.progress });
         break;

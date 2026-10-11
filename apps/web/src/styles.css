@@ -60,6 +60,10 @@ kbd { font-size: 10px; color: var(--fg-3); padding: 0 3px; }
 
 /* status: a single small mark carries the color */
 .s-working { --c: var(--working); } .s-needs_you { --c: var(--needs); } .s-failed { --c: var(--failed); } .s-done { --c: var(--done); } .s-idle { --c: var(--idle); }
+/* paused at a usage limit: no color of its own (it needs nothing from you); the words carry it */
+.s-paused { --c: var(--idle); }
+.paused { display: inline-flex; align-items: baseline; gap: 10px; }
+.row-note { color: var(--fg-3); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c, var(--idle)); flex: none; display: inline-block; }
 .s-working .dot, .dot.s-working { animation: breathe 2s ease-in-out infinite; }
 @keyframes breathe { 50% { opacity: 0.35; } }

@@ -19,6 +19,8 @@ export const demoEvents: PerzianEvent[] = [
   { type: "session.created", session: s("c", "Flaky checkout e2e", "~/code/web", "perzian/e2e-checkout", "failed", "codex", 2_400_000) },
   { type: "session.created", session: s("d", "Dark mode tokens", "~/code/web", "perzian/dark-tokens", "done", "claude-code", 3_000_000) },
   { type: "session.created", session: s("g", "Bump deps", "~/code/billing", "main", "idle", "claude-code", 6_000_000, { parentId: undefined, worktree: false, live: false }) },
+  { type: "session.created", session: s("h", "API reference docs", "~/code/api", "perzian/api-docs", "working", "claude-code", 1_800_000) },
+  { type: "session.paused", sessionId: "h", pause: { reason: "You've hit your session limit · resets soon", resumeAt: t + 2 * 3_600_000 + 17 * 60_000, window: "five_hour", at: t - 600_000 } },
 
   { type: "session.updated", sessionId: "main", patch: { usage: { costUsd: 0.38, contextUsed: 41_000, contextSize: 200_000 } } },
   { type: "session.updated", sessionId: "b", patch: { usage: { costUsd: 1.12, contextUsed: 92_000, contextSize: 200_000 } } },

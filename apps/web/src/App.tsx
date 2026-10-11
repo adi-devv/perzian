@@ -16,7 +16,7 @@ import { fetchText, isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts"
 import { Accounts, DaemonOffline, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, saveProject, withProject } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import type { ThemedToken } from "shiki/core";
-import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, statusLabel, Usage, ago, churn, cost, useTick } from "./bits.tsx";
+import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, Usage, ago, churn, cost, pauseTitle, resumeTime, statusText, useTick } from "./bits.tsx";
 
 type Send = (c: Command) => void;
 
@@ -150,7 +150,7 @@ function retryTarget(items: TranscriptItem[], status: SessionInfo["status"]): { 
 /* ───────────── Sidebar: every session at a glance ───────────── */
 
 function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, onHelp, onAccounts, connected }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void; connected: boolean }) {
-  const counts = { needs_you: 0, working: 0, failed: 0, done: 0, idle: 0 };
+  const counts = { needs_you: 0, working: 0, failed: 0, done: 0, idle: 0, paused: 0 };
   for (const s of workers) counts[s.status]++;
   const spent = [main, ...workers].reduce((n, s) => n + (s?.usage?.costUsd ?? 0), 0);
   const groups = new Map<string, SessionInfo[]>();
@@ -188,9 +188,10 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
           <section key={project} className="side-group">
             <h3 className="eyebrow">{project.split("/").slice(-1)[0]}</h3>
             {list.map((s) => (
-              <button key={s.id} className={`row s-${s.status} ${selected === s.id ? "active" : ""} ${s.live === false ? "dormant" : ""}`} onClick={() => onSelect(selected === s.id ? null : s.id)} title={`${statusLabel(s)} · ${s.branch ?? s.project}`}>
+              <button key={s.id} className={`row s-${s.status} ${selected === s.id ? "active" : ""} ${s.live === false ? "dormant" : ""}`} onClick={() => onSelect(selected === s.id ? null : s.id)} title={`${statusText(s)} · ${s.branch ?? s.project}`}>
                 <StatusGlyph s={s} />
                 <span className="row-title">{s.title}</span>
+                {s.status === "paused" && s.pause && <span className="row-note">{resumeTime(s.pause)}</span>}
                 {isUnseen(s) && <span className="unseen" aria-label="New result" />}
                 <ChurnBar files={state.changes[s.id] ?? []} />
               </button>
@@ -238,6 +239,7 @@ function Thread({ state, main, send, onOpen, decisions, link, onStart, firstRun 
         <h1>{main ? "Perzian" : "Talk to Perzian"}</h1>
         {main && <ModelPicker s={main} state={state} send={send} />}
         {main?.status === "working" && <span className="thinking">thinking</span>}
+        {main?.status === "paused" && <Paused s={main} send={send} />}
       </div>
 
       <div className="thread-scroll">
@@ -371,6 +373,17 @@ function ToolStrip({ tools }: { tools: TranscriptItem[] }) {
   );
 }
 
+// "Paused · resumes 3:40 pm" and a way not to wait. No color: paused at a limit needs nothing from you.
+function Paused({ s, send }: { s: SessionInfo; send: Send }) {
+  useTick();
+  return (
+    <span className="paused" title={pauseTitle(s)}>
+      <span className="status-text">{statusText(s)}</span>
+      <button className="text-link" onClick={() => send({ type: "session.resume", sessionId: s.id })}>Resume now</button>
+    </span>
+  );
+}
+
 // A spawned session, inline in the conversation, updating live.
 function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: () => void }) {
   const files = state.changes[s.id] ?? [];
@@ -382,7 +395,7 @@ function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: 
       <div className="live-top">
         <StatusGlyph s={s} />
         <span className="live-title">{s.title}</span>
-        <span className="live-status">{statusLabel(s)}{pending > 1 ? ` · ${pending}` : ""}</span>
+        <span className="live-status" title={pauseTitle(s)}>{statusText(s)}{pending > 1 ? ` · ${pending}` : ""}</span>
         <span className="age">{ago(s.updatedAt)}</span>
       </div>
       <div className="live-meta">
@@ -626,7 +639,7 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
         <div className="drawer-title">
           <h2>{s.title}</h2>
           <p>
-            <span className="status-text">{statusLabel(s)}</span>
+            {s.status === "paused" ? <Paused s={s} send={send} /> : <span className="status-text">{statusText(s)}</span>}
             {s.progress && s.status === "working" && <> · {s.progress.phase} {s.progress.step}/{s.progress.of}</>}
             {s.live === false && <> · asleep</>}
           </p>
@@ -686,7 +699,7 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
         {!outcome && (
           <section>
             <h3 className="eyebrow">Outcome</h3>
-            <p className="quiet">{s.status === "working" || s.status === "needs_you" ? "Lands here when the agent finishes, with proof." : s.status === "failed" ? "None. The agent stopped before reporting one." : "No outcome yet. Send a task to get one."}</p>
+            <p className="quiet">{s.status === "working" || s.status === "needs_you" || s.status === "paused" ? "Lands here when the agent finishes, with proof." : s.status === "failed" ? "None. The agent stopped before reporting one." : "No outcome yet. Send a task to get one."}</p>
           </section>
         )}
 

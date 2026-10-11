@@ -31,6 +31,27 @@ describe("formatChildFinished", () => {
   });
 });
 
+describe("formatChildFinished: usage-limit pauses", () => {
+  const NOW = Date.parse("2026-10-11T10:00:00Z");
+  test("paused and resumed children, mixed with a finished one", () => {
+    const text = formatChildFinished(
+      [
+        report("a"),
+        report("p", { status: "paused", event: "paused", pause: { resumeAt: NOW + 2 * 3600_000 + 5 * 60_000, window: "five_hour" } }),
+        report("q", { status: "paused", event: "paused", pause: { resumeAt: NOW + 3 * 86400_000, window: "seven_day", estimated: true, early: true } }),
+        report("r", { status: "working", event: "resumed" }),
+      ],
+      NOW,
+      "UTC",
+    );
+    const lines = text.split("\n");
+    assert.equal(lines[0], "[perzian] Automatic update, not from the developer: a session finished; 2 sessions paused at a usage limit (resumes by itself; nothing to do); a session resumed after a usage limit reset.");
+    assert.equal(lines[2], '- id=p title="Task p" status=paused resumes_at="Sun 12:05 PM" resumes_in=2h5m limit=five_hour files=2');
+    assert.equal(lines[3], '- id=q title="Task q" status=paused resumes_at="Wed 10:00 AM" resumes_in=~3d0h limit=seven_day early=true files=2');
+    assert.equal(lines[4], '- id=r title="Task r" status=resumed files=2');
+  });
+});
+
 describe("LeadNotifier", () => {
   let delivered: { lead: string; text: string }[];
   let notices: string[];
@@ -105,6 +126,38 @@ describe("LeadNotifier", () => {
     n.childSettled("L", "b");
     mock.timers.tick(2000);
     assert.equal(delivered.length, 1);
+    mock.timers.reset();
+  });
+
+  test("pauses and resumes are reported for any child, batched, and keep the lead's claim on the turn", () => {
+    n.childPrompted("a", true);
+    n.childPaused("L", "a");
+    n.childPaused("L", "b"); // the developer drove b; the lead still hears it paused
+    mock.timers.tick(1500);
+    assert.equal(delivered.length, 1);
+    assert.match(delivered[0].text, /2 sessions paused at a usage limit/);
+    assert.match(delivered[0].text, /id=a title="Task a" status=paused/);
+    // Resumed, then finished: the finish is still reported, since the lead started a's turn.
+    n.childResumed("L", "a");
+    mock.timers.tick(1500);
+    assert.match(delivered[1].text, /a session resumed/);
+    n.developerPrompted("L"); // this fixture's loop guard allows 2 automatic turns
+    n.childSettled("L", "a");
+    mock.timers.tick(1500);
+    assert.match(delivered[2].text, /a session finished/);
+    mock.timers.reset();
+  });
+
+  test("latest wins within a batch, but a pause note never hides a finish", () => {
+    n.childPaused("L", "a");
+    n.childResumed("L", "a");
+    settle("b");
+    n.childPaused("L", "b");
+    mock.timers.tick(1500);
+    assert.equal(delivered.length, 1);
+    assert.match(delivered[0].text, /: a session finished; a session resumed/);
+    assert.match(delivered[0].text, /id=a title="Task a" status=resumed/);
+    assert.match(delivered[0].text, /id=b title="Task b" status=done/);
     mock.timers.reset();
   });
 

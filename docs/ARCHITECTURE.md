@@ -122,10 +122,17 @@ without a developer message, updates pause until the developer speaks.
 ```
 idle ─prompt→ working ─permission/ask_decision→ needs_you ─answer→ working
 working ─end_turn→ done      working ─error→ failed      any ─cancel→ idle
+working ─usage limit (or worker ≥95%, after the current tool)→ paused ─reset/Resume now/prompt→ working
 ```
 
-Attention order (`byAttention`): `needs_you` → `failed` → `done` → `working` → `idle`; most recently updated
-first within a status. `isUnseen`: done/failed and updated since last `session.seen`.
+Attention order (`byAttention`): `needs_you` → `failed` → `done` → `working` → `paused` → `idle`; most recently
+updated first within a status. `isUnseen`: done/failed and updated since last `session.seen`.
+
+**Usage limits** (`limits.ts`, `resume.ts`): a limit hit (Claude's `_claude/rateLimit` usage info, its "You've hit
+your … · resets …" text, or a rate-limit error) emits `session.paused { resumeAt }` instead of failing. The event
+store is the resume queue: `ResumeQueue` rebuilds from state on start, polls the wall clock (timers stall in sleep),
+and at `resumeAt` + jitter sends a short system "continue" prompt to the same session. `session.resumed` clears it.
+The lead gets paused/resumed lines through the same batched updates as finished children.
 
 ## Events
 

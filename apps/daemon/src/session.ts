@@ -11,6 +11,7 @@ import {
   type AgentConfig,
   type AgentKind,
   type Decision,
+  type PauseInfo,
   type PermissionMode,
   type SessionInfo,
   type SessionStatus,
@@ -27,6 +28,10 @@ import { UsageMeter } from "./usage.ts";
 import { SetupGate, readyWorktree } from "./setup.ts";
 import { MAX_FIX_ATTEMPTS, declaredBrief, declaredProofs, fixPrompt, runDeclaredChecks } from "./checks.ts";
 import type { CheckResult, CheckRun, DeclaredCheck } from "@perzian/protocol";
+import { hitFromReading, limitFromError, parseLimitText, pauseThreshold, readRateLimit, resumeTime, type LimitHit } from "./limits.ts";
+
+/** Sent to a session when its usage limit resets. */
+export const CONTINUE_PROMPT = "(Perzian: your usage limit has reset. Continue where you left off.)";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const reportMcpEntry = join(here, "../../../packages/report-mcp/src/index.ts");
@@ -109,6 +114,15 @@ export class AgentSession {
   private fixTurn = false;
   private checksAbort?: AbortController;
   private downgraded?: number; // createdAt of the outcome our failing checks turned from success to partial
+  // Usage limits (see limits.ts): hit this turn, so it ends Paused instead of Failed; or nearly hit, so it
+  // stops after the current step. `turnText` is the agent's last words this turn, where Claude puts its
+  // "You've hit your limit" message.
+  private limitHit?: LimitHit;
+  private pauseAfterStep?: LimitHit;
+  private stoppingForLimit = false;
+  private turnText = "";
+  /** "Resume now" on an early pause: don't pause early again before this time. */
+  private nearLimitOkUntil = 0;
 
   constructor(public info: SessionInfo, private deps: SessionDeps) {
     // A restored session starts from what the log already has, so reattaching doesn't re-emit it.
@@ -196,8 +210,10 @@ export class AgentSession {
   }
 
   private async start(): Promise<void> {
-    // The user's installed agent CLI when there is one, else the binary bundled with the adapter.
-    const override = this.deps.adapter;
+    // The user's installed agent CLI when there is one, else the binary bundled with the adapter. Tests swap in
+    // a scripted fake agent (deps.adapter, or PERZIAN_TEST_ADAPTER).
+    const fake = process.env.PERZIAN_TEST_ADAPTER;
+    const override = this.deps.adapter ?? (fake ? { command: process.execPath, args: [fake] } : undefined);
     const agent = override ? undefined : agentEnv(this.info.agent);
     if (agent) console.log(`[${this.info.id.slice(0, 6)}] ${this.info.agent} executable (${agent.resolved.source}): ${agent.resolved.path}`);
     const env: NodeJS.ProcessEnv = { ...process.env, ...agent?.env, ...this.deps.creds?.envFor(this.info.agent) };
@@ -388,6 +404,8 @@ export class AgentSession {
    * the fix-attempt count starts over.
    */
   async prompt(text: string, opts: { system?: boolean; resend?: boolean; checkFix?: boolean } = {}): Promise<void> {
+    // Writing to a paused session resumes it now (the scheduled resume is dropped).
+    this.clearPause("prompt");
     if (!opts.resend) this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "user", text, at: Date.now(), ...(opts.system ? { system: true as const } : {}) } });
     // A prompt sent while a turn is running is queued by the agent; the session stays "working" until
     // the last one returns.
@@ -396,6 +414,10 @@ export class AgentSession {
       this.outcomeThisTurn = false;
       this.proofs.reset();
       this.fixTurn = !!opts.checkFix;
+      this.limitHit = undefined;
+      this.pauseAfterStep = undefined;
+      this.stoppingForLimit = false;
+      this.turnText = "";
     }
     if (!opts.checkFix) this.fixAttempts = 0;
     this.setStatus("working");
@@ -418,11 +440,19 @@ export class AgentSession {
       if (this.inflight === 1) next = await this.finishTurn(text, res.stopReason);
     } catch (err) {
       this.flushAgentText();
-      this.notice(this.describeError(err));
+      // A usage limit isn't a failure: pause, and resume when it resets.
+      const now = Date.now();
+      const said = limitFromError(err, { now }) ?? parseLimitText(this.turnText, { now, strict: true });
+      const hit = this.mergeHit(said);
+      if (hit) this.limitHit = hit;
+      else this.notice(this.describeError(err));
       if (this.inflight === 1) {
         this.dropDecisions();
-        this.closeOpenTools("failed");
-        this.setStatus("failed");
+        this.closeOpenTools(hit ? "cancelled" : "failed");
+        if (hit) {
+          await this.refreshChanges();
+          this.pause(hit);
+        } else this.setStatus("failed");
       }
     } finally {
       this.inflight--;
@@ -514,6 +544,15 @@ export class AgentSession {
     this.dropDecisions();
     this.closeOpenTools(stopReason === "cancelled" ? "cancelled" : "completed");
     const files = await this.refreshChanges();
+    // Stopped by a usage limit: the work isn't finished, so no outcome; it picks up when the limit resets.
+    // A normal-looking end only counts when the agent's last words are a limit message with a reset time.
+    const said = stopReason === "cancelled" ? null : parseLimitText(this.turnText, { now: Date.now(), strict: true });
+    const hit = this.limitHit || said?.resetAt !== undefined ? this.mergeHit(said) : undefined;
+    const early = !hit && stopReason === "cancelled" && this.stoppingForLimit ? this.pauseAfterStep : undefined;
+    if (hit || early) {
+      this.pause((hit ?? early)!, !hit);
+      return;
+    }
     // Only derive an outcome when this turn actually touched files (not for a follow-up question).
     const changedThisTurn = files.length > 0 && JSON.stringify(files) !== this.turnBaseline;
     const observed = this.proofs.proofs();
@@ -636,8 +675,79 @@ export class AgentSession {
     this.changeTimer = setTimeout(() => void this.refreshChanges(), 600);
   }
 
+  // ---- Usage limits ----
+
+  /** The agent's words win for the reason; the structured rate-limit info for the reset time. */
+  private mergeHit(said: LimitHit | null): LimitHit | undefined {
+    const known = this.limitHit;
+    if (!known) return said ?? undefined;
+    if (!said) return known;
+    return { ...said, ...known, reason: said.reason, ...(said.window && !known.window ? { window: said.window } : {}), ...(known.resetAt === undefined && said.resetAt !== undefined ? { resetAt: said.resetAt } : {}) };
+  }
+
+  /** Stop at a usage limit: status "paused" until the limit resets (the resume queue picks it up). */
+  pause(hit: LimitHit, early = false): void {
+    const at = Date.now();
+    const { resumeAt, estimated } = resumeTime(hit, at);
+    const pause: PauseInfo = { reason: hit.reason, resumeAt, at, ...(estimated ? { estimated } : {}), ...(hit.window ? { window: hit.window } : {}), ...(early ? { early } : {}) };
+    this.limitHit = undefined;
+    this.pauseAfterStep = undefined;
+    this.stoppingForLimit = false;
+    this.info.status = "paused";
+    this.info.pause = pause;
+    this.info.updatedAt = at;
+    this.notice(early ? "Paused near the usage limit, after the current step" : "Paused at the usage limit");
+    this.store.emit({ type: "session.paused", sessionId: this.info.id, pause });
+  }
+
+  /** Leaves "paused" (to idle), without prompting. False when it wasn't paused. */
+  private clearPause(reason: "reset" | "now" | "prompt" | "cancel"): boolean {
+    if (this.info.status !== "paused") return false;
+    const at = Date.now();
+    // The developer chose to go on past an early pause: don't stop again at the same threshold.
+    if (this.info.pause?.early && reason !== "reset") this.nearLimitOkUntil = this.info.pause.resumeAt;
+    delete this.info.pause;
+    this.info.status = "idle";
+    this.info.updatedAt = at;
+    this.store.emit({ type: "session.resumed", sessionId: this.info.id, at, reason });
+    return true;
+  }
+
+  /** The limit reset ("reset") or the developer pressed Resume now ("now"): continue the same conversation, same worktree. */
+  resume(reason: "reset" | "now"): Promise<void> {
+    if (!this.clearPause(reason)) return Promise.resolve();
+    return this.prompt(CONTINUE_PROMPT, { system: true });
+  }
+
+  // Claude's rate-limit info rides on usage_update. Rejected: the limit is hit (the turn is about to fail).
+  // Near the threshold: stop after the current step (see maybeStopForLimit). Workers only: the lead's
+  // turns are short and it should stay reachable.
+  private onRateLimit(info: unknown): void {
+    if (this.inflight === 0) return;
+    const r = readRateLimit(info, this.info.role === "worker" ? pauseThreshold() : 0);
+    if (!r) return;
+    if (r.state === "rejected") this.limitHit ??= hitFromReading(r);
+    else if (r.state === "near" && r.resetAt !== undefined && Date.now() >= this.nearLimitOkUntil && !this.pauseAfterStep) {
+      this.pauseAfterStep = hitFromReading(r);
+      this.notice(`${this.pauseAfterStep.reason}: pausing after the current step`);
+    }
+  }
+
+  // A step is a tool call. Once the one running finishes (and nothing else is open or waiting on the
+  // developer), cancel the turn; finishTurn then pauses instead of going idle.
+  private maybeStopForLimit(): void {
+    if (!this.pauseAfterStep || this.stoppingForLimit || !this.conn || !this.info.acpSessionId) return;
+    if (this.info.status !== "working") return;
+    for (const t of this.tools.values()) if (!isTerminal(t.status)) return;
+    this.stoppingForLimit = true;
+    void this.conn.cancel({ sessionId: this.info.acpSessionId }).catch(() => {});
+  }
+
   async cancel(): Promise<void> {
     this.gate.cancel(); // prompts still waiting on setup
+    this.pauseAfterStep = undefined;
+    this.stoppingForLimit = false;
+    if (this.clearPause("cancel")) return; // paused: nothing is running
     this.dropDecisions();
     // Everything still running belongs to the turn being cancelled; a late "completed" from the agent
     // won't reopen it (terminal tool states are sticky, see tool_call_update).
@@ -674,6 +784,7 @@ export class AgentSession {
 
   private flushAgentText(): void {
     if (!this.agentText.trim()) return;
+    this.turnText = this.agentText.trim();
     this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "agent", text: this.agentText.trim(), at: Date.now() } });
     this.agentText = "";
   }
@@ -770,6 +881,8 @@ export class AgentSession {
             if (known && isTerminal(known.status)) break;
             if (update.title && known && !known.hidden) known.title = update.title;
             if (update.status && known) known.status = update.status;
+            // Deferred: the stop goes out after this update is handled.
+            if (update.status && isTerminal(update.status) && this.pauseAfterStep) queueMicrotask(() => this.maybeStopForLimit());
             if (known?.hidden) break;
             // An update for a call we never saw (e.g. from before a reattach): without a title it would
             // blank the transcript entry, and it may be one of our own tools.
@@ -801,6 +914,7 @@ export class AgentSession {
           case "usage_update": {
             const usage = this.meter?.read(update);
             if (usage) this.update({ usage });
+            this.onRateLimit((update._meta as Record<string, unknown> | null | undefined)?.["_claude/rateLimit"]);
             break;
           }
           default:

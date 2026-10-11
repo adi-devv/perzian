@@ -1,12 +1,16 @@
-// Tells the lead when the sessions it started finish: one short, machine-readable system prompt per
-// batch of children that settle close together, delivered only between the lead's turns.
+// Tells the lead when the sessions it started finish, pause at a usage limit, or resume: one short,
+// machine-readable system prompt per batch of children that change close together, delivered only between
+// the lead's turns.
 //
 // Loop guards: only turns the lead itself started (spawn_session / send_to_session) are reported, never
 // work the developer drove directly in a child; and after MAX_AUTO_TURNS lead turns triggered by these
 // updates with no developer message in between, delivery pauses until the developer speaks.
-import type { Outcome, Proof, SessionInfo } from "@perzian/protocol";
+import type { Outcome, PauseInfo, Proof, SessionInfo } from "@perzian/protocol";
 
 export const NOTIFY_PREFIX = "[perzian]";
+
+/** What happened to a child: its turn ended, it paused at a usage limit, or it resumed after one. */
+export type ChildEvent = "finished" | "paused" | "resumed";
 
 export interface ChildReport {
   id: string;
@@ -14,6 +18,9 @@ export interface ChildReport {
   status: SessionInfo["status"];
   outcome?: Pick<Outcome, "status" | "intent" | "proof" | "derived">;
   changedFiles: number;
+  pause?: Pick<PauseInfo, "resumeAt" | "window" | "estimated" | "early">;
+  /** Set by the notifier; absent means finished. */
+  event?: ChildEvent;
 }
 
 const clean = (s: string, n: number) => {
@@ -27,8 +34,31 @@ function proofSummary(proof: Proof[]): string {
   return observed.map((p) => `${p.kind}:${p.passed ? "pass" : "fail"}${p.summary ? `(${clean(p.summary, 30)})` : ""}`).join(",");
 }
 
-export function formatChildLine(c: ChildReport): string {
-  const parts = [`id=${c.id}`, `title="${clean(c.title, 48)}"`, `status=${c.status}`];
+function duration(ms: number): string {
+  const m = Math.max(0, Math.round(ms / 60_000));
+  const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), mm = m % 60;
+  return d ? `${d}d${h}h` : h ? `${h}h${mm}m` : `${mm}m`;
+}
+
+/** "Sun 3:40 PM" in the daemon's (the developer's) time zone. */
+export function clockTime(at: number, timeZone?: string): string {
+  return new Date(at).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", ...(timeZone ? { timeZone } : {}) });
+}
+
+export function formatChildLine(c: ChildReport, now = Date.now(), timeZone?: string): string {
+  const head = [`id=${c.id}`, `title="${clean(c.title, 48)}"`];
+  if (c.event === "paused") {
+    const parts = [...head, "status=paused"];
+    if (c.pause) {
+      parts.push(`resumes_at="${clockTime(c.pause.resumeAt, timeZone)}"`, `resumes_in=${c.pause.estimated ? "~" : ""}${duration(c.pause.resumeAt - now)}`);
+      if (c.pause.window) parts.push(`limit=${c.pause.window}`);
+      if (c.pause.early) parts.push("early=true");
+    }
+    parts.push(`files=${c.changedFiles}`);
+    return `- ${parts.join(" ")}`;
+  }
+  if (c.event === "resumed") return `- ${[...head, "status=resumed", `files=${c.changedFiles}`].join(" ")}`;
+  const parts = [...head, `status=${c.status}`];
   if (c.outcome) {
     parts.push(`outcome=${c.outcome.status}${c.outcome.derived ? "(derived)" : ""}`);
     parts.push(`proof=${proofSummary(c.outcome.proof)}`);
@@ -38,10 +68,18 @@ export function formatChildLine(c: ChildReport): string {
   return `- ${parts.join(" ")}`;
 }
 
-export function formatChildFinished(children: ChildReport[]): string {
+const sessions = (n: number) => (n === 1 ? "a session" : `${n} sessions`);
+
+export function formatChildFinished(children: ChildReport[], now = Date.now(), timeZone?: string): string {
+  const count = (e: ChildEvent) => children.filter((c) => (c.event ?? "finished") === e).length;
+  const what = [
+    count("finished") && `${sessions(count("finished"))} finished`,
+    count("paused") && `${sessions(count("paused"))} paused at a usage limit (resumes by itself; nothing to do)`,
+    count("resumed") && `${sessions(count("resumed"))} resumed after a usage limit reset`,
+  ].filter(Boolean);
   return [
-    `${NOTIFY_PREFIX} Automatic update, not from the developer: ${children.length === 1 ? "a session" : `${children.length} sessions`} finished.`,
-    ...children.map(formatChildLine),
+    `${NOTIFY_PREFIX} Automatic update, not from the developer: ${what.join("; ")}.`,
+    ...children.map((c) => formatChildLine(c, now, timeZone)),
     "Reply to the developer in one short line (under 20 words): result, proof, what needs them. Don't start new work from this update; the developer decides what's next.",
   ].join("\n");
 }
@@ -58,7 +96,7 @@ export interface NotifierDeps {
 }
 
 export class LeadNotifier {
-  private pending = new Map<string, Set<string>>(); // leadId -> child ids
+  private pending = new Map<string, Map<string, ChildEvent>>(); // leadId -> child id -> latest event
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private ready = new Set<string>(); // leads whose debounce has elapsed, waiting for the turn to end
   private autoTurns = new Map<string, number>();
@@ -83,9 +121,24 @@ export class LeadNotifier {
   childSettled(leadId: string, childId: string): void {
     if (!this.byLead.has(childId)) return;
     this.byLead.delete(childId);
+    this.queue(leadId, childId, "finished");
+  }
+
+  /** A child paused at a usage limit, or resumed after one. Reported for any child: the lead should know
+   * why its crew went quiet, whoever drove the turn. The child's turn isn't over, so `byLead` stays. */
+  childPaused(leadId: string, childId: string): void {
+    this.queue(leadId, childId, "paused");
+  }
+
+  childResumed(leadId: string, childId: string): void {
+    this.queue(leadId, childId, "resumed");
+  }
+
+  private queue(leadId: string, childId: string, event: ChildEvent): void {
     let set = this.pending.get(leadId);
-    if (!set) this.pending.set(leadId, (set = new Set()));
-    set.add(childId);
+    if (!set) this.pending.set(leadId, (set = new Map()));
+    // Latest wins, except that a finish isn't replaced by a pause/resume note.
+    if (set.get(childId) !== "finished" || event === "finished") set.set(childId, event);
     this.ready.delete(leadId);
     clearTimeout(this.timers.get(leadId));
     this.timers.set(
@@ -104,7 +157,7 @@ export class LeadNotifier {
   }
 
   pendingFor(leadId: string): string[] {
-    return [...(this.pending.get(leadId) ?? [])];
+    return [...(this.pending.get(leadId)?.keys() ?? [])];
   }
 
   dispose(): void {
@@ -125,7 +178,11 @@ export class LeadNotifier {
       }
       return;
     }
-    const reports = [...ids].map((id) => this.deps.report(id)).filter((r): r is ChildReport => !!r);
+    const reports: ChildReport[] = [];
+    for (const [id, event] of ids) {
+      const r = this.deps.report(id);
+      if (r) reports.push({ ...r, event });
+    }
     this.pending.delete(leadId);
     this.ready.delete(leadId);
     if (!reports.length) return;

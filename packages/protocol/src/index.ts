@@ -1,6 +1,7 @@
 // Shared types between the daemon and the UI. All UI state is a fold over PerzianEvent (see fold.ts).
 
-export type SessionStatus = "idle" | "working" | "needs_you" | "done" | "failed";
+// paused: stopped at a plan usage limit; resumes by itself when the limit resets (see SessionInfo.pause).
+export type SessionStatus = "idle" | "working" | "needs_you" | "done" | "failed" | "paused";
 export type AgentKind = "claude-code" | "codex";
 export type SessionRole = "main" | "worker";
 
@@ -42,6 +43,8 @@ export interface SessionInfo {
   ship?: ShipState;
   /** Readying a fresh worktree (local files copied, dependencies installed) before the agent's first message. */
   setup?: SetupState;
+  /** Set while status is "paused": the usage limit it stopped at and when it resumes. */
+  pause?: PauseInfo;
   createdAt: number;
   updatedAt: number;
 }
@@ -101,6 +104,22 @@ export interface SetupState {
   notes?: string[];
   /** On failure: the failing command and the last lines of its output. */
   error?: { command: string; tail: string };
+  at: number;
+}
+
+/** Which plan window ran out: Claude's 5-hour and weekly windows (overall or per model), or unknown. */
+export type LimitWindow = "five_hour" | "seven_day" | "seven_day_opus" | "seven_day_sonnet" | "overage" | "unknown";
+
+export interface PauseInfo {
+  /** The agent's own words, e.g. "You've hit your session limit · resets 5:40pm (Asia/Calcutta)". */
+  reason: string;
+  /** When the limit resets and the session resumes by itself (ms since epoch). */
+  resumeAt: number;
+  /** No reset time was reported; resumeAt is a retry guess. */
+  estimated?: boolean;
+  window?: LimitWindow;
+  /** Paused at the warning threshold, after the current step, before the limit was actually hit. */
+  early?: boolean;
   at: number;
 }
 
@@ -203,6 +222,12 @@ export type PerzianEvent =
   | { type: "session.created"; session: SessionInfo }
   | { type: "session.updated"; sessionId: string; patch: Partial<Omit<SessionInfo, "id" | "status">> }
   | { type: "session.status"; sessionId: string; status: SessionStatus; at: number }
+  // Stopped at a usage limit: status "paused" until session.resumed. The daemon's resume queue is
+  // rebuilt from these on boot, so it survives restarts.
+  | { type: "session.paused"; sessionId: string; pause: PauseInfo }
+  // reset: the limit reset (scheduled); now: the developer pressed "Resume now"; prompt: the developer
+  // wrote to it; cancel: stopped instead. Status is "idle" after this until the next prompt.
+  | { type: "session.resumed"; sessionId: string; at: number; reason: "reset" | "now" | "prompt" | "cancel" }
   | { type: "session.progress"; sessionId: string; progress: Progress }
   | { type: "session.transcript"; sessionId: string; item: TranscriptItem }
   | { type: "session.config"; sessionId: string; config: AgentConfig }
@@ -226,6 +251,7 @@ export type Command =
   | ({ type: "session.create" } & CreateSessionArgs)
   | { type: "session.prompt"; sessionId: string; prompt: string }
   | { type: "session.cancel"; sessionId: string }
+  | { type: "session.resume"; sessionId: string }
   | { type: "session.setModel"; sessionId: string; model: string }
   | { type: "session.setMode"; sessionId: string; mode: PermissionMode }
   | { type: "session.seen"; sessionId: string }
@@ -277,7 +303,7 @@ export const MODE_LABEL: Record<PermissionMode, string> = {
 };
 
 // Attention ordering: what needs the dev first.
-const STATUS_RANK: Record<SessionStatus, number> = { needs_you: 0, failed: 1, done: 2, working: 3, idle: 4 };
+const STATUS_RANK: Record<SessionStatus, number> = { needs_you: 0, failed: 1, done: 2, working: 3, paused: 4, idle: 5 };
 export function byAttention(a: SessionInfo, b: SessionInfo): number {
   return STATUS_RANK[a.status] - STATUS_RANK[b.status] || b.updatedAt - a.updatedAt;
 }
@@ -323,6 +349,7 @@ Follow through
 - Changes to work a session already did go to that session via send_to_session, not a new spawn.
 - Asked for status or results: call get_session or list_sessions first; never answer from memory.
 - When sessions you started finish, you get a "[perzian]" update (not from the developer). Answer it in one short line: result, proof, what needs the developer. Don't start new work from it; the developer decides what's next.
+- An update can also say a session paused at its usage limit (it resumes by itself at the time given, in the same worktree) or resumed. Relay it in one line; don't re-send its work or spawn a replacement.
 
 Talk in signals
 - Every reply, including explanations of a problem: 1-3 short sentences total for the turn. Don't narrate your steps ("I'll check...", "Let me..."). No code, diffs, logs, ids, paths or lists; the UI shows them.

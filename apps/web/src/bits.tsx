@@ -1,7 +1,29 @@
 import { useEffect, useState } from "react";
 import type { Decision, FileChange, Outcome, SessionInfo, SessionStatus } from "@perzian/protocol";
 
-export const STATUS_LABEL: Record<SessionStatus, string> = { needs_you: "Needs you", working: "Working", failed: "Failed", done: "Done", idle: "Idle" };
+export const STATUS_LABEL: Record<SessionStatus, string> = { needs_you: "Needs you", working: "Working", failed: "Failed", done: "Done", idle: "Idle", paused: "Paused" };
+
+/** "3:40 pm", or "Tue 3:40 pm" when it isn't today; "~" when the agent gave no reset time. */
+export function resumeTime(p: NonNullable<SessionInfo["pause"]>): string {
+  const d = new Date(p.resumeAt);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }).toLowerCase();
+  const day = d.toDateString() === new Date().toDateString() ? "" : `${d.toLocaleDateString([], { weekday: "short" })} `;
+  return `${p.estimated ? "~" : ""}${day}${time}`;
+}
+
+/** The status in words: "Paused · resumes 3:40 pm" for a session waiting out a usage limit. */
+export function statusText(s: SessionInfo): string {
+  return s.status === "paused" && s.pause ? `Paused · resumes ${resumeTime(s.pause)}` : statusLabel(s);
+}
+
+/** Why it's paused, for a tooltip. */
+export function pauseTitle(s: SessionInfo): string | undefined {
+  const p = s.pause;
+  if (s.status !== "paused" || !p) return undefined;
+  const how = p.early ? "Paused near the usage limit, after its current step." : "Paused at the usage limit.";
+  const when = p.estimated ? "No reset time was given; it tries again then." : "It resumes by itself when the limit resets.";
+  return `${how} ${when}\n${p.reason}`;
+}
 
 // The status as words, with worktree setup folded in: "Setting up…" while it runs, "Setup failed" when it stops the session.
 export function statusLabel(s: SessionInfo): string {
@@ -141,6 +163,7 @@ const NO_CHANGES: Record<SessionStatus, string> = {
   done: "Finished without changing files.",
   failed: "No files changed before it stopped.",
   idle: "No file changes yet.",
+  paused: "No file changes yet.",
 };
 
 export function ChangeMap({ files, onOpen, status }: { files: FileChange[]; onOpen: (path: string) => void; status?: SessionStatus }) {

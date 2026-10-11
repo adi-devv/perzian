@@ -60,6 +60,8 @@ function makeLog(n: number, seed = 1): PerzianEvent[] {
       ev.push({ type: "decision.resolved", decisionId: d.id, sessionId: d.sessionId, optionId: null });
     } else if (x < 0.81) ev.push({ type: "session.transcript", sessionId: "ghost", item: { kind: "notice", text: "orphan", at: t } });
     else if (x < 0.82) ev.push({ type: "session.updated", sessionId: "ghost", patch: { title: "nope" } });
+    else if (x < 0.83) ev.push({ type: "session.paused", sessionId: sid, pause: { reason: "You've hit your session limit", resumeAt: t + 3600_000, window: "five_hour", at: t } });
+    else if (x < 0.84) ev.push({ type: "session.resumed", sessionId: sid, at: t, reason: r() < 0.5 ? "reset" : "now" });
     else ev.push({ type: "session.updated", sessionId: sid, patch: { seenAt: t, title: `title ${ev.length}` } });
   }
   ev.push({ type: "session.status", sessionId: "old-archived", status: "done", at: NOW - 8 * DAY });

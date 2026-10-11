@@ -26,6 +26,14 @@ export function reduce(s: State, e: PerzianEvent): State {
       return patchSession(s, e.sessionId, e.patch);
     case "session.status":
       return patchSession(s, e.sessionId, { status: e.status, updatedAt: e.at });
+    case "session.paused":
+      return patchSession(s, e.sessionId, { status: "paused", pause: e.pause, updatedAt: e.pause.at });
+    case "session.resumed": {
+      const cur = s.sessions[e.sessionId];
+      if (!cur) return s;
+      const { pause: _, ...rest } = cur;
+      return { ...s, sessions: { ...s.sessions, [e.sessionId]: { ...rest, status: cur.status === "paused" ? "idle" : cur.status, updatedAt: e.at } } };
+    }
     case "session.progress":
       return patchSession(s, e.sessionId, { progress: e.progress });
     case "session.transcript": {

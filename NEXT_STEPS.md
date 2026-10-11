@@ -35,6 +35,14 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    worktrees, no new prompt needed. Show it plainly: "Paused · resumes 3:40 pm" on the session.
    Needs: detect limit errors and reset times from the adapter (Claude reports rate-limit info; Codex TBD), a persisted
    resume queue in the daemon (survives restarts), and the lead told what was paused and what resumed.
+   Built: limit detection from Claude's `_claude/rateLimit` usage info, its "You've hit your … · resets 5:40pm
+   (Asia/Calcutta)" text and its rate-limit errors (`limits.ts`: wall clock with IANA zone/UTC/GMT, dates, weekdays,
+   epochs, ISO, "in 2 hours"); a worker at ≥95% (`PERZIAN_PAUSE_AT`) finishes its current tool then pauses; status
+   `paused` with `pause.resumeAt` in the event store; `ResumeQueue` (`resume.ts`) polls the wall clock and sends a short
+   "continue" to the same session/worktree at reset + jitter, also after a daemon restart; the lead gets batched
+   paused/resumed lines; UI shows "Paused · resumes 17:40" (no new color) and "Resume now" in the drawer.
+   Unverified: not yet run against a real Claude limit hit; Codex detection is best-effort from its error text and
+   has no early pause (its usage snapshots aren't sent over ACP), TBD.
    **Marketing:** "Hit your limit at 2 am? Perzian picks up when it resets." Lead with it on the site as a feature card.
 5. **Phone access (after trying the Mac app).** QR code + one-time pairing token opens the UI on your phone,
    on the same Wi-Fi or through Tailscale. Mainly for answering decision cards. Needs token auth on the daemon.
