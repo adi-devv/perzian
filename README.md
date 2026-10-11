@@ -108,4 +108,4 @@ Created by **Aadit Singal** ([@adi-devv](https://github.com/adi-devv)).
 
 ## License
 
-MIT © 2026 Aadit Singal
+[AGPL-3.0](LICENSE) © 2026 Aadit Singal. Contributions are accepted under the [CLA](CLA.md), so the project can also be offered under other terms (e.g. a commercial license).

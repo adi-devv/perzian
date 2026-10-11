@@ -30,7 +30,7 @@
     "typescript": "^5.6.3"
   },
   "author": "Aadit Singal",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "allowScripts": {
     "electron": true,
     "esbuild": true,
