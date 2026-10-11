@@ -23,11 +23,10 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    - Later, if people want zero setup with guarantees: our own Cloudflare Durable Objects relay with end-to-end encryption,
      about $5-30/month per 1k active users, possibly paid. Firebase rejected (data at Google, per-event cost).
 2. **Branches for teams (in progress).** Teams don't ship straight to main. Next: base picker on New session (lead can pass `base`),
-   fetch and branch from `origin/<base>` (offline falls back to local with a note), PR as the default action with Merge in a menu
-   (`perzian.json` `"ship"` overrides), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
+   fetch and branch from `origin/<base>` (offline falls back to local with a note), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
 3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
 5. **Observation UI, leftovers (the rest is drawn: chips and facts on tiles and the session header, outside-project tag on cards, nested subagent calls, default-mode picker, persisted projects).**
-   Still to draw: a leftover-worktrees list (`GET /api/worktrees/leftover`) and an Extra folders field on New session (`extraDirs`).
+   Leftover worktrees (Accounts) are list-and-copy-command only; a Remove button needs a safe daemon removal.
    Not done: `createSession`'s default-mode fallback in `apps/daemon/src/index.ts` has no test (it is a script); Codex gets no `additionalDirectories`.
 - **Usage card at 95%, one per account (not per session):** "Usage 95% · resets 10:15 pm · [Pause sessions] [Keep going]".
   - Keep going: run to the real limit, then auto-pause and auto-resume at reset (already built).
@@ -49,7 +48,6 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 - **Checkpoints:** roll a session back to before a given turn.
 - **Sessions from issues:** pick a GitHub/Linear issue; it becomes the brief.
 - **Comment on a diff line:** goes to the agent as the next task (code view stays read-only).
-- **GitHub connect, not login:** first-run check shows "Connected as <user>" via `gh`, or how to run `gh auth login`. (In progress.)
 
 ## Known gaps
 - Not yet run for real (marked ⚠️ in FEATURES.md): Open PR past its pre-push checks, auto-resume at a real limit reset.

@@ -80,6 +80,14 @@ export const parsePerzianConfig = (text: string): DeclaredCheck[] => parseList(t
 /** The optional `"setup": [{name, run, timeoutSec?}]` steps, run after the built-in worktree setup. Same shape and rules as checks. */
 export const parsePerzianSetup = (text: string): DeclaredCheck[] => parseList(text, "setup");
 
+/** Everything perzian.json says: the declared checks and the optional "ship": "pr" | "merge" default. */
+export function parseConfig(text: string): { checks: DeclaredCheck[]; ship?: "pr" | "merge" } {
+  const checks = parseList(text, "checks");
+  const rawShip = (JSON.parse(text) as { ship?: unknown }).ship;
+  if (rawShip !== undefined && rawShip !== "pr" && rawShip !== "merge") throw new Error(`${CONFIG_FILE}: "ship" must be "pr" or "merge"`);
+  return { checks, ...(rawShip ? { ship: rawShip } : {}) };
+}
+
 function parseList(text: string, key: "checks" | "setup"): DeclaredCheck[] {
   let raw: unknown;
   try {
@@ -123,12 +131,12 @@ function parseList(text: string, key: "checks" | "setup"): DeclaredCheck[] {
 }
 
 /** Declared checks from the first of `dirs` that has a perzian.json. No file: no checks, no error. */
-export function loadDeclaredChecks(...dirs: string[]): { checks: DeclaredCheck[]; error?: string } {
+export function loadDeclaredChecks(...dirs: string[]): { checks: DeclaredCheck[]; ship?: "pr" | "merge"; error?: string } {
   for (const dir of dirs) {
     const text = read(dir, CONFIG_FILE);
     if (text === undefined) continue;
     try {
-      return { checks: parsePerzianConfig(text) };
+      return parseConfig(text);
     } catch (e) {
       return { checks: [], error: (e as Error).message };
     }

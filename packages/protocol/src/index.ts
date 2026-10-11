@@ -39,6 +39,8 @@ export interface SessionInfo {
   checkRun?: CheckRun;
   /** What the agent reports it has spent and how full its context is. Codex may report only context. */
   usage?: SessionUsage;
+  /** Which ship action leads: PR when the repo has a GitHub origin, else Merge; perzian.json "ship" overrides. Read at spawn. */
+  shipDefault?: "pr" | "merge";
   /** The branch a worktree session was cut from; "Merge" lands the work back here. */
   baseBranch?: string;
   /** Where the session's work went: merged back, opened as a PR, or why it couldn't. */
@@ -484,11 +486,17 @@ Talk in signals
 
 // The UI adds the folder it picked for the lead as a last line; the agent needs it, the transcript doesn't show it.
 const PROJECT_LINE = "\n\nProject folder: ";
-export const withProject = (prompt: string, path: string): string => `${prompt}${PROJECT_LINE}${path}`;
-/** A prompt as the developer typed it: without the "Project folder: …" line withProject added. */
+const EXTRA_LINE = "\nExtra folders (pass as extraDirs when starting sessions): ";
+export const withProject = (prompt: string, path: string, extra: string[] = []): string =>
+  `${prompt}${PROJECT_LINE}${path}${extra.length ? `${EXTRA_LINE}${extra.join(", ")}` : ""}`;
+/** A prompt as the developer typed it: without the "Project folder: …" (and "Extra folders: …") lines withProject added. */
 export function shownPrompt(text: string): string {
   const i = text.lastIndexOf(PROJECT_LINE);
-  return i >= 0 && !text.slice(i + PROJECT_LINE.length).includes("\n") ? text.slice(0, i) : text;
+  if (i < 0) return text;
+  const rest = text.slice(i + PROJECT_LINE.length);
+  const nl = rest.indexOf("\n");
+  const ok = nl < 0 || (rest.startsWith(EXTRA_LINE, nl) && !rest.slice(nl + EXTRA_LINE.length).includes("\n"));
+  return ok ? text.slice(0, i) : text;
 }
 
 export * from "./fold.ts";

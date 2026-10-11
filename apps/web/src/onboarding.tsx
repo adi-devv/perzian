@@ -1,6 +1,7 @@
 import { useState } from "react";
-import type { AgentCheck, ApiKeyProvider, CredentialStatus, DoctorReport } from "@perzian/protocol";
-import { DAEMON_ADDR, installAgent, isDesktop, useCredentials, useDoctor } from "./daemon.ts";
+import type { AgentCheck, ApiKeyProvider, CredentialStatus, DoctorReport, GitHubCheck } from "@perzian/protocol";
+import { DAEMON_ADDR, installAgent, isDesktop, useCredentials, useDoctor, useLeftover } from "./daemon.ts";
+import { ago } from "./bits.tsx";
 
 /* ───────────── Project folder memory (shared with New session) ───────────── */
 
@@ -70,6 +71,9 @@ export function FolderPicker({ id, project, setProject, recent, onPicked, autoFo
 
 /** The lead agent works from its own folder; tell it which repo the task is about (hidden in the transcript, see shownPrompt). */
 export { withProject } from "@perzian/protocol";
+
+/** "~/a, ~/b" -> ["~/a", "~/b"]. */
+export const parseFolders = (text: string) => text.split(/[,\n]/).map((d) => d.trim()).filter(Boolean);
 
 /* ───────────── First run ───────────── */
 
@@ -207,6 +211,7 @@ export function Onboarding({ doctor, project, setProject, recent }: { doctor: Do
           )}
         </ol>
       ) : null}
+      {proj?.exists && proj.gitRoot && report?.github && !report.github.signedIn && <p className="quiet gh-note">GitHub not connected (optional). In a terminal: <code>{report.github.signInCommand}</code></p>}
     </div>
   );
 }
@@ -313,7 +318,51 @@ export function ApiKeyField({ provider, status, creds, onChange }: { provider: A
   );
 }
 
-const AGENT_KEY: Record<AgentCheck["kind"], ApiKeyProvider> = { "claude-code": "anthropic", codex: "openai" };
+/** GitHub through the developer's own `gh`. Informational: nothing here blocks local use. */
+export function GitHubLine({ gh }: { gh: GitHubCheck }) {
+  const how = gh.signedIn ? `Connected as ${gh.user}` : gh.signedIn === null ? "Not checked" : gh.ghInstalled ? "Not connected" : "GitHub CLI not installed";
+  return (
+    <>
+      <div className="step-line">
+        <span className="step-label">GitHub</span>
+        <span className="step-meta">{[gh.host !== "github.com" && gh.host, how].filter(Boolean).join(" · ")}</span>
+      </div>
+      {gh.signedIn === false && (
+        <div className="step-fix">
+          <p className="quiet">Optional: lets Perzian open pull requests.</p>
+          {!gh.ghInstalled && gh.installCommand && <CopyCmd cmd={gh.installCommand} />}
+          {!gh.ghInstalled && !gh.installCommand && <a className="text-link" href={gh.installUrl} target="_blank" rel="noopener">Install the GitHub CLI ↗</a>}
+          <CopyCmd cmd={gh.signInCommand} />
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Worktree folders left behind by archived or merged sessions. Removal is a command to copy, never a button. */
+function Leftover() {
+  const list = useLeftover(true);
+  if (!list?.length) return null;
+  return (
+    <section className="account">
+      <div className="step-line">
+        <span className="step-label">Leftover worktrees</span>
+        <span className="step-meta">{list.length}</span>
+      </div>
+      {list.map((w) => (
+        <div key={w.path} className="leftover">
+          <div className="step-line">
+            <code title={w.path}>{w.repo}/{w.name}</code>
+            <span className="step-meta">{[w.branch, w.at && ago(w.at)].filter(Boolean).join(" · ")}</span>
+          </div>
+          {w.command && <CopyCmd cmd={w.command} />}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+const AGENT_KEY:Record<AgentCheck["kind"], ApiKeyProvider> = { "claude-code": "anthropic", codex: "openai" };
 
 /** Accounts & keys, reachable any time from the sidebar. */
 export function Accounts({ onClose }: { onClose: () => void }) {
@@ -339,7 +388,13 @@ export function Accounts({ onClose }: { onClose: () => void }) {
             </section>
           );
         })}
+        {doctor.report?.github && (
+          <section className="account">
+            <GitHubLine gh={doctor.report.github} />
+          </section>
+        )}
         {!doctor.report && <p className="quiet">{doctor.failed ? "Couldn't reach the daemon." : "Checking…"}</p>}
+        <Leftover />
       </div>
     </div>
   );

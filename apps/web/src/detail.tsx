@@ -620,6 +620,10 @@ function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send
   // Required checks that fail on this branch: merging is still allowed, but never the default.
   const failing = (s.checkRun?.results ?? []).filter((r) => r.state === "failed").map((r) => r.name);
   const red = failing.length > 0 || s.status === "failed";
+  // PR leads when the repo has a GitHub origin (or perzian.json says "ship": "pr"); sessions from before this field keep Merge first.
+  const prFirst = s.shipDefault === "pr";
+  const merge = { key: "merge", label: busy && sh.how === "merge" ? "Merging…" : `Merge into ${into}`, go: () => setConfirming(true) };
+  const pr = { key: "pr", label: busy && sh.how === "pr" ? "Opening PR…" : "Open PR", go: () => send({ type: "session.ship", sessionId: s.id, how: "pr" }) };
   // Merging writes into the developer's own checkout, so it takes one quiet confirm.
   if (confirming && !busy)
     return (
@@ -641,12 +645,11 @@ function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send
     <section className="ship">
       <h3 className="eyebrow">Ship it</h3>
       <div className="ship-row">
-        <button id="ship-primary" className={`btn${red ? "" : " primary"}`} disabled={busy} onClick={() => setConfirming(true)}>
-          {busy && sh.how === "merge" ? "Merging…" : `Merge into ${into}`}
-        </button>
-        <button className="btn" disabled={busy} onClick={() => send({ type: "session.ship", sessionId: s.id, how: "pr" })}>
-          {busy && sh.how === "pr" ? "Opening PR…" : "Open PR"}
-        </button>
+        {(prFirst ? [pr, merge] : [merge, pr]).map((b, i) => (
+          <button key={b.key} id={i === 0 ? "ship-primary" : undefined} className={`btn${i === 0 && !red ? " primary" : ""}`} disabled={busy} onClick={b.go}>
+            {b.label}
+          </button>
+        ))}
       </div>
       {sh?.state === "conflict" && (
         <div className="ship-msg">

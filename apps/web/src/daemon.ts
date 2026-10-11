@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type Command, type CredentialStatus, type DoctorReport, type InstallResult, type PerzianEvent, type RepoTree, type ServerMessage, type State } from "@perzian/protocol";
+import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type Command, type CredentialStatus, type DoctorReport, type InstallResult, type LeftoverWorktree, type PerzianEvent, type RepoTree, type ServerMessage, type State } from "@perzian/protocol";
 import { demoEvents } from "./demo.ts";
 import { demoAutoplay, demoSend } from "./demoScript.ts";
 
@@ -174,6 +174,22 @@ export function useCredentials(enabled: boolean) {
     save: (provider: ApiKeyProvider, key: string) => call("POST", "", { provider, key }).then(() => null, (e: Error) => e.message),
     remove: (provider: ApiKeyProvider) => call("DELETE", `?provider=${provider}`).catch(() => {}),
   };
+}
+
+/** Worktree folders no live session uses (archived or merged sessions leave them). Read-only. */
+export function useLeftover(enabled: boolean) {
+  const [list, setList] = useState<LeftoverWorktree[] | null>(null);
+  useEffect(() => {
+    if (!enabled || isDemo) return;
+    let cancelled = false;
+    fetch(api(`/api/worktrees/leftover`))
+      .then((r) => (r.ok ? (r.json() as Promise<LeftoverWorktree[]>) : []))
+      .then((l) => !cancelled && setList(l), () => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled]);
+  return list;
 }
 
 export async function installAgent(agent: AgentKind): Promise<InstallResult> {

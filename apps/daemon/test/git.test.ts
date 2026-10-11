@@ -260,6 +260,18 @@ describe("leftoverWorktrees", () => {
       const left = git.leftoverWorktrees(home, sessions);
       assert.deepEqual(left.map((l) => [l.name, l.sessionId]).sort(), [["archived-bbbbbb", "2"], ["merged-cccccc", "3"], ["orphan-dddddd", undefined]]);
       assert.equal(left[0].repo, "app");
+      assert.ok(left[0].at);
+      // A real linked worktree reports its branch and the safe removal command.
+      const repo = join(home, "repo");
+      mkdirSync(repo);
+      execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"], { cwd: repo });
+      const linked = join(home, "worktrees", "app", "real-eeeeee");
+      execFileSync("git", ["worktree", "add", "-q", "-b", "perzian/real", linked], { cwd: repo });
+      const real = git.leftoverWorktrees(home, []).find((l) => l.name === "real-eeeeee");
+      assert.equal(real?.branch, "perzian/real");
+      assert.ok(real?.project?.endsWith("repo"));
+      assert.match(real?.command ?? "", /^git -C \S+repo worktree remove \S+real-eeeeee$/);
       assert.deepEqual(git.leftoverWorktrees(join(home, "nope"), sessions), []);
     } finally {
       rmSync(home, { recursive: true, force: true });

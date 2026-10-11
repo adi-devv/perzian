@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AGENTS, isUnseen, shownPrompt, shownStatus, type Command, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
 import { isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
-import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, readiness, saveProject, withProject } from "./onboarding.tsx";
+import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, parseFolders, readiness, saveProject, withProject } from "./onboarding.tsx";
 import { PairScreen, PhoneHome, useNarrow } from "./phone.tsx";
 import { Composer, DecisionLine, LEAD_PLACEHOLDER, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
 import { Crew } from "./crew.tsx";
@@ -224,7 +224,8 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
   const items = main ? (state.transcripts[main.id] ?? []) : [];
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
-  const end = useRef<HTMLDivElement>(null);
+  const [extras, setExtras] = useState("");
+  const end =useRef<HTMLDivElement>(null);
   // The demo's "this is scripted" notices are a dismissible hint above the composer, not a line in the stream.
   const demoNote = isDemo ? [...items].reverse().find((i) => i.kind === "notice" && i.text.startsWith("Demo:")) : undefined;
   const [hintGone, setHintGone] = useState(() => {
@@ -286,14 +287,27 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
           blocked={main ? undefined : blocked}
           controls={<ModePicker value={state.settings.defaultMode} onChange={(mode) => send({ type: "settings.setDefaultMode", mode })} title="Permission mode new sessions start in" />}
           note={folder && (
-            <span className="proj-chip" title={leadProject ?? undefined}>
-              in <b>{folder}</b>
-              <button type="button" className="icon" aria-label="Clear project" onClick={onProjectUsed}>✕</button>
-            </span>
+            <>
+              <span className="proj-chip" title={leadProject ?? undefined}>
+                in <b>{folder}</b>
+                <button type="button" className="icon" aria-label="Clear project" onClick={onProjectUsed}>✕</button>
+              </span>
+              <input
+                className="extra-dirs"
+                value={extras}
+                onChange={(e) => setExtras(e.target.value)}
+                placeholder="Also edit: ~/other-repo, …"
+                aria-label="Extra folders the sessions may also edit"
+                spellCheck={false}
+              />
+            </>
           )}
           onSubmit={(text) => {
-            const prompt = leadProject ? withProject(text, leadProject) : text;
-            if (leadProject) onProjectUsed();
+            const prompt = leadProject ? withProject(text, leadProject, parseFolders(extras)) : text;
+            if (leadProject) {
+              onProjectUsed();
+              setExtras("");
+            }
             if (main) send({ type: "session.prompt", sessionId: main.id, prompt });
             else onStart(prompt);
           }}

@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdirSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import type { ChangeKind, FileChange, SessionInfo } from "@perzian/protocol";
+import type { ChangeKind, FileChange, LeftoverWorktree, SessionInfo } from "@perzian/protocol";
 
 const exec = promisify(execFile);
 
@@ -224,12 +224,22 @@ export function realish(p: string): string {
   }
 }
 
-export interface LeftoverWorktree {
-  path: string;
-  repo: string;
-  name: string;
-  /** The archived or merged session that owned it, when known. */
-  sessionId?: string;
+export type { LeftoverWorktree };
+
+const shq = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
+
+/** Branch and owning repo of a linked worktree, from its `.git` file (no git process). */
+function worktreeFacts(path: string): { branch?: string; project?: string } {
+  try {
+    const gitdir = /^gitdir:\s*(.+)$/m.exec(readFileSync(join(path, ".git"), "utf8"))?.[1].trim();
+    if (!gitdir) return {};
+    const head = /^ref:\s*refs\/heads\/(.+)$/m.exec(readFileSync(join(gitdir, "HEAD"), "utf8"))?.[1].trim();
+    // <repo>/.git/worktrees/<name> -> <repo>
+    const common = dirname(dirname(gitdir));
+    return { ...(head ? { branch: head } : {}), ...(basename(common) === ".git" ? { project: dirname(common) } : {}) };
+  } catch {
+    return {};
+  }
 }
 
 /** Folders under $PERZIAN_HOME/worktrees (<repo>/<name>) no live session works in: archived or merged sessions leave them behind. */
@@ -250,7 +260,12 @@ export function leftoverWorktrees(home: string, sessions: Pick<SessionInfo, "id"
       const path = join(root, repo, name);
       const s = owner.get(realish(path));
       if (s && !s.archived && s.ship?.state !== "merged") continue; // live
-      out.push({ path, repo, name, ...(s ? { sessionId: s.id } : {}) });
+      const f = worktreeFacts(path);
+      let at: number | undefined;
+      try {
+        at = statSync(path).mtimeMs;
+      } catch {}
+      out.push({ path, repo, name, ...(s ? { sessionId: s.id } : {}), ...f, ...(at ? { at } : {}), ...(f.project ? { command: `git -C ${shq(f.project)} worktree remove ${shq(path)}` } : {}) });
     }
   }
   return out;

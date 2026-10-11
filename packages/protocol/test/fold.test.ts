@@ -261,3 +261,7 @@ test("shownPrompt hides the project-folder line withProject adds, and nothing el
   assert.equal(shownPrompt("Project folder: /x\n\nmore"), "Project folder: /x\n\nmore");
   assert.equal(shownPrompt("a\n\nProject folder: /x\nthen more"), "a\n\nProject folder: /x\nthen more");
 });
+
+test("shownPrompt also hides the extra-folders line", () => {
+  assert.equal(shownPrompt(withProject("task", "/a", ["~/b", "~/c"])), "task");
+});
