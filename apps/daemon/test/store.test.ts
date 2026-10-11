@@ -258,3 +258,30 @@ describe("settings.defaultMode", () => {
     }
   });
 });
+
+describe("settings.projectAdded", () => {
+  const add = (path: string, at = 1): PerzianEvent => ({ type: "settings.projectAdded", path, at });
+
+  test("folds in order without duplicates, in fold and replay", () => {
+    const events = [add("/a"), add("/b"), add("/a", 2)];
+    assert.deepEqual(fold(events).settings.projects, ["/a", "/b"]);
+    assert.deepEqual(replay(events).settings.projects, ["/a", "/b"]);
+    assert.deepEqual(fold([]).settings.projects, []);
+  });
+
+  test("persists across restarts, compaction and the WS snapshot", () => {
+    const dir = mkdtempSync(join(tmpdir(), "perzian-projects-"));
+    try {
+      const a = new EventStore(dir, { compact: "never" });
+      a.emit(add("/work/api"));
+      a.close();
+      const b = new EventStore(dir, { compact: "always" });
+      assert.deepEqual(b.state().settings.projects, ["/work/api"]);
+      assert.deepEqual(fold(b.snapshot()).settings.projects, ["/work/api"]);
+      b.close();
+      assert.deepEqual(new EventStore(dir, { compact: "never" }).state().settings.projects, ["/work/api"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

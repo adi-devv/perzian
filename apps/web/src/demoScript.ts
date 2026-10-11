@@ -63,6 +63,10 @@ export function demoSend(cmd: Command, s: State, emit: Emit): void {
     emit({ type: "session.status", sessionId: id, status: "working", at });
     if (id === "main") leadRun(text, s, emit);
     else workerReply(id, emit);
+  } else if (cmd.type === "settings.setDefaultMode") {
+    emit({ type: "settings.defaultMode", mode: cmd.mode, at });
+  } else if (cmd.type === "settings.addProject") {
+    emit({ type: "settings.projectAdded", path: cmd.path, at });
   } else if (cmd.type === "session.setModel") {
     emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { model: cmd.model } });
   } else if (cmd.type === "session.setMode") {
@@ -74,7 +78,7 @@ export function demoSend(cmd: Command, s: State, emit: Emit): void {
       emit({
         type: "session.updated",
         sessionId,
-        patch: { ship: how === "merge" ? { state: "merged", how, into: "main", at: Date.now() } : { state: "pr", how, url: "https://github.com/adi-devv/perzian/pulls", at: Date.now() } },
+        patch: { ship: how === "merge" ? { state: "merged", how, into: "main", worktreeRemoved: true, at: Date.now() } : { state: "pr", how, url: "https://github.com/adi-devv/perzian/pulls", at: Date.now() } },
       }),
     );
   } else if (cmd.type === "session.runChecks") {
@@ -130,7 +134,7 @@ function leadRun(prompt: string, s: State, emit: Emit, auto = false) {
   const tool = (key: string, title: string, toolKind: string, status = "completed") => tr(id, { kind: "tool", toolCallId: `${id}-${key}`, title, status, toolKind, at: now() });
 
   later(900, () => {
-    tr("main", { kind: "agent", text: `On it. One session in its own worktree for "${title}". I'll come back only if it needs your call.`, at: now() });
+    tr("main", { kind: "agent", text: "On it.", at: now() });
     const session: SessionInfo = {
       id, role: "worker", parentId: "main", title, project, cwd: `~/.perzian/worktrees/${slug}`, branch: `perzian/${slug}`, worktree: true, baseBranch: "main",
       agent: "claude-code", model: "claude-sonnet-5-5", mode: "ask", status: "working", live: true, createdAt: now(), updatedAt: now(),

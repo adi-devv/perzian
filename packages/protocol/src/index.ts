@@ -288,7 +288,9 @@ export type PerzianEvent =
   | { type: "decision.resolved"; decisionId: string; sessionId: string; optionId: string | null }
   | { type: "outcome.reported"; outcome: Outcome }
   // The global default permission mode: what a new session starts in when its creator doesn't say.
-  | { type: "settings.defaultMode"; mode: PermissionMode; at: number };
+  | { type: "settings.defaultMode"; mode: PermissionMode; at: number }
+  // A project folder the developer added in the UI before any session exists in it; shown in the crew column.
+  | { type: "settings.projectAdded"; path: string; at: number };
 
 export interface CreateSessionArgs {
   project: string;
@@ -315,6 +317,7 @@ export type Command =
   | { type: "session.ship"; sessionId: string; how: "merge" | "pr" }
   | { type: "session.runChecks"; sessionId: string }
   | { type: "settings.setDefaultMode"; mode: PermissionMode }
+  | { type: "settings.addProject"; path: string }
   // After a failed worktree setup: run it again, or start the agent without it.
   | { type: "session.setup"; sessionId: string; action: "retry" | "skip" }
   | { type: "main.start"; model?: string; agent?: AgentKind; prompt?: string }

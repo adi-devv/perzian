@@ -23,9 +23,9 @@ declare global {
   }
 }
 
-/** The last 5 distinct project folders across sessions, newest first (sessions fold in creation order). */
+/** The last 5 distinct project folders, newest first: ones added by hand, then those of sessions (which fold in creation order). */
 export function recentProjects(state: State): string[] {
-  const out: string[] = [];
+  const out: string[] = [...state.settings.projects].reverse();
   for (const s of Object.values(state.sessions).reverse()) if (s.project && !out.includes(s.project)) out.push(s.project);
   return out.slice(0, 5);
 }
@@ -459,12 +459,12 @@ export function friendlyError(msg: string): { what: string; fix: string } {
 /* ───────────── Keyboard help ───────────── */
 
 const SHORTCUTS: [string, string][] = [
-  ["⌘1", "Lead chat"],
+  ["⌘1", "Perzian"],
   ["/", "Focus the message box"],
   ["↑ ↓", "Move between sessions"],
   ["Enter", "Open the focused session"],
   ["1–9", "Answer the first decision card"],
-  ["Esc", "Close dialog, or back to the lead chat"],
+  ["Esc", "Close dialog, or back to Perzian"],
   ["?", "Show these shortcuts"],
 ];
 

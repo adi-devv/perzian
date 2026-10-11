@@ -20,6 +20,7 @@ export const demoEvents: PerzianEvent[] = [
   { type: "session.created", session: s("d", "Dark mode tokens", "~/code/web", "perzian/dark-tokens", "done", "claude-code", 3_000_000) },
   { type: "session.created", session: s("g", "Bump deps", "~/code/billing", "main", "idle", "claude-code", 6_000_000, { parentId: undefined, worktree: false, live: false }) },
   { type: "session.created", session: s("h", "API reference docs", "~/code/api", "perzian/api-docs", "working", "claude-code", 1_800_000) },
+  { type: "session.created", session: s("b2", "Redis session store", "~/code/api", "perzian/redis-store", "working", "claude-code", 500_000, { parentId: "b" }) },
   { type: "session.paused", sessionId: "h", pause: { reason: "You've hit your session limit · resets soon", resumeAt: t + 2 * 3_600_000 + 17 * 60_000, window: "five_hour", at: t - 600_000 } },
 
   { type: "session.updated", sessionId: "main", patch: { usage: { costUsd: 0.38, contextUsed: 41_000, contextSize: 200_000 } } },
@@ -27,6 +28,25 @@ export const demoEvents: PerzianEvent[] = [
   { type: "session.updated", sessionId: "a", patch: { usage: { costUsd: 0.41, contextUsed: 38_000, contextSize: 200_000 } } },
   { type: "session.updated", sessionId: "d", patch: { usage: { costUsd: 0.87, contextUsed: 168_000, contextSize: 200_000 } } },
   { type: "session.updated", sessionId: "e", patch: { usage: { contextUsed: 61_000, contextSize: 258_000 } } },
+  // What the daemon observed the agents doing on their own.
+  {
+    type: "session.updated",
+    sessionId: "b",
+    patch: {
+      extraDirs: ["~/code/shared-types"],
+      extraWorktrees: [{ path: "~/code/api-spike", branch: "spike/redis", changed: 3 }],
+      subagents: [
+        { id: "sa1", description: "Explore Redis client options", status: "done" },
+        { id: "sa2", description: "Audit JWT call sites", status: "running" },
+      ],
+      background: [{ id: "bg1", command: "npm run dev", port: 3000 }],
+    },
+  },
+  { type: "session.updated", sessionId: "e", patch: { outsidePaths: ["/Users/dev/.config/limiter.json"] } },
+  { type: "session.updated", sessionId: "h", patch: { git: { ahead: 3, pushed: true, prUrl: "https://github.com/acme/api/pull/142" } } },
+  { type: "session.updated", sessionId: "d", patch: { git: { ahead: 2, pushed: false } } },
+  { type: "session.updated", sessionId: "b2", patch: { progress: { phase: "Implement", step: 1, of: 3 } } },
+  { type: "settings.projectAdded", path: "~/code/docs", at: t - 120_000 },
   // Checks declared in perzian.json, run by the daemon when the agent finished.
   {
     type: "session.updated",
@@ -56,7 +76,7 @@ export const demoEvents: PerzianEvent[] = [
   { type: "session.progress", sessionId: "a", progress: { phase: "Design", step: 1, of: 4 } },
 
   { type: "session.transcript", sessionId: "main", item: { kind: "user", text: "Morning. Billing webhooks are dropping on Stripe retries, auth should move off JWT, and checkout e2e keeps flaking. Split it up.", at: t - 3_500_000 } },
-  { type: "session.transcript", sessionId: "main", item: { kind: "agent", text: "Three independent jobs, so three sessions in their own worktrees. I'll flag anything that needs a call from you.", at: t - 3_490_000 } },
+  { type: "session.transcript", sessionId: "main", item: { kind: "agent", text: "On it. Three sessions, one per job.", at: t - 3_490_000 } },
   { type: "session.transcript", sessionId: "main", item: { kind: "spawn", childId: "a", title: "Webhook retries", at: t - 3_480_000 } },
   { type: "session.transcript", sessionId: "main", item: { kind: "spawn", childId: "b", title: "Session auth", at: t - 3_470_000 } },
   { type: "session.transcript", sessionId: "main", item: { kind: "spawn", childId: "c", title: "Flaky checkout e2e", at: t - 3_460_000 } },
@@ -81,6 +101,18 @@ export const demoEvents: PerzianEvent[] = [
     type: "decision.requested",
     decision: {
       id: "d2", sessionId: "e", source: "permission", createdAt: t - 60_000, question: "Terminal", detail: "npm install express-rate-limit",
+      options: [
+        { id: "y", label: "Allow", kind: "allow_once" },
+        { id: "a", label: "Always", kind: "allow_always" },
+        { id: "n", label: "Deny", kind: "reject_once" },
+      ],
+    },
+  },
+
+  {
+    type: "decision.requested",
+    decision: {
+      id: "d3", sessionId: "e", source: "permission", createdAt: t - 30_000, question: "Edit", detail: "/Users/dev/.config/limiter.json", outside: ["/Users/dev/.config/limiter.json"],
       options: [
         { id: "y", label: "Allow", kind: "allow_once" },
         { id: "a", label: "Always", kind: "allow_always" },
@@ -126,6 +158,12 @@ export const demoEvents: PerzianEvent[] = [
     type: "session.transcript", sessionId: "b",
     item: { kind: "tool", toolCallId: `b${i}`, title: `${k === "edit" ? "Edit" : k === "execute" ? "Run" : "Read"} src/auth/${["jwt", "session", "index", "types"][i % 4]}.ts`, status: i === 9 ? "in_progress" : "completed", toolKind: k, at: t - 880_000 + i * 60_000 },
   })),
+  { type: "session.transcript", sessionId: "b", item: { kind: "tool", toolCallId: "sa1", title: "Explore Redis client options", status: "completed", toolKind: "other", at: t - 330_000 } },
+  { type: "session.transcript", sessionId: "b", item: { kind: "tool", toolCallId: "sa1-0", parentToolCallId: "sa1", title: "Read package.json", status: "completed", toolKind: "read", at: t - 325_000 } },
+  { type: "session.transcript", sessionId: "b", item: { kind: "tool", toolCallId: "sa1-1", parentToolCallId: "sa1", title: "Search ioredis usage", status: "completed", toolKind: "search", at: t - 320_000 } },
+  { type: "session.transcript", sessionId: "b", item: { kind: "tool", toolCallId: "sa2", title: "Audit JWT call sites", status: "in_progress", toolKind: "other", at: t - 310_000 } },
+  { type: "session.transcript", sessionId: "b", item: { kind: "tool", toolCallId: "sa2-0", parentToolCallId: "sa2", title: "Search jwt.verify", status: "completed", toolKind: "search", at: t - 305_000 } },
+  { type: "session.transcript", sessionId: "b", item: { kind: "tool", toolCallId: "sa2-1", parentToolCallId: "sa2", title: "Read src/middleware/auth.ts", status: "in_progress", toolKind: "read", at: t - 300_000 } },
   { type: "session.transcript", sessionId: "b", item: { kind: "agent", text: "Session store wired. Moving the middleware over now.", at: t - 300_000 } },
   { type: "session.config", sessionId: "b", config: { models: [], modes: [] } },
 ];

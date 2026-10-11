@@ -260,6 +260,13 @@ async function handleCommand(cmd: Command): Promise<void> {
       if (!PERMISSION_MODES.includes(cmd.mode)) throw new Error(`Unknown mode: ${String(cmd.mode)}`);
       if (store.state().settings.defaultMode !== cmd.mode) store.emit({ type: "settings.defaultMode", mode: cmd.mode, at: Date.now() });
       break;
+    case "settings.addProject": {
+      if (typeof cmd.path !== "string" || !cmd.path.trim()) throw new Error("Choose a folder");
+      const path = expand(cmd.path.trim());
+      if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Project folder not found: ${path}`);
+      if (!store.state().settings.projects.includes(path)) store.emit({ type: "settings.projectAdded", path, at: Date.now() });
+      break;
+    }
     case "session.runChecks":
       if (!s) throw new Error("Unknown session");
       void s.rerunChecks().catch((e) => console.error(`[${s.info.id}]`, e));

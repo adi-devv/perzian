@@ -29,6 +29,7 @@ export function compact(state: State, opts: CompactOptions = {}): PerzianEvent[]
 
   const out: PerzianEvent[] = [];
   if (state.settings.defaultMode !== DEFAULT_PERMISSION_MODE) out.push({ type: "settings.defaultMode", mode: state.settings.defaultMode, at: now });
+  for (const path of state.settings.projects) out.push({ type: "settings.projectAdded", path, at: now });
   for (const id of kept) {
     const session = state.sessions[id];
     const sessionId = id;
@@ -54,7 +55,7 @@ export function replay(events: PerzianEvent[]): State {
   const sessions: Record<string, SessionInfo> = {};
   const transcripts: Record<string, TranscriptItem[]> = {};
   const toolIndex = new Map<string, Map<string, number>>(); // sessionId -> toolCallId -> index
-  const st: State = { sessions, transcripts, decisions: {}, outcomes: {}, changes: {}, configs: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE } };
+  const st: State = { sessions, transcripts, decisions: {}, outcomes: {}, changes: {}, configs: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [] } };
   const patch = (id: string, p: Partial<SessionInfo>) => {
     if (sessions[id]) Object.assign(sessions[id], p);
   };
@@ -114,6 +115,9 @@ export function replay(events: PerzianEvent[]): State {
         break;
       case "settings.defaultMode":
         st.settings = { ...st.settings, defaultMode: e.mode };
+        break;
+      case "settings.projectAdded":
+        if (!st.settings.projects.includes(e.path)) st.settings = { ...st.settings, projects: [...st.settings.projects, e.path] };
         break;
       default: {
         const unhandled: never = e; // a new event type must be handled here and in protocol `reduce`

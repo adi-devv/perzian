@@ -88,9 +88,18 @@ export function churn(files: FileChange[]) {
 }
 
 // Compact +/− counts, colored only in the digits.
+// One small mark per state: blue pulsing dot (working, or its step ring), amber dot (needs you), red dot (failed),
+// green check (done), hollow grey ring (paused or asleep). Dots and checks only; the tile carries the rest.
 export function StatusGlyph({ s }: { s: SessionInfo }) {
   if (s.status === "working" && s.progress) return <Ring step={s.progress.step} of={s.progress.of} />;
-  return <span key={s.status} className="dot" />;
+  if (s.status === "done")
+    return (
+      <svg key="done" className="chk" viewBox="0 0 12 12" width="11" height="11" aria-hidden>
+        <path d="M2.4 6.3l2.3 2.3 4.9-5.2" />
+      </svg>
+    );
+  const hollow = s.status === "paused" || s.status === "idle";
+  return <span key={s.status} className={`dot ${hollow ? "hollow" : ""}`} />;
 }
 
 /** Focus a control on mount, unless the developer is already typing somewhere. */
@@ -125,6 +134,7 @@ export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decis
       {perm ? (
         <div className="perm-body">
           {d.destructive && <span className="danger-tag">Destructive · {d.destructive}</span>}
+          <OutsideTag d={d} />
           <span className="perm-tool">{d.question}</span>
           {d.detail && <code>{d.detail}</code>}
         </div>
@@ -140,6 +150,76 @@ export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decis
         ))}
       </div>
     </article>
+  );
+}
+
+/** "Outside project: <path>" for an edit, delete or move beyond the session's folders. Grey: it is information, not an alarm. */
+export function OutsideTag({ d }: { d: Decision }) {
+  if (!d.outside?.length) return null;
+  const more = d.outside.length - 1;
+  return (
+    <span className="out-tag" title={d.outside.join("\n")}>
+      Outside project: <code>{d.outside[0]}</code>
+      {more > 0 && ` +${more}`}
+    </span>
+  );
+}
+
+export interface Chip {
+  key: string;
+  label: string;
+  title?: string;
+  href?: string;
+}
+
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+/** Facts the daemon observed about what the agent did on its own, as short grey chips. */
+export function sessionChips(s: SessionInfo): Chip[] {
+  const out: Chip[] = [];
+  const wt = s.extraWorktrees ?? [];
+  if (wt.length) out.push({ key: "wt", label: `+${plural(wt.length, "worktree")}`, title: wt.map((w) => [w.path, w.branch].filter(Boolean).join("  ⎇ ")).join("\n") });
+  const sub = s.subagents ?? [];
+  if (sub.length) out.push({ key: "sub", label: plural(sub.length, "subagent"), title: sub.map((x) => `${x.description} (${x.status})`).join("\n") });
+  const outside = s.outsidePaths ?? [];
+  if (outside.length) out.push({ key: "out", label: "outside project", title: outside.join("\n") });
+  for (const b of (s.background ?? []).filter((p) => !p.ended)) {
+    const label = `▶ ${b.command}${b.port ? ` :${b.port}` : ""}`;
+    out.push({ key: `bg${b.id}`, label, title: b.port ? `Running in the background. Open http://localhost:${b.port}` : "Running in the background", href: b.port ? `http://localhost:${b.port}` : undefined });
+  }
+  return out;
+}
+
+/** "3 commits · pushed" plus the PR link, or null when the agent made no commits. */
+export function gitChip(s: SessionInfo): { label: string; url?: string } | null {
+  const g = s.git;
+  if (!g || (!g.ahead && !g.prUrl)) return null;
+  const label = [g.ahead ? plural(g.ahead, "commit") : "", g.ahead && g.pushed ? "pushed" : ""].filter(Boolean).join(" · ");
+  return { label, url: g.prUrl };
+}
+
+/** `quietOutside`: the card on the tile already says which path is outside the project, so the chip would repeat it. */
+export function Chips({ s, quietOutside }: { s: SessionInfo; quietOutside?: boolean }) {
+  const chips = sessionChips(s).filter((c) => !(quietOutside && c.key === "out"));
+  const g = gitChip(s);
+  if (!chips.length && !g) return null;
+  return (
+    <div className="chips-row">
+      {chips.map((c) =>
+        c.href ? (
+          <a key={c.key} className="mchip" href={c.href} target="_blank" rel="noopener" title={c.title} onClick={(e) => e.stopPropagation()}>{c.label}</a>
+        ) : (
+          <span key={c.key} className="mchip" title={c.title}>{c.label}</span>
+        ),
+      )}
+      {g && (
+        <span className="mchip" title="Commits the agent made itself">
+          {g.label}
+          {g.label && g.url ? " · " : ""}
+          {g.url && <a href={g.url} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()}>PR ↗</a>}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -163,7 +243,7 @@ export function retryTarget(items: TranscriptItem[], status: SessionInfo["status
   return null;
 }
 
-/** An input that says who it talks to: "To: Perzian" or "To: <session title>". `blocked`: why sending isn't possible yet; typing still works and the text is kept. */
+/** An input; the placeholder says who it talks to (`to` is its accessible name). `blocked`: why sending isn't possible yet; typing still works and the text is kept. */
 export function Composer({ id, to, placeholder, focus, busy, blocked, onSubmit, onStop, note, controls }: { id: string; to: string; placeholder: string; focus?: boolean; busy?: boolean; blocked?: string; onSubmit: (t: string) => void; onStop?: () => void; note?: React.ReactNode; controls?: React.ReactNode }) {
   const [text, setText] = useState("");
   const submit = () => {
@@ -173,13 +253,11 @@ export function Composer({ id, to, placeholder, focus, busy, blocked, onSubmit, 
   };
   return (
     <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-      <label className="to" htmlFor={id}>
-        To: <b>{to}</b>
-        {note}
-      </label>
+      {note && <div className="composer-note">{note}</div>}
       <div className="composer-row">
         <textarea
           id={id}
+          aria-label={to}
           rows={1}
           autoFocus={focus}
           value={text}

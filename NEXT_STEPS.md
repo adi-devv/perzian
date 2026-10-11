@@ -7,10 +7,8 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    answer a decision card, a failing check, ship (merge and PR), a usage-limit pause, phone pairing. Note every confusing
    moment, extra click or wall of text, then fix in small batches.
 2. **UI direction: crew + center is built; finish it.** Left: the crew (one live tile per session, grouped by project, urgency-sorted, answerable in place).
-   Center: lead chat, or one session's detail (Changes, Map, Checks, Transcript). Leftovers:
-   - "Add project" only sets local lead-composer state; an empty project can't persist without a daemon event.
+   Center: Perzian's chat, or one session's detail (Changes, Map, Checks, Transcript). Leftovers:
    - The Map is a simple directory-region view (regions grow with churn), not a treemap with agents as dots yet.
-   - The lead composer's default permission-mode picker is disabled until `settings.setDefaultMode` lands in packages/protocol (TODO in App.tsx).
    - Decision inbox on the phone, and the old alternatives (subway-map timeline), are still open.
 3. **Small eval set.** About 5 scripted tasks run against a real agent, scored on finished, checks passed, and an honest outcome.
 4. **Try the Mac app** (`npm run app`) and **publish v0.0.1** as a GitHub Release (`npm run dist`, upload the zip, link it).
@@ -29,10 +27,8 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    (`perzian.json` `"ship"` overrides), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
 3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
 4. **Ready worktrees, later:** per-repo custom setup steps.
-5. **Observation UI (daemon side is done, see docs/ARCHITECTURE.md).** Draw the new `SessionInfo` fields: `outsidePaths` and `Decision.outside`
-   on the card, `subagents` with nested tool items (`parentToolCallId`), `background` (port link, ended), `extraWorktrees` (changed count),
-   `git` (ahead, pushed, PR link), `ship.worktreeRemoved`, a leftover-worktrees list (`GET /api/worktrees/leftover`), a default-mode
-   control (`settings.setDefaultMode`), and an Extra folders field on New session (`extraDirs`).
+5. **Observation UI, leftovers (the rest is drawn: chips and facts on tiles and the session header, outside-project tag on cards, nested subagent calls, default-mode picker, persisted projects).**
+   Still to draw: a leftover-worktrees list (`GET /api/worktrees/leftover`) and an Extra folders field on New session (`extraDirs`).
    Not done: background processes are marked ended only from the agent's own exit/kill report, not by detecting a `kill <pid>` command;
    `createSession`'s default-mode fallback in `apps/daemon/src/index.ts` has no test (it is a script); Codex gets no `additionalDirectories`.
 

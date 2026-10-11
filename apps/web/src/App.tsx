@@ -3,8 +3,7 @@ import { AGENTS, isUnseen, type Command, type SessionInfo, type State, type Tran
 import { isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
 import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, readiness, saveProject, withProject } from "./onboarding.tsx";
 import { PairScreen, PhoneHome, useNarrow } from "./phone.tsx";
-import { Count, Slot, useExiting } from "./motion.tsx";
-import { Composer, DecisionCard, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
+import { Composer, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
 import { Crew } from "./crew.tsx";
 import { SessionDetail } from "./detail.tsx";
 
@@ -12,7 +11,7 @@ type Send = (c: Command) => void;
 
 export function App() {
   const { state, send, link, connected, error, clearError } = useDaemon();
-  // Which session fills the center column; null is the lead chat.
+  // Which session fills the center column; null is Perzian's chat.
   const [selected, setSelected] = useState<string | null>(null);
   // Lead messages that arrived while a session was open count from here (the lead transcript length when you left it).
   const [leadSeen, setLeadSeen] = useState<number | null>(null);
@@ -22,7 +21,6 @@ export function App() {
   const [project, setProject] = useState(loadProject);
   // A folder picked with "Add project": the next lead message carries it, then it clears.
   const [leadProject, setLeadProject] = useState<string | null>(null);
-  const [decIdx, setDecIdx] = useState(0);
   const narrow = useNarrow();
   useTick();
 
@@ -45,6 +43,13 @@ export function App() {
     send({ type: "main.start", prompt: firstRun && projectPath ? withProject(prompt, projectPath) : prompt });
   };
 
+  // Use a folder for the lead's next message and land in Perzian's chat.
+  const startInFolder = (p: string) => {
+    setLeadProject(p);
+    open(null);
+    focusLead();
+  };
+
   // Errors fade on their own; clicking dismisses sooner.
   useEffect(() => {
     if (!error) return;
@@ -52,8 +57,8 @@ export function App() {
     return () => clearTimeout(t);
   }, [error]);
   const workers = useMemo(() => all.filter((s) => s.role === "worker"), [state.sessions]);
-  // Oldest call first; in the demo the visitor's own run should be the card they see.
-  const decisions = useMemo(() => Object.values(state.decisions).sort((a, b) => (isDemo ? b.createdAt - a.createdAt : a.createdAt - b.createdAt)), [state.decisions]);
+  // Oldest call first.
+  const decisions = useMemo(() => Object.values(state.decisions).sort((a, b) => a.createdAt - b.createdAt), [state.decisions]);
 
   const sel = selected && state.sessions[selected] && !state.sessions[selected].archived ? state.sessions[selected] : null;
   const mainItems = main ? (state.transcripts[main.id] ?? []) : [];
@@ -69,7 +74,7 @@ export function App() {
   useEffect(() => {
     if (sel && isUnseen(sel)) send({ type: "session.seen", sessionId: sel.id });
   }, [sel?.updatedAt, sel?.status]);
-  // A session that was archived or removed while open: back to the lead chat.
+  // A session that was archived or removed while open: back to Perzian.
   useEffect(() => {
     if (selected && !sel) open(null);
   }, [selected, sel]);
@@ -77,7 +82,7 @@ export function App() {
   const focusLead = () => requestAnimationFrame(() => document.getElementById("main-composer")?.focus());
   const modal = help || accounts || adding;
 
-  // Keyboard: ⌘1 / Esc lead chat · ↑/↓ move between tiles, Enter opens · 1-9 answer a decision · / focus the input · ? help
+  // Keyboard: ⌘1 / Esc Perzian · ↑/↓ move between tiles, Enter opens · 1-9 answer a decision · / focus the input · ? help
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target instanceof Element ? e.target : null;
@@ -120,15 +125,16 @@ export function App() {
         tiles[next].focus();
         tiles[next].scrollIntoView({ block: "nearest" });
       } else if (/^[1-9]$/.test(e.key)) {
-        const mine = selected ? decisions.filter((d) => d.sessionId === selected) : [];
-        const shown = selected ? mine[0] : decisions[Math.min(decIdx, decisions.length - 1)];
+        // In a session: its own oldest call. Otherwise the call on the topmost tile that is asking.
+        const owner = selected ?? document.querySelector<HTMLElement>("[data-tile]:has(.t-ask)")?.dataset.tile;
+        const shown = decisions.find((d) => d.sessionId === owner);
         const opt = shown?.options[Number(e.key) - 1];
         if (shown && opt) send({ type: "decision.answer", decisionId: shown.id, optionId: opt.id });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [decisions, decIdx, selected, help, adding, accounts, mainItems.length]);
+  }, [decisions, selected, help, adding, accounts, mainItems.length]);
 
   // A phone that isn't paired yet, or any window under 600px: the attention queue, nothing else.
   if (link === "unpaired") return <PairScreen />;
@@ -136,7 +142,7 @@ export function App() {
 
   return (
     <div className="app">
-      <Crew state={state} workers={workers} selected={sel?.id ?? null} onOpen={open} send={send} connected={connected} onAddProject={() => setAdding(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} onAccounts={() => setAccounts(true)} />
+      <Crew state={state} workers={workers} selected={sel?.id ?? null} onOpen={open} send={send} connected={connected} onAddProject={() => setAdding(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} onAccounts={() => setAccounts(true)} onUseProject={startInFolder} />
 
       <div className="center">
         <Thread
@@ -145,9 +151,6 @@ export function App() {
           main={main}
           send={send}
           onOpen={open}
-          decisions={decisions}
-          decIdx={decIdx}
-          onDecIdx={setDecIdx}
           link={link}
           onStart={startLead}
           blocked={gate.ready ? undefined : gate.blocker}
@@ -156,7 +159,7 @@ export function App() {
           leadProject={leadProject}
           onProjectUsed={() => setLeadProject(null)}
         />
-        {sel && <SessionDetail key={sel.id} s={sel} state={state} send={send} onBack={() => { open(null); focusLead(); }} leadNew={leadNew} />}
+        {sel && <SessionDetail key={sel.id} s={sel} state={state} send={send} onBack={() => { open(null); focusLead(); }} onOpen={open} leadNew={leadNew} />}
       </div>
 
       {adding && (
@@ -165,10 +168,10 @@ export function App() {
           onClose={() => setAdding(false)}
           onPick={(p) => {
             saveProject(p);
-            setLeadProject(p);
+            // The daemon keeps it (event store), so it stays in the crew column after a reload.
+            send({ type: "settings.addProject", path: p });
             setAdding(false);
-            open(null);
-            focusLead();
+            startInFolder(p);
           }}
         />
       )}
@@ -207,17 +210,13 @@ function AddProject({ recent, onClose, onPick }: { recent: string[]; onClose: ()
   );
 }
 
-/* ───────────── Lead chat: the one place work starts ───────────── */
+/* ───────────── Perzian's chat: the one place work starts ───────────── */
 
-function Thread({ hidden, state, main, send, onOpen, decisions, decIdx, onDecIdx, link, onStart, blocked, focus, firstRun, leadProject, onProjectUsed }: { hidden: boolean; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; decIdx: number; onDecIdx: (i: number) => void; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode; leadProject: string | null; onProjectUsed: () => void }) {
+function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, focus, firstRun, leadProject, onProjectUsed }: { hidden: boolean; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode; leadProject: string | null; onProjectUsed: () => void }) {
   const items = main ? (state.transcripts[main.id] ?? []) : [];
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
   const end = useRef<HTMLDivElement>(null);
-  // An answered card collapses out instead of vanishing; the ones after it slide up.
-  const cards = useExiting(decisions, (d) => d.id);
-  const cur = Math.min(decIdx, Math.max(0, cards.length - 1));
-  const shown = cards[cur];
   // The demo's "this is scripted" notices are a dismissible hint above the composer, not a line in the stream.
   const demoNote = isDemo ? [...items].reverse().find((i) => i.kind === "notice" && i.text.startsWith("Demo:")) : undefined;
   const [hintGone, setHintGone] = useState(() => {
@@ -230,13 +229,13 @@ function Thread({ hidden, state, main, send, onOpen, decisions, decIdx, onDecIdx
   // Stay at the end as messages arrive, and land there again when coming back from a session.
   useEffect(() => {
     if (!hidden) end.current?.scrollIntoView({ block: "end" });
-  }, [items.length, decisions.length, hidden]);
+  }, [items.length, hidden]);
   const folder = leadProject?.split("/").filter(Boolean).slice(-1)[0];
 
   return (
-    <main className="thread" hidden={hidden} aria-label="Lead chat">
+    <main className="thread" hidden={hidden} aria-label="Perzian">
       <div className="thread-head drag">
-        <h1 className="lead-h">Lead chat</h1>
+        <h1 className="lead-h">Perzian</h1>
         <span className="grow" />
         {main?.status === "working" && <span className="thinking">thinking</span>}
         {main?.status === "paused" && <Paused s={main} send={send} />}
@@ -253,26 +252,6 @@ function Thread({ hidden, state, main, send, onOpen, decisions, decIdx, onDecIdx
       </div>
 
       <div className="dock">
-        {shown && (
-          <div className="needs" aria-label="Needs you">
-            <div className="needs-head">
-              <span className="eyebrow s-needs_you">
-                <span className="dot" /> Needs you
-              </span>
-              {decisions.length > 1 && (
-                <span className="stepper" role="group" aria-label="Pending decisions">
-                  <button className="icon" aria-label="Previous" disabled={cur === 0} onClick={() => onDecIdx(cur - 1)}>‹</button>
-                  <span><Count n={cur + 1} /> of {decisions.length}</span>
-                  <button className="icon" aria-label="Next" disabled={cur >= cards.length - 1} onClick={() => onDecIdx(cur + 1)}>›</button>
-                </span>
-              )}
-            </div>
-            <Slot key={shown.item.id} id={shown.item.id} leaving={shown.leaving}>
-              <DecisionCard d={shown.item} session={state.sessions[shown.item.sessionId]} onOpen={() => onOpen(shown.item.sessionId)} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: shown.item.id, optionId })} />
-            </Slot>
-            <p className="hint">Press 1–{Math.min(9, shown.item.options.length)} to answer</p>
-          </div>
-        )}
         {demoNote && demoNote.kind === "notice" && !hintGone && (
           <p className="hint demo-hint">
             {demoNote.text}{" "}
@@ -294,12 +273,11 @@ function Thread({ hidden, state, main, send, onOpen, decisions, decIdx, onDecIdx
         <Composer
           id="main-composer"
           to="Perzian"
-          placeholder={main ? "Tell it what to build, or ask how things stand…" : "What should it do? e.g. Fix the failing test"}
+          placeholder={main ? "Ask Perzian, or tell it what to build…" : "What should it do? e.g. Fix the failing test"}
           focus={focus}
           busy={main?.status === "working"}
           blocked={main ? undefined : blocked}
-          // TODO: wire to `settings.setDefaultMode` once it lands in packages/protocol (another agent is adding it); disabled until then.
-          controls={<ModePicker value={main?.mode ?? "ask"} disabled title="Default permission mode for new work. Coming soon." />}
+          controls={<ModePicker value={state.settings.defaultMode} onChange={(mode) => send({ type: "settings.setDefaultMode", mode })} title="Permission mode new sessions start in" />}
           note={folder && (
             <span className="proj-chip" title={leadProject ?? undefined}>
               in <b>{folder}</b>
@@ -342,8 +320,8 @@ function ThreadItems({ items, state, onOpen, retry }: { items: TranscriptItem[];
         if (Array.isArray(b)) return <ToolStrip key={i} tools={b} />;
         switch (b.kind) {
           case "user":
-            // Daemon updates to the lead ("sessions finished") are plumbing, not something the developer typed.
-            return b.system ? <SystemUpdate key={i} text={b.text} /> : <div key={i} className="msg user">{b.text}</div>;
+            // Daemon updates to the lead ("sessions finished") are plumbing: the session's own line above already shows it.
+            return b.system ? null : <div key={i} className="msg user">{b.text}</div>;
           case "agent":
             return <div key={i} className="msg agent">{b.text}</div>;
           case "notice":
@@ -362,16 +340,6 @@ function ThreadItems({ items, state, onOpen, retry }: { items: TranscriptItem[];
         }
       })}
     </>
-  );
-}
-
-function SystemUpdate({ text }: { text: string }) {
-  const lines = text.split("\n").filter((l) => l.startsWith("- "));
-  const label = lines.length === 1 ? (/title="([^"]*)"/.exec(lines[0])?.[1] ?? "A session") + " finished" : `${lines.length || "Sessions"} sessions finished`;
-  return (
-    <div className="notice system-update" title={text}>
-      ↳ {label} · Perzian notified
-    </div>
   );
 }
 
@@ -400,7 +368,6 @@ function Paused({ s, send }: { s: SessionInfo; send: Send }) {
 // A spawned session, inline in the conversation as one line, updating live. Branch, files and
 // proof live in its detail view one click away.
 function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: () => void }) {
-  const pending = Object.values(state.decisions).filter((d) => d.sessionId === s.id).length;
   const files = state.changes[s.id] ?? [];
   const { add, del } = churn(files);
   const detail = [s.branch, AGENTS[s.agent].label, files.length ? `${files.length} files +${add} −${del}` : ""].filter(Boolean).join(" · ");
@@ -409,7 +376,7 @@ function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: 
       <span className="live-arrow" aria-hidden>↳</span>
       <StatusGlyph s={s} />
       <span className="live-title">{s.title}</span>
-      <span key={statusText(s)} className="live-status" title={pauseTitle(s)}>{statusText(s)}{pending > 1 ? ` · ${pending}` : ""}</span>
+      <span key={statusText(s)} className="live-status" title={pauseTitle(s)}>{statusText(s)}</span>
     </button>
   );
 }

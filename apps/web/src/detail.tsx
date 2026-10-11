@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AGENTS, checkPlan, type Command, type FileChange, type Outcome, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AGENTS, checkPlan, type Command, type FileChange, type Outcome, type SessionInfo, type State, type Subagent, type TranscriptItem } from "@perzian/protocol";
 import type { ThemedToken } from "shiki/core";
 import { fetchText } from "./daemon.ts";
 import { FailureNotice } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import { Slot, useExiting } from "./motion.tsx";
-import { Composer, DecisionCard, ModePicker, ModelPicker, StatusGlyph, Usage, ago, churn, retryTarget, statusText } from "./bits.tsx";
+import { Composer, DecisionCard, gitChip, ModePicker, ModelPicker, StatusGlyph, Usage, ago, churn, retryTarget, statusText } from "./bits.tsx";
 
 type Send = (c: Command) => void;
 type Tab = "changes" | "map" | "checks" | "transcript";
@@ -24,7 +24,8 @@ function defaultTab(s: SessionInfo, files: number): Tab {
 
 /* ───────────── Session detail: the whole center column for one session ───────────── */
 
-export function SessionDetail({ s, state, send, onBack, leadNew }: { s: SessionInfo; state: State; send: Send; onBack: () => void; leadNew: number }) {
+export function SessionDetail({ s, state, send, onBack, onOpen, leadNew }: { s: SessionInfo; state: State; send: Send; onBack: () => void; onOpen: (id: string) => void; leadNew: number }) {
+  const parent = s.parentId && s.parentId !== "main" ? state.sessions[s.parentId] : undefined;
   const files = state.changes[s.id] ?? [];
   const outcome = state.outcomes[s.id];
   const transcript = state.transcripts[s.id] ?? [];
@@ -63,16 +64,16 @@ export function SessionDetail({ s, state, send, onBack, leadNew }: { s: SessionI
   const shippable = !!s.worktree && !!s.branch;
   let primary: React.ReactNode = null;
   if (s.status === "failed") primary = <button className="btn primary" onClick={fix}>Ask agent to fix</button>;
-  else if (s.status === "done")
-    primary = s.ship?.state === "merged" ? <button className="btn" disabled>Merged ✓</button> : s.ship?.state === "pr" ? <button className="btn" disabled>PR opened ✓</button> : <button className="btn primary" onClick={review}>{shippable ? "Review & ship" : "Review changes"}</button>;
+  else if (s.status === "done" && s.ship?.state !== "merged" && s.ship?.state !== "pr")
+    primary = <button className="btn primary" onClick={review}>{shippable ? "Review & ship" : "Review changes"}</button>;
   else if (s.status === "paused") primary = <button className="btn primary" onClick={() => send({ type: "session.resume", sessionId: s.id })}>Resume now</button>;
 
   return (
     <section className="detail" aria-label={`Session: ${s.title}`}>
       <header className="d-head">
         <div className="d-row">
-          <button className="btn back" onClick={onBack} title="Back to the lead chat (Esc)">
-            ← Lead chat
+          <button className="btn back" onClick={onBack} title="Back to Perzian (Esc)">
+            ← Perzian
             {leadNew > 0 && <span className="badge" role="status" aria-label={`${leadNew} new from Perzian`}>{leadNew}</span>}
           </button>
           <span className={`stpill s-${s.status}`}>
@@ -89,10 +90,12 @@ export function SessionDetail({ s, state, send, onBack, leadNew }: { s: SessionI
           <ModelPicker s={s} state={state} send={send} />
           <ModePicker value={s.mode ?? "ask"} onChange={(mode) => send({ type: "session.setMode", sessionId: s.id, mode })} />
           <Usage s={s} />
+          {parent && <button className="text-link" onClick={() => onOpen(parent.id)} title="The session that started this one">from {parent.title}</button>}
           <span className="sp" />
           <button className="btn small ghost" onClick={() => { send({ type: "session.archive", sessionId: s.id }); onBack(); }}>Archive</button>
         </div>
 
+        <Facts s={s} quietOutside={pending.some((p) => p.item.outside?.length)} />
         <SetupBar s={s} send={send} />
         {retry && failure?.kind === "notice" && <FailureNotice text={failure.text} onRetry={() => send({ type: "session.prompt", sessionId: s.id, prompt: retry.prompt })} />}
         {pending.length > 0 && (
@@ -120,17 +123,94 @@ export function SessionDetail({ s, state, send, onBack, leadNew }: { s: SessionI
         {tab === "changes" && <ChangesTab s={s} files={files} outcome={outcome} state={state} send={send} file={file} onFile={setFile} closed={closed} />}
         {tab === "map" && <MapTab s={s} state={state} files={files} onFile={(p) => { setFile(p); pick("changes"); }} />}
         {tab === "checks" && <ChecksTab s={s} outcome={outcome} send={send} fix={fix} />}
-        {tab === "transcript" && <TranscriptTab items={transcript} state={state} />}
+        {tab === "transcript" && <TranscriptTab items={transcript} state={state} subagents={s.subagents ?? []} />}
       </div>
 
       <div className="d-foot">
         {closed ? (
-          <p className="closed-note">Merged into {s.ship?.into ?? s.baseBranch ?? "your branch"}. This session is closed; ask Perzian to start a new one to keep going.</p>
+          <p className="closed-note">This session is closed. Ask Perzian to start a new one to keep going.</p>
         ) : (
-          <Composer id="session-composer" to={s.title} placeholder="Tell this session what to change…" busy={s.status === "working"} onSubmit={(text) => send({ type: "session.prompt", sessionId: s.id, prompt: text })} onStop={() => send({ type: "session.cancel", sessionId: s.id })} />
+          <Composer id="session-composer" to={s.title} placeholder={`Tell ${s.title}…`} busy={s.status === "working"} onSubmit={(text) => send({ type: "session.prompt", sessionId: s.id, prompt: text })} onStop={() => send({ type: "session.cancel", sessionId: s.id })} />
         )}
       </div>
     </section>
+  );
+}
+
+/* ───────────── Facts the daemon observed: what the agent did on its own ───────────── */
+
+function Facts({ s, quietOutside }: { s: SessionInfo; quietOutside?: boolean }) {
+  const wt = s.extraWorktrees ?? [];
+  const sub = s.subagents ?? [];
+  const outside = quietOutside ? [] : (s.outsidePaths ?? []);
+  const bg = (s.background ?? []).filter((b) => !b.ended);
+  const dirs = s.extraDirs ?? [];
+  const g = gitChip(s);
+  if (!wt.length && !sub.length && !outside.length && !bg.length && !dirs.length && !g) return null;
+  return (
+    <dl className="d-facts">
+      {g && (
+        <div>
+          <dt>Git</dt>
+          <dd>
+            {g.label}
+            {g.label && g.url ? " · " : ""}
+            {g.url && <a href={g.url} target="_blank" rel="noopener">PR ↗</a>}
+          </dd>
+        </div>
+      )}
+      {bg.length > 0 && (
+        <div>
+          <dt>Running</dt>
+          <dd>
+            {bg.map((b) => (
+              <span key={b.id} className="mchip">
+                {b.port ? <a href={`http://localhost:${b.port}`} target="_blank" rel="noopener">▶ {b.command} :{b.port}</a> : <>▶ {b.command}</>}
+              </span>
+            ))}
+          </dd>
+        </div>
+      )}
+      {dirs.length > 0 && (
+        <div>
+          <dt>Also allowed</dt>
+          <dd>{dirs.map((d) => <code key={d} title={d}>{d}</code>)}</dd>
+        </div>
+      )}
+      {wt.length > 0 && (
+        <div>
+          <dt>{wt.length === 1 ? "Extra worktree" : "Extra worktrees"}</dt>
+          <dd>
+            {wt.map((w) => (
+              <span key={w.path} className="fact-line">
+                <code title={w.path}>{w.path}</code>
+                {w.branch && <span>⎇ {w.branch}</span>}
+                {w.changed !== undefined && <span>{w.changed} changed</span>}
+              </span>
+            ))}
+          </dd>
+        </div>
+      )}
+      {outside.length > 0 && (
+        <div>
+          <dt>Outside project</dt>
+          <dd>{outside.map((p) => <code key={p} title={p}>{p}</code>)}</dd>
+        </div>
+      )}
+      {sub.length > 0 && (
+        <div>
+          <dt>{sub.length === 1 ? "Subagent" : "Subagents"}</dt>
+          <dd>
+            {sub.map((x) => (
+              <span key={x.id} className="fact-line">
+                <span className={`sa-dot ${x.status}`} aria-hidden />
+                <span title={x.status}>{x.description}</span>
+              </span>
+            ))}
+          </dd>
+        </div>
+      )}
+    </dl>
   );
 }
 
@@ -145,7 +225,7 @@ function ChangesTab({ s, files, outcome, state, send, file, onFile, closed }: { 
       <div className="cg">
         <div className="g-files">
           <h3 className="h3">
-            Changed files <b>{files.length}</b>
+            Changed files
             {files.length > 0 && (
               <span className="stat">
                 <em className="a">+{add}</em> <em className="d">−{del}</em>
@@ -298,7 +378,7 @@ function MapTab({ s, state, files, onFile }: { s: SessionInfo; state: State; fil
           })}
         </div>
       )}
-      <h3 className="h3 act-h">Activity <b>{tools.length}</b></h3>
+      <h3 className="h3 act-h">Activity</h3>
       <div className="activity">
         {tools.map((t) => t.kind === "tool" && <span key={t.toolCallId} className={`act k-${t.toolKind ?? "other"} st-${t.status}`} title={`${t.toolKind ?? "tool"}: ${t.title}`} />)}
         {tools.length === 0 && <span className="quiet small">Nothing yet</span>}
@@ -338,21 +418,28 @@ function ChecksTab({ s, outcome, send, fix }: { s: SessionInfo; outcome?: Outcom
 
 /* ───────────── Transcript: messages in a column; tool calls fold into one line each run ───────────── */
 
-function TranscriptTab({ items, state }: { items: TranscriptItem[]; state: State }) {
-  const blocks = useMemo(() => {
+function TranscriptTab({ items, state, subagents }: { items: TranscriptItem[]; state: State; subagents: Subagent[] }) {
+  const { blocks, kids } = useMemo(() => {
+    // Calls that ran inside a subagent nest under the call that started it instead of sitting in the flow.
+    const ids = new Set(items.flatMap((i) => (i.kind === "tool" ? [i.toolCallId] : [])));
+    const kids = new Map<string, TranscriptItem[]>();
     const out: (TranscriptItem | TranscriptItem[])[] = [];
     for (const it of items) {
+      if (it.kind === "tool" && it.parentToolCallId && ids.has(it.parentToolCallId)) {
+        kids.set(it.parentToolCallId, [...(kids.get(it.parentToolCallId) ?? []), it]);
+        continue;
+      }
       const last = out[out.length - 1];
       if (it.kind === "tool" && Array.isArray(last)) last.push(it);
       else out.push(it.kind === "tool" ? [it] : it);
     }
-    return out;
+    return { blocks: out, kids };
   }, [items]);
   if (!items.length) return <p className="empty">Nothing yet. What this session says and does shows up here.</p>;
   return (
     <ol className="tr">
       {blocks.map((b, i) => {
-        if (Array.isArray(b)) return <li key={i} className="tr-item"><ToolGroup tools={b} /></li>;
+        if (Array.isArray(b)) return <li key={i} className="tr-item"><ToolGroup tools={b} kids={kids} subagents={subagents} /></li>;
         const at = new Date(b.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
         switch (b.kind) {
           case "user":
@@ -372,25 +459,42 @@ function TranscriptTab({ items, state }: { items: TranscriptItem[]; state: State
 }
 
 // A run of tool calls is one collapsed line ("5 actions · 1 failed"); open it to read each call, one per row.
-function ToolGroup({ tools }: { tools: TranscriptItem[] }) {
-  const calls = tools.filter((t) => t.kind === "tool");
-  const failed = calls.filter((t) => t.kind === "tool" && t.status === "failed").length;
+// A subagent's own calls are indented under the call that started it.
+function ToolGroup({ tools, kids, subagents }: { tools: TranscriptItem[]; kids: Map<string, TranscriptItem[]>; subagents: Subagent[] }) {
+  const all = tools.flatMap((t) => (t.kind === "tool" ? [t, ...(kids.get(t.toolCallId) ?? [])] : []));
+  const failed = all.filter((t) => t.kind === "tool" && t.status === "failed").length;
   return (
     <details className="tools">
       <summary>
         <span className="caret" aria-hidden>▸</span>
-        {calls.length} action{calls.length === 1 ? "" : "s"}
+        {all.length} action{all.length === 1 ? "" : "s"}
         {failed > 0 && <span className="toolstrip-fail"> · {failed} failed</span>}
       </summary>
       <ul>
-        {calls.map((t) =>
-          t.kind === "tool" ? (
-            <li key={t.toolCallId} className={`st-${t.status}`}>
-              <b>{t.toolKind ?? "tool"}</b>
-              <span>{t.title}</span>
-            </li>
-          ) : null,
-        )}
+        {tools.map((t) => {
+          if (t.kind !== "tool") return null;
+          const inner = kids.get(t.toolCallId);
+          const sa = subagents.find((x) => x.id === t.toolCallId);
+          return (
+            <Fragment key={t.toolCallId}>
+              <li className={`st-${t.status}`}>
+                <b>{inner || sa ? "subagent" : (t.toolKind ?? "tool")}</b>
+                <span>
+                  {t.title}
+                  {sa && sa.status !== "done" ? ` · ${sa.status}` : ""}
+                </span>
+              </li>
+              {inner?.map((c) =>
+                c.kind === "tool" ? (
+                  <li key={c.toolCallId} className={`st-${c.status} nested`}>
+                    <b>{c.toolKind ?? "tool"}</b>
+                    <span>{c.title}</span>
+                  </li>
+                ) : null,
+              )}
+            </Fragment>
+          );
+        })}
       </ul>
     </details>
   );
@@ -499,7 +603,7 @@ function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send
     return (
       <section className="ship shipped">
         <b>✓ Merged into {sh.into}</b>
-        <span>{sh.detail ?? "The worktree and branch were cleaned up."} This session is closed; start a new one to keep going.</span>
+        <span>{sh.detail ?? (sh.worktreeRemoved ? "Worktree cleaned up; the branch is kept." : "")}</span>
       </section>
     );
   if (sh?.state === "pr")

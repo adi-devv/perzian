@@ -7,9 +7,9 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 
 ## Lead and crew
 - ✅ One main agent (Perzian) you talk to; it starts, messages and checks on worker sessions through the report MCP.
-- ✅ Spawned sessions show as live mini-tiles in the main thread, with outcome cards.
+- ✅ Each spawned session is one line in the chat (dot color and a short state, updating in place); the finish notice to the lead is never shown.
 - ✅ The lead is told, in batches, when its sessions finish, pause or resume (with loop guards).
-- ✅ Sessions list ordered by attention: working, needs you, done, failed, idle (color only for needs-you and failed).
+- ✅ Sessions list ordered by attention: working, needs you, done, failed, idle (small status marks carry color: blue working, amber needs you, red failed, green check done, hollow grey paused).
 - ✅ Crew column: one live tile per session grouped by project, urgency-sorted (needs you, failed, working, done), with a summary line ("2 need you · 1 failed · 3 working"); decisions are answerable on the tile, and the order holds still while the pointer is over it.
 - ✅ Import existing Claude Code sessions from `~/.claude` (read-only), then resume them.
 
@@ -19,7 +19,7 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ⚠️ Ready worktrees: before the first message, copy gitignored `.env*`/`.npmrc` files and run the lockfile's install; shows "Setting up…" with Retry / Start anyway.
 
 ## Decisions and permissions
-- ✅ Needs-you dock: permission asks and agent decisions as one-click cards.
+- ✅ Permission asks and agent decisions are one-click cards on the session tile (keys 1-9 answer the top one); phones get a queue.
 - ✅ Subtle motion shows what changed: answered cards collapse, crew tiles slide (FLIP), status dots cross-fade, expanders animate; off with reduced-motion.
 - ✅ Destructive-command and permission rules enforced by the daemon (Claude); Codex is best-effort.
 

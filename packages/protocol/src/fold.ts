@@ -11,10 +11,10 @@ export interface State {
   changes: Record<string, FileChange[]>; // latest per session
   configs: Record<string, AgentConfig>;
   /** Global settings, folded from settings.* events. */
-  settings: { defaultMode: PermissionMode };
+  settings: { defaultMode: PermissionMode; /** Folders added by hand, oldest first. */ projects: string[] };
 }
 
-export const emptyState: State = { sessions: {}, transcripts: {}, decisions: {}, outcomes: {}, changes: {}, configs: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE } };
+export const emptyState: State = { sessions: {}, transcripts: {}, decisions: {}, outcomes: {}, changes: {}, configs: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [] } };
 
 function patchSession(s: State, id: string, patch: Partial<SessionInfo>): State {
   const cur = s.sessions[id];
@@ -66,6 +66,8 @@ export function reduce(s: State, e: PerzianEvent): State {
       return { ...s, outcomes: { ...s.outcomes, [e.outcome.sessionId]: e.outcome } };
     case "settings.defaultMode":
       return { ...s, settings: { ...s.settings, defaultMode: e.mode } };
+    case "settings.projectAdded":
+      return s.settings.projects.includes(e.path) ? s : { ...s, settings: { ...s.settings, projects: [...s.settings.projects, e.path] } };
   }
 }
 

@@ -3,7 +3,7 @@ import { isUnseen, type Command, type Decision, type SessionInfo, type SessionSt
 import { explainFailure, isFailureNotice } from "./onboarding.tsx";
 import { PhoneButton } from "./phone.tsx";
 import { useFlip } from "./motion.tsx";
-import { StatusGlyph, cost, denyOption, statusText, useFocusOnMount } from "./bits.tsx";
+import { Chips, OutsideTag, StatusGlyph, cost, denyOption, statusText, useFocusOnMount } from "./bits.tsx";
 import { isDemo } from "./daemon.ts";
 
 type Send = (c: Command) => void;
@@ -61,7 +61,7 @@ export function tileLine(s: SessionInfo, state: State, pending: Decision[]): str
   if (run?.state === "passed" || o?.proof.length) {
     const proof = o?.proof ?? [];
     const failed = proof.some((p) => !p.passed);
-    return failed ? "Checks failed" : "Checks ✓ · ready to ship";
+    return failed ? "Checks failed" : "Checks pass · ready to ship";
   }
   return "Ready to review";
 }
@@ -75,6 +75,7 @@ function TileAnswer({ d, send }: { d: Decision; send: Send }) {
   return (
     <div className="t-ask">
       {d.destructive && <span className="danger-tag">Destructive · {d.destructive}</span>}
+      <OutsideTag d={d} />
       {perm && d.detail && <code className="t-cmd" title={d.detail}>{d.detail}</code>}
       <div className={`t-ans ${perm ? "row" : "stack"}`}>
         {d.options.map((o) => {
@@ -92,7 +93,7 @@ function TileAnswer({ d, send }: { d: Decision; send: Send }) {
   );
 }
 
-function Tile({ s, state, send, selected, onOpen }: { s: SessionInfo; state: State; send: Send; selected: boolean; onOpen: (id: string) => void }) {
+function Tile({ s, state, send, selected, onOpen, parent }: { s: SessionInfo; state: State; send: Send; selected: boolean; onOpen: (id: string) => void; parent?: SessionInfo }) {
   const pending = Object.values(state.decisions)
     .filter((d) => d.sessionId === s.id)
     .sort((a, b) => a.createdAt - b.createdAt);
@@ -101,13 +102,13 @@ function Tile({ s, state, send, selected, onOpen }: { s: SessionInfo; state: Sta
   const first = pending[0];
   return (
     <div
-      className={`ctile s-${s.status} ${selected ? "sel" : ""} ${done ? "compact" : ""} ${isUnseen(s) ? "unseen-row" : ""} ${first?.destructive ? "destructive" : ""}`}
+      className={`ctile s-${s.status} ${parent ? "child" : ""} ${selected ? "sel" : ""} ${done ? "compact" : ""} ${isUnseen(s) ? "unseen-row" : ""} ${first?.destructive ? "destructive" : ""}`}
       role="button"
       tabIndex={0}
       data-tile={s.id}
       data-flip={s.id}
       aria-current={selected ? "true" : undefined}
-      title={`${s.title} · ${statusText(s)}${s.branch ? ` · ${s.branch}` : ""}`}
+      title={`${s.title} · ${statusText(s)}${s.branch ? ` · ${s.branch}` : ""}${parent ? ` · from ${parent.title}` : ""}`}
       onClick={() => onOpen(s.id)}
       onKeyDown={(e) => {
         if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
@@ -126,6 +127,7 @@ function Tile({ s, state, send, selected, onOpen }: { s: SessionInfo; state: Sta
           {line}
         </div>
       )}
+      {!done && <Chips s={s} quietOutside={!!first?.outside?.length} />}
       {s.status === "needs_you" && first && (
         <div onClick={(e) => e.stopPropagation()}>
           <TileAnswer d={first} send={send} />
@@ -154,7 +156,7 @@ function Summary({ workers }: { workers: SessionInfo[] }) {
 
 const DONE_FOLD = 3;
 
-export function Crew({ state, workers, selected, onOpen, send, connected, onAddProject, onImport, onHelp, onAccounts }: { state: State; workers: SessionInfo[]; selected: string | null; onOpen: (id: string) => void; send: Send; connected: boolean; onAddProject: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void }) {
+export function Crew({ state, workers, selected, onOpen, send, connected, onAddProject, onImport, onHelp, onAccounts, onUseProject }: { state: State; workers: SessionInfo[]; selected: string | null; onOpen: (id: string) => void; send: Send; connected: boolean; onAddProject: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void; onUseProject: (path: string) => void }) {
   // While the pointer is over the column the order holds still, so a tile never moves out from under a click.
   // New orders queue and apply on mouseleave.
   const [held, setHeld] = useState(false);
@@ -172,6 +174,7 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
     const s = byId.get(id);
     if (s) groups.set(s.project, [...(groups.get(s.project) ?? []), s]);
   }
+  for (const p of state.settings.projects) if (!groups.has(p)) groups.set(p, []);
   const scroll = useFlip<HTMLDivElement>(order.join(), 150);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const spent = workers.reduce((n, s) => n + (s.usage?.costUsd ?? 0), 0);
@@ -190,16 +193,27 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
 
       <div className="crew-list" ref={scroll}>
         {[...groups.entries()].map(([project, list]) => {
-          const active = list.filter((s) => s.status !== "done");
-          const done = list.filter((s) => s.status === "done");
+          // A session started by another session nests under it, indented, when both live in this project.
+          const parentOf = (x: SessionInfo) => (x.parentId && x.parentId !== "main" ? list.find((p) => p.id === x.parentId) : undefined);
+          const top = list.filter((x) => !parentOf(x));
+          const active = top.filter((x) => x.status !== "done");
+          const done = top.filter((x) => x.status === "done");
           const fold = done.length > DONE_FOLD && !open.has(project);
+          const row = (x: SessionInfo) => (
+            <div key={x.id} className="crew-nest">
+              <Tile s={x} state={state} send={send} selected={selected === x.id} onOpen={onOpen} />
+              {list.filter((c) => c.parentId === x.id).map((c) => <Tile key={c.id} s={c} parent={x} state={state} send={send} selected={selected === c.id} onOpen={onOpen} />)}
+            </div>
+          );
           return (
             <section key={project} className="crew-group">
               <h3 className="grp-h" title={project}>
                 <span>{base(project)}</span>
-                <span>{list.length}</span>
               </h3>
-              {active.map((s) => <Tile key={s.id} s={s} state={state} send={send} selected={selected === s.id} onOpen={onOpen} />)}
+              {list.length === 0 && (
+                <button className="btn small ghost empty-proj" onClick={() => onUseProject(project)}>Tell Perzian what to build here</button>
+              )}
+              {active.map(row)}
               {done.length > DONE_FOLD && (
                 <button
                   className="btn small done-toggle"
@@ -215,7 +229,7 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
                   <span aria-hidden>{fold ? "▸" : "▾"}</span>
                 </button>
               )}
-              {!fold && done.map((s) => <Tile key={s.id} s={s} state={state} send={send} selected={selected === s.id} onOpen={onOpen} />)}
+              {!fold && done.map(row)}
             </section>
           );
         })}
