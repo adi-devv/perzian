@@ -56,11 +56,11 @@ test("ask_project: the card lists the projects; an answer returns the absolute p
 
   // "Choose folder…" / a typed path: any existing folder, not just a listed one.
   const picked = folder("picked");
-  answerProject(deps.decisions, store, id, picked);
+  answerProject(deps.decisions, store, id, picked, home);
   assert.equal(await answer, picked, "the lead gets the absolute path");
   assert.deepEqual(store.state().settings.projects, [known, picked], "persisted through the add-project event");
   assert.equal(store.state().decisions[id], undefined);
-  assert.throws(() => answerProject(deps.decisions, store, id, picked), /Already answered/);
+  assert.throws(() => answerProject(deps.decisions, store, id, picked, home), /Already answered/);
   store.close();
 
   // Restart: the project is still there.
@@ -74,11 +74,15 @@ test("ask_project: a missing folder is refused and the card stays open; dismissi
   const lead = AgentSession.create({ project: leadDir(home), cwd: leadDir(home), title: "Perzian", agent: "claude-code", role: "main" }, deps);
   const answer = askProject(lead, []);
   const [id] = deps.decisions.keys();
-  assert.throws(() => answerProject(deps.decisions, store, id, join(tmp, "nope")), /not found/);
-  assert.throws(() => answerProject(deps.decisions, store, id, "  "), /Choose a folder/);
+  assert.throws(() => answerProject(deps.decisions, store, id, join(tmp, "nope"), home), /not found/);
+  assert.throws(() => answerProject(deps.decisions, store, id, "  ", home), /Choose a folder/);
+  // The lead's own folders are not projects, here as in spawn_session.
+  mkdirSync(join(home, "main"), { recursive: true });
+  assert.throws(() => answerProject(deps.decisions, store, id, leadDir(home), home), /lead's own empty folder/);
+  assert.throws(() => answerProject(deps.decisions, store, id, join(home, "main"), home), /lead's own empty folder/);
   assert.ok(deps.decisions.has(id), "still waiting");
   assert.deepEqual(store.state().settings.projects, []);
-  answerProject(deps.decisions, store, id, null);
+  answerProject(deps.decisions, store, id, null, home);
   assert.equal(await answer, null);
   store.close();
 });

@@ -1,9 +1,9 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fold, type SetupState } from "@perzian/protocol";
 import { createWorktree } from "../src/git.ts";
 import { SetupGate, copyLocalFiles, copyProjectSkills, detectInstall, localFiles, readyWorktree } from "../src/setup.ts";
@@ -288,5 +288,24 @@ describe("project skills and commands", () => {
     assert.equal(readFileSync(join(wt, ".claude/commands/old.md"), "utf8"), "committed\n");
     assert.ok(!existsSync(join(wt, ".claude/settings.local.json")), "only skills and commands");
     assert.deepEqual(await copyProjectSkills(project, wt), [], "a second run copies nothing");
+  });
+
+  test("a symlinked skill is linked to its resolved target, not copied; links to directories or nowhere are skipped", async () => {
+    const shared = mkdtempSync(join(tmpdir(), "pz-shared-"));
+    write(shared, { "deploy.md": "shared command\n", "dir/x.md": "x\n" });
+    const { project, wt } = await repo({ "README.md": "x\n" });
+    mkdirSync(join(project, ".claude/commands"), { recursive: true });
+    mkdirSync(join(project, ".claude/skills"), { recursive: true });
+    // Relative link in the checkout: the worktree's link must be absolute, so it still resolves from there.
+    symlinkSync(relative(join(project, ".claude/commands"), join(shared, "deploy.md")), join(project, ".claude/commands/deploy.md"));
+    symlinkSync(join(shared, "dir"), join(project, ".claude/skills/dirlink"));
+    symlinkSync(join(shared, "missing.md"), join(project, ".claude/commands/dangling.md"));
+    const copied = await copyProjectSkills(project, wt);
+    assert.deepEqual(copied, [".claude/commands/deploy.md"]);
+    const link = join(wt, ".claude/commands/deploy.md");
+    assert.ok(lstatSync(link).isSymbolicLink());
+    assert.equal(readlinkSync(link), realpathSync(join(shared, "deploy.md")));
+    assert.equal(readFileSync(link, "utf8"), "shared command\n");
+    assert.deepEqual(await copyProjectSkills(project, wt), [], "existing links are left alone");
   });
 });

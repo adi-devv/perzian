@@ -150,6 +150,8 @@ export class AgentSession {
   private modelOptionId?: string;
   private availableModes: string[] = [];
   private turn = 0;
+  // The "Known projects" brief as the lead last saw it: sent again when the list changes.
+  private briefSent?: string;
   private lastChanges?: string;
   private disposing = false;
   private turnBaseline?: string;
@@ -508,6 +510,12 @@ export class AgentSession {
       const isCommand = !!slash && (BUILTIN_COMMANDS.has(slash[1]) || !!this.info.commands?.some((c) => c.name === slash[1]));
       const body = isCommand ? text.trimStart() : this.promptBody(text, this.turn++ === 0);
       const res = await this.conn.prompt({ sessionId: this.info.acpSessionId, prompt: buildPrompt(body, opts.attachments ?? [], this.canImage) });
+      // /clear wipes the agent's context, preamble included: the next normal prompt brings it back.
+      // (/compact keeps a summary of the conversation, so the preamble survives it.)
+      if (isCommand && slash?.[1] === "clear" && res.stopReason === "end_turn") {
+        this.turn = 0;
+        this.briefSent = undefined;
+      }
       this.flushAgentText();
       // Close the cancelled turn's tools now, even if a newer prompt is already queued behind it;
       // otherwise that prompt's end_turn would close them as "completed".
@@ -599,7 +607,19 @@ export class AgentSession {
   // What the agent receives: instructions on the first turn, plus for workers the detected checks; a
   // one-line rules reminder on later worker turns, since long sessions drift.
   private promptBody(text: string, first: boolean): string {
-    if (this.info.role === "main") return first ? `${MAIN_INSTRUCTIONS}\n\n${leadProjectsBrief(knownProjects(this.store.state()))}\n\n---\n\n${text}` : text;
+    if (this.info.role === "main") {
+      const projects = leadProjectsBrief(knownProjects(this.store.state()));
+      if (first) {
+        this.briefSent = projects;
+        return `${MAIN_INSTRUCTIONS}\n\n${projects}\n\n---\n\n${text}`;
+      }
+      // Projects were added since the lead last saw the list (answering ask_project, a new session): tell it again.
+      if (projects !== this.briefSent) {
+        this.briefSent = projects;
+        return `(The known projects changed.)\n${projects}\n\n---\n\n${text}`;
+      }
+      return text;
+    }
     if (!first) return `${FOLLOWUP_REMINDER}\n\n${text}`;
     const checks = this.info.checks?.length ? `\n\nChecks available: ${this.info.checks.join(", ")}` : "";
     const required = declaredBrief(this.info.declaredChecks);

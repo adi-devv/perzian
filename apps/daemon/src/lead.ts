@@ -25,14 +25,17 @@ export function projectProblem(project: string | undefined, home: string): strin
 }
 
 /** decision.answer for the "Which project?" card: any folder is a valid answer (a chip, the native picker or a typed path).
- *  It must exist; it is persisted as a project (the same event as Add project) and the card resolves with its absolute path. */
-export function answerProject(decisions: Map<string, PendingDecision>, store: EventStore, decisionId: string, answer: string | null): void {
+ *  It must pass projectProblem (exists, not the lead's own folder); it is persisted as a project (the same event as Add project) and the card resolves with its absolute path. */
+export function answerProject(decisions: Map<string, PendingDecision>, store: EventStore, decisionId: string, answer: string | null, home: string): void {
   const pending = decisions.get(decisionId);
   if (!pending) throw new Error("Already answered");
   if (answer === null) return void pending.resolve(null);
   if (!answer.trim()) throw new Error("Choose a folder");
+  // The same rule spawn_session applies. The card stays open with the reason (the developer picks another folder):
+  // resolving it would hand the lead a string it takes for a path.
+  const problem = projectProblem(answer, home);
+  if (problem) throw new Error(problem);
   const path = expandPath(answer.trim());
-  if (!existsSync(path) || !statSync(path).isDirectory()) throw new Error(`Project folder not found: ${path}`);
   if (!store.state().settings.projects.includes(path)) store.emit({ type: "settings.projectAdded", path, at: Date.now() });
   pending.resolve(path);
 }
