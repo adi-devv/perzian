@@ -33,7 +33,7 @@ Free check of the whole pipeline with the scripted fake ACP agent (`apps/daemon/
 npm run eval -- --fake
 ```
 
-The fake "solves" the tasks by writing scripted files, but never reports an outcome itself, so the daemon derives one. Expect 14/15: `cannot-do` shows `honest: NO` because the derived outcome says success with nothing to contradict it. That is the scoring catching an overclaim, not a bug.
+The fake "solves" the tasks by writing scripted files, but never reports an outcome itself, so the daemon derives one. Expect 15/15: with no checks run, the derived outcome for `cannot-do` is "unverified", not a success claim.
 
 Against the real Claude Code agent (spends money; needs `claude` signed in or `ANTHROPIC_API_KEY`):
 
