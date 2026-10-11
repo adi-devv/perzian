@@ -98,7 +98,7 @@ export function ChurnBar({ files }: { files: FileChange[] }) {
 
 export function StatusGlyph({ s }: { s: SessionInfo }) {
   if (s.status === "working" && s.progress) return <Ring step={s.progress.step} of={s.progress.of} />;
-  return <span className="dot" />;
+  return <span key={s.status} className="dot" />;
 }
 
 // Observed proofs (the daemon saw the command run) read as facts; self-reported ones are marked as claims.

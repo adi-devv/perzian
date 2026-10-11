@@ -498,3 +498,56 @@ code.chip { font-size: 11px; }
 .qr.dim { opacity: 0.15; }
 .pair-code { font: 500 18px var(--mono); letter-spacing: 0.12em; }
 .pair-url { font-size: 11px; overflow-wrap: anywhere; }
+
+/* ── motion: show what changed, never slow anyone down ──
+   120–200ms (240 max for panels), ease-out in / ease-in out, opacity + transform (height only to collapse).
+   Structure for a card that collapses on exit; harmless without motion. */
+.slot { display: grid; grid-template-rows: 1fr; min-width: 0; }
+.slot-in { display: flex; flex-direction: column; min-width: 0; }
+.slot-in > * { flex: 1; }
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes fade-in { from { opacity: 0; } }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+  @keyframes drawer-in { from { opacity: 0; transform: translateX(28px); } }
+  @keyframes drawer-out { to { opacity: 0; transform: translateX(28px); } }
+  @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 6px); } }
+  @keyframes count-pulse { from { opacity: 0.25; } }
+
+  /* session drawer */
+  .drawer.enter { animation: drawer-in 0.22s ease-out; }
+  .drawer.leave { animation: drawer-out 0.17s ease-in forwards; pointer-events: none; }
+
+  /* decision cards: rise in; collapse out while the cards below slide up */
+  .slot-in { animation: rise 0.18s ease-out; }
+  .slot.leaving { grid-template-rows: 0fr; opacity: 0; pointer-events: none; transition: grid-template-rows 0.2s ease-in, opacity 0.14s ease-in, margin-bottom 0.2s ease-in; }
+  .slot.leaving .slot-in { min-height: 0; overflow: hidden; }
+  .drawer-scroll > .slot.leaving { margin-bottom: -26px; }
+
+  /* sessions: new ones fade in; a status change cross-fades the dot and the label */
+  .row, .live, .since-chip, .crew-btn { animation: fade-in 0.18s ease-out; }
+  .dot { animation: fade-in 0.16s ease-out; }
+  .s-working .dot, .dot.s-working { animation: fade-in 0.16s ease-out, breathe 2s ease-in-out 0.16s infinite; }
+  .live-status, .status-text { animation: fade-in 0.16s ease-out; }
+  .pulse { animation: count-pulse 0.3s ease-out; }
+
+  /* transcript and expanders */
+  .thread-scroll > :is(.msg, .notice, .toolstrip, .since), .transcript li { animation: fade-in 0.2s ease-out; }
+  .ship, .setup, .transcript, .ship-msg, .checks-error { animation: rise 0.18s ease-out; }
+  .modal { animation: fade-in 0.14s ease-out; }
+  .sheet { animation: rise 0.2s ease-out; }
+  .toast { animation: toast-in 0.18s ease-out; }
+
+  /* buttons: a slight press, quick hover */
+  .btn, .opt, .icon, .crew-btn, .since-chip, .link-btn, .text-link, .row, .live, .picker {
+    transition: background-color 0.1s ease-out, border-color 0.1s ease-out, color 0.1s ease-out, opacity 0.1s ease-out, transform 0.1s ease-out;
+  }
+  .btn:not(:disabled):active, .opt:active, .icon:active { transform: scale(0.97); }
+
+  /* Options and other disclosures animate open and closed */
+  @supports selector(::details-content) {
+    .opts { interpolate-size: allow-keywords; }
+    .opts::details-content { height: 0; opacity: 0; overflow: clip; transition: height 0.17s ease-in, opacity 0.12s ease-in, content-visibility 0.17s allow-discrete; }
+    .opts[open]::details-content { height: auto; opacity: 1; transition: height 0.2s ease-out, opacity 0.18s ease-out, content-visibility 0.2s allow-discrete; }
+  }
+}

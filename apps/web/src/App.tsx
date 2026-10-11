@@ -21,6 +21,7 @@ import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, F
 import { PairScreen, PhoneButton, PhoneHome, useNarrow } from "./phone.tsx";
 import { tokenize } from "./highlight.ts";
 import type { ThemedToken } from "shiki/core";
+import { Count, Slot, useExiting, useFlip, useLinger } from "./motion.tsx";
 import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, Usage, ago, churn, cost, pauseTitle, resumeTime, statusText, useTick } from "./bits.tsx";
 
 type Send = (c: Command) => void;
@@ -123,13 +124,20 @@ export function App() {
   }, [decisions, viewing, creating, help]);
 
   const sel = selected ? state.sessions[selected] : null;
+  // The drawer stays mounted briefly after closing so it can slide out.
+  const { shown: drawer, leaving: drawerLeaving } = useLinger(sel);
+  const drawerWas = useRef(false);
+  const drawerEnter = !!drawer && !drawerWas.current;
+  useEffect(() => {
+    drawerWas.current = !!drawer;
+  }, [drawer]);
 
   // A phone that isn't paired yet, or any window under 600px: the attention queue, nothing else.
   if (link === "unpaired") return <PairScreen />;
   if (narrow) return <PhoneHome state={state} send={send} link={link} />;
 
   return (
-    <div className={`app ${sel ? "with-drawer" : ""}`}>
+    <div className={`app ${drawer ? "with-drawer" : ""}`}>
       <Sidebar state={state} main={main} workers={workers} selected={selected} onSelect={open} onNew={() => setCreating(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} onAccounts={() => setAccounts(true)} connected={connected} filter={crewFilter} onClearFilter={() => setCrewFilter(null)} />
 
       <Thread
@@ -147,7 +155,7 @@ export function App() {
         firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} recent={recent} /> : null}
       />
 
-      {sel && <Drawer key={sel.id} s={sel} state={state} send={send} onClose={() => setSelected(null)} onFile={(path) => setViewing({ session: sel.id, path })} onOpen={open} />}
+      {drawer && <Drawer key={drawer.id} s={drawer} enter={drawerEnter} leaving={drawerLeaving} state={state} send={send} onClose={() => setSelected(null)} onFile={(path) => setViewing({ session: drawer.id, path })} onOpen={open} />}
 
       {creating && (
         <NewSession
@@ -213,6 +221,8 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
   const spent = [main, ...workers].reduce((n, s) => n + (s?.usage?.costUsd ?? 0), 0);
   const groups = new Map<string, SessionInfo[]>();
   for (const s of workers.filter((w) => !filter || crewMatch(filter, w))) groups.set(s.project, [...(groups.get(s.project) ?? []), s]);
+  // A session that changes status re-sorts; FLIP slides the rows to their new spots.
+  const scroll = useFlip<HTMLDivElement>([...groups.values()].flat().map((s) => s.id).join());
 
   return (
     <nav className="sidebar" aria-label="Sessions">
@@ -228,7 +238,7 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
       <div className="glance" aria-label="Status summary">
         {(["needs_you", "working", "failed", "done"] as const).map((k) => (
           <div key={k} className={`glance-cell s-${k} ${counts[k] ? "" : "zero"}`} title={STATUS_LABEL[k]}>
-            <b>{counts[k]}</b>
+            <Count n={counts[k]} />
             <span>{STATUS_LABEL[k]}</span>
           </div>
         ))}
@@ -241,12 +251,12 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
         <kbd>/</kbd>
       </button>
 
-      <div className="side-scroll">
+      <div className="side-scroll" ref={scroll}>
         {[...groups.entries()].map(([project, list]) => (
           <section key={project} className="side-group">
             <h3 className="eyebrow">{project.split("/").slice(-1)[0]}</h3>
             {list.map((s) => (
-              <button key={s.id} className={`row s-${s.status} ${selected === s.id ? "active" : ""} ${s.live === false ? "dormant" : ""}`} onClick={() => onSelect(selected === s.id ? null : s.id)} title={`${statusText(s)} · ${s.branch ?? s.project}`}>
+              <button key={s.id} data-flip={s.id} className={`row s-${s.status} ${selected === s.id ? "active" : ""} ${s.live === false ? "dormant" : ""}`} onClick={() => onSelect(selected === s.id ? null : s.id)} title={`${statusText(s)} · ${s.branch ?? s.project}`}>
                 <StatusGlyph s={s} />
                 <span className="row-title">{s.title}</span>
                 {s.status === "paused" && s.pause && <span className="row-note">{resumeTime(s.pause)}</span>}
@@ -293,6 +303,9 @@ function Thread({ crewFilter, onCrewFilter, state, main, send, onOpen, decisions
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
   const end = useRef<HTMLDivElement>(null);
+  // An answered card collapses out instead of vanishing; the ones after it slide up.
+  const cards = useExiting(decisions, (d) => d.id);
+  const needsList = useFlip<HTMLDivElement>(cards.map((c) => c.item.id).join());
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
   }, [items.length, decisions.length]);
@@ -318,17 +331,19 @@ function Thread({ crewFilter, onCrewFilter, state, main, send, onOpen, decisions
       </div>
 
       <div className="dock">
-        {decisions.length > 0 && (
+        {cards.length > 0 && (
           <div className="needs" aria-label="Needs you">
             <h2 className="eyebrow s-needs_you">
-              <span className="dot" /> Needs you <b>{decisions.length}</b>
+              <span className="dot" /> Needs you <Count n={decisions.length} />
             </h2>
-            <div className="needs-list">
-              {decisions.map((d, i) => (
-                <DecisionCard key={d.id} d={d} index={i === 0 ? undefined : undefined} session={state.sessions[d.sessionId]} onOpen={() => onOpen(d.sessionId)} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: d.id, optionId })} />
+            <div className="needs-list" ref={needsList}>
+              {cards.map(({ item: d, leaving }) => (
+                <Slot key={d.id} id={d.id} leaving={leaving}>
+                  <DecisionCard d={d} session={state.sessions[d.sessionId]} onOpen={() => onOpen(d.sessionId)} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: d.id, optionId })} />
+                </Slot>
               ))}
             </div>
-            <p className="hint">Press 1–{Math.min(9, decisions[0].options.length)} to answer the first card</p>
+            {decisions.length > 0 && <p className="hint">Press 1–{Math.min(9, decisions[0].options.length)} to answer the first card</p>}
           </div>
         )}
         <Composer
@@ -366,7 +381,7 @@ function CrewStrip({ state, filter, onFilter, onOpen }: { state: State; filter: 
           }}
         >
           <span className="dot" />
-          <b>{count}</b> {CREW_LABEL[key]}
+          <Count n={count} /> {CREW_LABEL[key]}
         </button>
       ))}
     </div>
@@ -483,7 +498,7 @@ function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: 
       <div className="live-top">
         <StatusGlyph s={s} />
         <span className="live-title">{s.title}</span>
-        <span className="live-status" title={pauseTitle(s)}>{statusText(s)}{pending > 1 ? ` · ${pending}` : ""}</span>
+        <span key={statusText(s)} className="live-status" title={pauseTitle(s)}>{statusText(s)}{pending > 1 ? ` · ${pending}` : ""}</span>
         <span className="age">{ago(s.updatedAt)}</span>
       </div>
       <div className="live-meta">
@@ -731,13 +746,15 @@ function DeclaredChecks({ s, send }: { s: SessionInfo; send: Send }) {
 
 /* ───────────── Drawer: deep dive into one session ───────────── */
 
-function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; state: State; send: Send; onClose: () => void; onFile: (path: string) => void; onOpen: (id: string) => void }) {
+function Drawer({ s, enter, leaving, state, send, onClose, onFile, onOpen }: { s: SessionInfo; enter: boolean; leaving: boolean; state: State; send: Send; onClose: () => void; onFile: (path: string) => void; onOpen: (id: string) => void }) {
   const [showTranscript, setShowTranscript] = useState(false);
+  const [slideIn] = useState(enter); // only the open animates, not switching between sessions
   const outcome = state.outcomes[s.id];
   const files = state.changes[s.id] ?? [];
   const transcript = state.transcripts[s.id] ?? [];
   const tools = transcript.filter((t) => t.kind === "tool");
   const decisions = Object.values(state.decisions).filter((d) => d.sessionId === s.id);
+  const pending = useExiting(decisions, (d) => d.id);
   const lastAgent = [...transcript].reverse().find((t) => t.kind === "agent");
   const parent = s.parentId ? state.sessions[s.parentId] : undefined;
   // Merged: the work landed and the worktree is gone, so the session takes no more prompts.
@@ -746,13 +763,13 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
   const failure = retry ? transcript[retry.index] : undefined;
 
   return (
-    <aside className={`drawer s-${s.status}`} aria-label="Session detail">
+    <aside className={`drawer s-${s.status} ${slideIn ? "enter" : ""} ${leaving ? "leave" : ""}`} aria-label="Session detail">
       <div className="drawer-head drag">
         <StatusGlyph s={s} />
         <div className="drawer-title">
           <h2>{s.title}</h2>
           <p>
-            {s.status === "paused" ? <Paused s={s} send={send} /> : <span className="status-text">{statusText(s)}</span>}
+            {s.status === "paused" ? <Paused s={s} send={send} /> : <span key={statusText(s)} className="status-text">{statusText(s)}</span>}
             {s.progress && s.status === "working" && <> · {s.progress.phase} {s.progress.step}/{s.progress.of}</>}
             {s.live === false && <> · asleep</>}
           </p>
@@ -782,8 +799,10 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
       <div className="drawer-scroll">
         <SetupBar s={s} send={send} />
         {retry && failure?.kind === "notice" && <FailureNotice text={failure.text} onRetry={() => send({ type: "session.prompt", sessionId: s.id, prompt: retry.prompt })} />}
-        {decisions.map((d) => (
-          <DecisionCard key={d.id} d={d} session={s} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: d.id, optionId })} />
+        {pending.map(({ item: d, leaving }) => (
+          <Slot key={d.id} id={d.id} leaving={leaving} className="in-drawer">
+            <DecisionCard d={d} session={s} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: d.id, optionId })} />
+          </Slot>
         ))}
 
         <ShipBar s={s} files={files.length} send={send} />

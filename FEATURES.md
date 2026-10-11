@@ -20,6 +20,7 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 
 ## Decisions and permissions
 - ✅ Needs-you dock: permission asks and agent decisions as one-click cards.
+- ✅ Subtle motion shows what changed: drawer slides, answered cards collapse, sidebar rows slide (FLIP), status dots cross-fade, expanders animate; off with reduced-motion.
 - ✅ Destructive-command and permission rules enforced by the daemon (Claude); Codex is best-effort.
 
 ## Proof and checks
