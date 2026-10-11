@@ -84,13 +84,20 @@ export function SessionDetail({ s, state, send, onBack, onOpen, leadNew }: { s: 
           <span className="sp" />
           {primary}
         </div>
-        <h2 className="d-title">{s.title}</h2>
+        <h2 className="d-title">
+          {parent && (
+            <>
+              <button className="crumb" onClick={() => onOpen(parent.id)} title="The session that started this one">{parent.title}</button>
+              <span className="crumb-sep" aria-hidden>›</span>
+            </>
+          )}
+          {s.title}
+        </h2>
         <div className="d-sub">
           <span title={AGENTS[s.agent].experimental ? "Experimental: less tested than Claude Code" : undefined}>{AGENTS[s.agent].label}</span>
           <ModelPicker s={s} state={state} send={send} />
           <ModePicker value={s.mode ?? "ask"} onChange={(mode) => send({ type: "session.setMode", sessionId: s.id, mode })} />
           <Usage s={s} />
-          {parent && <button className="text-link" onClick={() => onOpen(parent.id)} title="The session that started this one">from {parent.title}</button>}
           <span className="sp" />
           <button className="btn small ghost" onClick={() => { send({ type: "session.archive", sessionId: s.id }); onBack(); }}>Archive</button>
         </div>

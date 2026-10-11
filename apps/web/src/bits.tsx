@@ -4,6 +4,9 @@ import { isFailureNotice } from "./onboarding.tsx";
 
 type Send = (c: Command) => void;
 
+/** The one placeholder for the lead's composer, in the real app and the demo, with or without a lead session. */
+export const LEAD_PLACEHOLDER = "Ask Perzian, or tell it what to build…";
+
 export const STATUS_LABEL: Record<SessionStatus, string> = { needs_you: "Needs you", working: "Working", failed: "Failed", done: "Done", idle: "Idle", paused: "Paused" };
 
 /** "3:40 pm", or "Tue 3:40 pm" when it isn't today; "~" when the agent gave no reset time. */
@@ -91,7 +94,7 @@ export function churn(files: FileChange[]) {
 // One small mark per state: blue pulsing dot (working, or its step ring), amber dot (needs you), red dot (failed),
 // green check (done), hollow grey ring (paused or asleep). Dots and checks only; the tile carries the rest.
 export function StatusGlyph({ s }: { s: SessionInfo }) {
-  if (s.status === "working" && s.progress) return <Ring step={s.progress.step} of={s.progress.of} />;
+  if (s.status === "working" && s.progress) return <Ring step={s.progress.step} of={s.progress.of} size={14} />;
   if (s.status === "done")
     return (
       <svg key="done" className="chk" viewBox="0 0 12 12" width="11" height="11" aria-hidden>

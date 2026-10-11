@@ -1,10 +1,10 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { isUnseen, type Command, type Decision, type SessionInfo, type SessionStatus, type State } from "@perzian/protocol";
 import { explainFailure, isFailureNotice } from "./onboarding.tsx";
 import { PhoneButton } from "./phone.tsx";
 import { useFlip } from "./motion.tsx";
 import { Chips, OutsideTag, StatusGlyph, cost, denyOption, statusText, useFocusOnMount } from "./bits.tsx";
-import { isDemo } from "./daemon.ts";
+import { isDemo, isDesktop } from "./daemon.ts";
 
 type Send = (c: Command) => void;
 
@@ -93,22 +93,76 @@ function TileAnswer({ d, send }: { d: Decision; send: Send }) {
   );
 }
 
-function Tile({ s, state, send, selected, onOpen, parent }: { s: SessionInfo; state: State; send: Send; selected: boolean; onOpen: (id: string) => void; parent?: SessionInfo }) {
+/** A sub-session inside its parent's card: one line, no card of its own; the rail and elbow come from the parent. */
+function Kid({ s, state, selected, onOpen }: { s: SessionInfo; state: State; selected: boolean; onOpen: (id: string) => void }) {
+  const pending = Object.values(state.decisions).filter((d) => d.sessionId === s.id).sort((a, b) => a.createdAt - b.createdAt);
+  const word = s.status === "needs_you" ? "Needs you" : s.status === "failed" ? "Failed" : s.status === "paused" ? "Paused" : s.status === "working" ? tileLine(s, state, pending) : "";
+  const open = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+    onOpen(s.id);
+  };
+  return (
+    <div
+      className={`kid s-${s.status} ${selected ? "sel" : ""}`}
+      role="button"
+      tabIndex={0}
+      data-tile={s.id}
+      aria-current={selected ? "true" : undefined}
+      title={`${s.title} · ${statusText(s)}`}
+      onClick={open}
+      onKeyDown={(e) => {
+        if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
+          e.preventDefault();
+          open(e);
+        }
+      }}
+    >
+      <StatusGlyph s={s} />
+      <span className="kid-title">{s.title}</span>
+      {word && <span className="kid-state">{word}</span>}
+    </div>
+  );
+}
+
+const KIDS_FOLD = 3;
+
+function Tile({ s, state, send, selected, onOpen, kids = [], selectedId }: { s: SessionInfo; state: State; send: Send; selected: boolean; onOpen: (id: string) => void; kids?: SessionInfo[]; selectedId?: string | null }) {
   const pending = Object.values(state.decisions)
     .filter((d) => d.sessionId === s.id)
     .sort((a, b) => a.createdAt - b.createdAt);
   const line = tileLine(s, state, pending);
   const done = s.status === "done" || s.status === "idle";
   const first = pending[0];
+  const [kidsOpen, setKidsOpen] = useState(false);
+  const fold = kids.length > KIDS_FOLD && !kidsOpen;
+  // A child that needs you (or is open) stays visible even when the list is folded.
+  const shownKids = fold ? kids.filter((k) => k.status === "needs_you" || k.id === selectedId) : kids;
+  const kidNeeds = kids.some((k) => k.status === "needs_you");
+  const card = useRef<HTMLDivElement>(null);
+  // The rail starts under the parent's status dot, so measure how far down the kids list begins.
+  useLayoutEffect(() => {
+    const el = card.current;
+    if (!el || !kids.length) return;
+    const set = () => {
+      const head = el.querySelector<HTMLElement>(".t-head");
+      const list = el.querySelector<HTMLElement>(".t-kids");
+      if (head && list) el.style.setProperty("--up", `${Math.max(0, list.offsetTop - (head.offsetTop + head.offsetHeight / 2 + 6))}px`);
+    };
+    set();
+    const ro = new ResizeObserver(set);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
   return (
     <div
-      className={`ctile s-${s.status} ${parent ? "child" : ""} ${selected ? "sel" : ""} ${done ? "compact" : ""} ${isUnseen(s) ? "unseen-row" : ""} ${first?.destructive ? "destructive" : ""}`}
+      ref={card}
+      className={`ctile s-${s.status} ${kids.length ? "has-kids" : ""} ${kidNeeds && s.status !== "needs_you" ? "kid-needs" : ""} ${selected ? "sel" : ""} ${done ? "compact" : ""} ${isUnseen(s) ? "unseen-row" : ""} ${first?.destructive ? "destructive" : ""}`}
       role="button"
       tabIndex={0}
       data-tile={s.id}
       data-flip={s.id}
       aria-current={selected ? "true" : undefined}
-      title={`${s.title} · ${statusText(s)}${s.branch ? ` · ${s.branch}` : ""}${parent ? ` · from ${parent.title}` : ""}`}
+      title={`${s.title} · ${statusText(s)}${s.branch ? ` · ${s.branch}` : ""}`}
       onClick={() => onOpen(s.id)}
       onKeyDown={(e) => {
         if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
@@ -132,6 +186,16 @@ function Tile({ s, state, send, selected, onOpen, parent }: { s: SessionInfo; st
         <div onClick={(e) => e.stopPropagation()}>
           <TileAnswer d={first} send={send} />
           {pending.length > 1 && <p className="t-more">+{pending.length - 1} more waiting</p>}
+        </div>
+      )}
+      {kids.length > 0 && (
+        <div className="t-kids" onClick={(e) => e.stopPropagation()}>
+          {kids.length > KIDS_FOLD && (
+            <button className="kids-toggle" aria-expanded={!fold} onClick={() => setKidsOpen((v) => !v)}>
+              {kids.length} sub-sessions <span aria-hidden>{fold ? "▸" : "▾"}</span>
+            </button>
+          )}
+          {shownKids.map((k) => <Kid key={k.id} s={k} state={state} selected={selectedId === k.id} onOpen={onOpen} />)}
         </div>
       )}
     </div>
@@ -181,30 +245,25 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
 
   return (
     <nav className="crewcol" aria-label="Crew" onMouseEnter={() => setHeld(true)} onMouseLeave={() => setHeld(false)}>
-      <div className="side-head drag">
-        <span className="brand">
+      <div className={`side-head drag${isDesktop ? " inset" : ""}`}>
+        <span className="brand" aria-label="Perzian">
           <span className="mark" aria-hidden />
-          Perzian
           {isDemo && <span className="tag">demo</span>}
+          {!connected && <span className="conn off" role="status" aria-label="Daemon offline" title="Daemon offline" />}
         </span>
-        <span className={`conn ${connected ? "on" : "off"}`} title={connected ? "Daemon connected" : "Daemon offline"} />
       </div>
       <Summary workers={workers} />
 
       <div className="crew-list" ref={scroll}>
         {[...groups.entries()].map(([project, list]) => {
-          // A session started by another session nests under it, indented, when both live in this project.
+          // A session started by another session lives inside its parent's card (all descendants, flat) when both are in this project.
           const parentOf = (x: SessionInfo) => (x.parentId && x.parentId !== "main" ? list.find((p) => p.id === x.parentId) : undefined);
+          const kidsOf = (id: string): SessionInfo[] => list.filter((c) => c.parentId === id).flatMap((c) => [c, ...kidsOf(c.id)]);
           const top = list.filter((x) => !parentOf(x));
           const active = top.filter((x) => x.status !== "done");
           const done = top.filter((x) => x.status === "done");
           const fold = done.length > DONE_FOLD && !open.has(project);
-          const row = (x: SessionInfo) => (
-            <div key={x.id} className="crew-nest">
-              <Tile s={x} state={state} send={send} selected={selected === x.id} onOpen={onOpen} />
-              {list.filter((c) => c.parentId === x.id).map((c) => <Tile key={c.id} s={c} parent={x} state={state} send={send} selected={selected === c.id} onOpen={onOpen} />)}
-            </div>
-          );
+          const row = (x: SessionInfo) => <Tile key={x.id} s={x} state={state} send={send} selected={selected === x.id} selectedId={selected} onOpen={onOpen} kids={kidsOf(x.id)} />;
           return (
             <section key={project} className="crew-group">
               <h3 className="grp-h" title={project}>
@@ -233,7 +292,6 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
             </section>
           );
         })}
-        {workers.length === 0 && <p className="quiet crew-empty">Ask Perzian for something and its sessions show up here.</p>}
       </div>
 
       <div className="crew-foot">

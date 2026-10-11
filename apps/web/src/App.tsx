@@ -3,7 +3,7 @@ import { AGENTS, isUnseen, type Command, type SessionInfo, type State, type Tran
 import { isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
 import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, readiness, saveProject, withProject } from "./onboarding.tsx";
 import { PairScreen, PhoneHome, useNarrow } from "./phone.tsx";
-import { Composer, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
+import { Composer, LEAD_PLACEHOLDER, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
 import { Crew } from "./crew.tsx";
 import { SessionDetail } from "./detail.tsx";
 
@@ -246,7 +246,6 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
         {link === "refused" && <DaemonRefused />}
         {link === "offline" && (empty ? <DaemonOffline /> : <OfflineBanner />)}
         {firstRun}
-        {!main && !firstRun && !(link === "offline" && empty) && link !== "connecting" && link !== "refused" && <Welcome />}
         <ThreadItems items={items} state={state} onOpen={onOpen} retry={retry && main ? { index: retry.index, run: () => send({ type: "session.prompt", sessionId: main.id, prompt: retry.prompt }) } : undefined} />
         <div ref={end} />
       </div>
@@ -273,7 +272,7 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
         <Composer
           id="main-composer"
           to="Perzian"
-          placeholder={main ? "Ask Perzian, or tell it what to build…" : "What should it do? e.g. Fix the failing test"}
+          placeholder={LEAD_PLACEHOLDER}
           focus={focus}
           busy={main?.status === "working"}
           blocked={main ? undefined : blocked}
@@ -294,14 +293,6 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
         />
       </div>
     </main>
-  );
-}
-
-function Welcome() {
-  return (
-    <div className="welcome">
-      <div className="welcome-mark" aria-hidden />
-    </div>
   );
 }
 
@@ -368,15 +359,19 @@ function Paused({ s, send }: { s: SessionInfo; send: Send }) {
 // A spawned session, inline in the conversation as one line, updating live. Branch, files and
 // proof live in its detail view one click away.
 function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: () => void }) {
+  // The glyph (dot, check, ring) already says working and done; words stay where a dot is ambiguous: needs you, failed, paused, setup.
+  const word = !(s.status === "done" || s.status === "idle" || (s.status === "working" && s.setup?.state !== "running"));
+  // A session another session started: same rail and elbow as the crew column, indented.
+  const nested = !!s.parentId && s.parentId !== "main" && state.sessions[s.parentId]?.role !== "main";
   const files = state.changes[s.id] ?? [];
   const { add, del } = churn(files);
   const detail = [s.branch, AGENTS[s.agent].label, files.length ? `${files.length} files +${add} −${del}` : ""].filter(Boolean).join(" · ");
   return (
-    <button className={`live s-${s.status}`} onClick={onOpen} title={detail}>
+    <button className={`live s-${s.status}${nested ? " nested" : ""}`} onClick={onOpen} title={detail}>
       <span className="live-arrow" aria-hidden>↳</span>
       <StatusGlyph s={s} />
       <span className="live-title">{s.title}</span>
-      <span key={statusText(s)} className="live-status" title={pauseTitle(s)}>{statusText(s)}</span>
+      {word && <span key={statusText(s)} className="live-status" title={pauseTitle(s)}>{statusText(s)}</span>}
     </button>
   );
 }

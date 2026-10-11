@@ -31,16 +31,16 @@ export function recentProjects(state: State): string[] {
 }
 
 /** Folder choice: native picker button (desktop), recent-project chips, typed path as the small fallback. */
-export function FolderPicker({ id, project, setProject, recent, onPicked, autoFocus, inputClass }: { id: string; project: string; setProject: (p: string) => void; recent: string[]; onPicked: () => void; autoFocus?: boolean; inputClass?: string }) {
+export function FolderPicker({ id, project, setProject, recent, onPicked, autoFocus, inputClass, first }: { id: string; project: string; setProject: (p: string) => void; recent: string[]; onPicked: () => void; autoFocus?: boolean; inputClass?: string; first?: boolean }) {
   const pick = window.perzian?.pickFolder;
   const choose = (p: string) => {
     setProject(p);
     onPicked();
   };
   return (
-    <div className="folder-pick">
+    <div className={`folder-pick${first ? " first" : ""}`}>
       {pick && (
-        <button type="button" className="btn" onClick={() => void pick().then((p) => p && choose(p)).catch(() => {})}>
+        <button type="button" className={`btn${first ? " primary choose" : ""}`} onClick={() => void pick().then((p) => p && choose(p)).catch(() => {})}>
           Choose folder…
         </button>
       )}
@@ -59,7 +59,7 @@ export function FolderPicker({ id, project, setProject, recent, onPicked, autoFo
         required
         value={project}
         onChange={(e) => setProject(e.target.value)}
-        placeholder={pick ? "or type a path" : "Project folder, e.g. ~/code/app"}
+        placeholder={pick ? "Or type a path, e.g. ~/code/app" : "Type a project path, e.g. ~/code/app"}
         spellCheck={false}
         autoComplete="off"
         autoFocus={autoFocus}
@@ -160,8 +160,9 @@ export function Onboarding({ doctor, project, setProject, recent }: { doctor: Do
 
   return (
     <div className="onboard">
-      <div className="welcome-mark" aria-hidden />
+      <h2 className="onboard-h">Pick a project to start</h2>
       <FolderPicker
+        first
         id="onboard-project"
         inputClass="step-input"
         project={project}
