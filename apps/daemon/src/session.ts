@@ -63,6 +63,9 @@ function toolName(update: { _meta?: Record<string, unknown> | null }): string | 
   return typeof n === "string" ? n : undefined;
 }
 const OWN_TOOL = /^mcp__perzian__|^perzian[_.]/;
+// Claude loads the developer's and the repo's settings; an allow rule there would answer before the daemon
+// ever sees the request. Ask rules beat allow rules, so these send every shell command and edit to us.
+const CLAUDE_META = { claudeCode: { options: { settings: { permissions: { ask: ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"] } } } } };
 const isTerminal = (status: string) => status === "completed" || status === "failed" || status === "cancelled";
 
 export interface PendingDecision {
@@ -274,12 +277,13 @@ export class AgentSession {
       },
     ];
 
+    const meta = this.info.agent === "claude-code" ? { _meta: CLAUDE_META } : {};
     let res: acp.NewSessionResponse | acp.LoadSessionResponse | undefined;
     if (this.info.acpSessionId && init.agentCapabilities?.loadSession) {
       // Replay is suppressed: we already have the transcript in our log.
       this.replaying = true;
       try {
-        res = await Promise.race([died, conn.loadSession({ sessionId: this.info.acpSessionId, cwd: this.info.cwd, mcpServers })]);
+        res = await Promise.race([died, conn.loadSession({ sessionId: this.info.acpSessionId, cwd: this.info.cwd, mcpServers, ...meta })]);
         this.turn = 1; // the preamble is already part of the restored conversation
         this.notice("Reattached to the previous conversation");
       } catch (err) {
@@ -291,9 +295,10 @@ export class AgentSession {
     }
     if (!res) {
       if (this.info.acpSessionId) this.notice("Previous conversation could not be restored; starting fresh");
-      const created = await Promise.race([died, conn.newSession({ cwd: this.info.cwd, mcpServers })]);
+      const created = await Promise.race([died, conn.newSession({ cwd: this.info.cwd, mcpServers, ...meta })]);
       res = created;
       this.turn = 0;
+      this.meter?.restart(false); // a new conversation's cost can't include what we already counted
       this.update({ acpSessionId: created.sessionId });
     }
     this.conn = conn;
@@ -822,7 +827,8 @@ export class AgentSession {
           toolKind: kind ?? undefined,
           command,
           title,
-          own: OWN_TOOL.test(title) || OWN_TOOL.test(toolName(params.toolCall) ?? "") || !!known?.own,
+          // A shell command's title is the command itself, so `perzian_x` there is not our tool.
+          own: kind !== "execute" && command === undefined && (OWN_TOOL.test(title) || OWN_TOOL.test(toolName(params.toolCall) ?? "") || !!known?.own),
           declared: this.info.declaredChecks?.map((c) => c.run),
         });
         const pick = (...kinds: acp.PermissionOptionKind[]) => kinds.map((k) => params.options.find((o) => o.kind === k)).find(Boolean);

@@ -89,8 +89,21 @@ async function prBlocker(cwd: string): Promise<string | undefined> {
   return undefined;
 }
 
+export const isShipHow = (how: unknown): how is "merge" | "pr" => how === "merge" || how === "pr";
+
+/** Why shipping now would take the worktree out from under an agent still at work in it. */
+export function busyReason(info: SessionInfo): string | undefined {
+  if (info.status === "working" || info.status === "needs_you") return "Wait for the agent to finish (or stop it), then ship.";
+  if (info.status === "paused") return "This session is paused at a usage limit and picks up again later. Wait for it to finish (or stop it), then ship.";
+  if (info.setup?.state === "running") return "The worktree is still being set up. Wait for it to finish, then ship.";
+  return undefined;
+}
+
 export async function ship(info: SessionInfo, how: "merge" | "pr", stop: () => void): Promise<ShipState> {
+  if (!isShipHow(how)) throw new Error(`Unknown ship method: ${String(how)}`);
   const fail = (detail: string): ShipState => ({ state: "error", how, detail, at: Date.now() });
+  const busy = busyReason(info);
+  if (busy) return fail(busy);
   if (!info.worktree || !info.branch) return fail("This session worked in your checkout directly, so there's no branch to ship.");
   const wt = info.cwd;
   const branch = info.branch;

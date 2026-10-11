@@ -34,6 +34,30 @@ describe("UsageMeter", () => {
     assert.equal(m.read(usd(1.3))?.costUsd, 1.3);
   });
 
+  test("a small dip within one process is noise, not a restart", () => {
+    const m = new UsageMeter();
+    m.restart();
+    m.read(usd(1));
+    assert.equal(m.read(usd(0.9)), null);
+    assert.equal(m.read(usd(1.1))?.costUsd, 1.1);
+  });
+
+  test("a resumed process slightly below the stored total isn't counted twice", () => {
+    const m = new UsageMeter({ costUsd: 1 });
+    m.restart();
+    assert.equal(m.read(usd(0.98))?.costUsd, 1, "stays at 1");
+    assert.ok(Math.abs(m.read(usd(1.2))!.costUsd! - 1.22) < 1e-9);
+  });
+
+  test("a fresh conversation after a restart adds to the stored total, however large its first reading", () => {
+    const m = new UsageMeter({ costUsd: 0.1 });
+    m.restart();
+    m.restart(false);
+    assert.ok(Math.abs(m.read(usd(0.3))!.costUsd! - 0.4) < 1e-9);
+    m.restart(false);
+    assert.ok(Math.abs(m.read(usd(0.5))!.costUsd! - 0.9) < 1e-9);
+  });
+
   test("ignores non-USD and bad amounts, keeps context, and skips tiny moves", () => {
     const m = new UsageMeter({ costUsd: 0.5 });
     m.restart();

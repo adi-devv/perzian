@@ -59,6 +59,20 @@ describe("ship", () => {
     assert.match((await ship(info, "merge", () => {})).detail ?? "", /started from main/);
   });
 
+  test("refuses while the agent is still at work, and an unknown method", async () => {
+    const { project, info } = await setup();
+    writeFileSync(join(info.cwd, "b.txt"), "b\n");
+    for (const status of ["working", "needs_you", "paused"] as const) {
+      const r = await ship({ ...info, status }, "merge", () => assert.fail("stopped"));
+      assert.equal(r.state, "error", status);
+      assert.match(r.detail ?? "", /Wait for/);
+    }
+    assert.match((await ship({ ...info, setup: { state: "running", copied: [], install: [] } } as SessionInfo, "pr", () => {})).detail ?? "", /still being set up/);
+    await assert.rejects(ship(info, "rebase" as "merge", () => {}), /Unknown ship method/);
+    assert.equal(git(project, "log", "--oneline").split("\n").length, 1, "nothing landed");
+    assert.ok(existsSync(join(info.cwd, "b.txt")));
+  });
+
   test("a session in the checkout itself has nothing to ship", async () => {
     const r = await ship({ worktree: false } as SessionInfo, "merge", () => {});
     assert.equal(r.state, "error");

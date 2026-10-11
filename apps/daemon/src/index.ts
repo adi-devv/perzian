@@ -9,20 +9,21 @@ import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps 
 import * as git from "./git.ts";
 import { listClaudeSessions, toEvents } from "./importer.ts";
 import { mergeProofs } from "./proof.ts";
-import { assertPromptable, interruptedShip, ship } from "./ship.ts";
+import { assertPromptable, interruptedShip, isShipHow, ship } from "./ship.ts";
 import { doctor, doctorHeaders, installCommand, resetDoctorCache } from "./doctor.ts";
 import { Credentials, PROVIDERS } from "./credentials.ts";
 import { exec } from "node:child_process";
 import { allChecks, detectChecks, loadDeclaredChecks } from "./checks.ts";
 import { LeadNotifier, type ChildReport } from "./notify.ts";
 import { ResumeQueue } from "./resume.ts";
-import { trustedOrigin } from "./origin.ts";
+import { loadDesktopToken, trustedOrigin } from "./origin.ts";
 import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
 
 const port = Number(process.env.PERZIAN_PORT ?? DAEMON_PORT);
 const home = resolve(process.env.PERZIAN_HOME ?? join(homedir(), ".perzian"));
 const daemonUrl = `http://127.0.0.1:${port}`;
 const store = new EventStore(home);
+loadDesktopToken(home);
 {
   const b = store.boot;
   const c = b.compacted ? `, compacted to ${b.compacted.events} events (${(b.compacted.bytes / 1e6).toFixed(2)} MB; previous log in events.jsonl.bak)` : "";
@@ -149,7 +150,9 @@ resumeQueue.attach(store);
 const expand = (p: string) => resolve(p.replace(/^~(?=$|\/)/, homedir()));
 
 async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "worker"; parentId?: string } = {}): Promise<AgentSession> {
-  const project = expand(args.project);
+  // An empty path would resolve to the daemon's own folder.
+  if (!args.project?.trim()) throw new Error("No project folder given");
+  const project = expand(args.project.trim());
   if (!existsSync(project) || !statSync(project).isDirectory()) throw new Error(`Project folder not found: ${project}`);
   const id = crypto.randomUUID();
   const title = args.title?.trim() || args.prompt.split("\n")[0].slice(0, 48) || basename(project);
@@ -161,6 +164,7 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
     { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode, checks, declaredChecks: declared.checks, checksError: declared.error, ...extra },
     deps,
   );
+  if (args.worktree && !ws.worktree) s.notice("This folder isn't a git repo, so the session works in it directly (no worktree)");
   if (declared.error) s.notice(`${declared.error}. Declared checks won't run until it's fixed.`);
   notifier.childPrompted(s.info.id, !!extra.parentId);
   sessions.set(s.info.id, s);
@@ -237,6 +241,7 @@ async function handleCommand(cmd: Command): Promise<void> {
     }
     case "session.ship": {
       if (!s) throw new Error("Unknown session");
+      if (!isShipHow(cmd.how)) throw new Error(`Unknown ship method: ${String(cmd.how)}`);
       if (s.info.ship?.state === "shipping") break;
       s.setShip({ state: "shipping", how: cmd.how, at: Date.now() });
       const result = await ship(s.info, cmd.how, () => s.dispose());
@@ -341,14 +346,15 @@ async function readBody(req: import("node:http").IncomingMessage): Promise<strin
 const http = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", daemonUrl);
   const origin = req.headers.origin;
-  if (!trustedOrigin(origin)) {
+  const token = url.searchParams.get("t");
+  if (!trustedOrigin(origin, token)) {
     res.writeHead(403, { "content-type": "text/plain" }).end("forbidden origin");
     return;
   }
-  const json = (status: number, body: unknown) => res.writeHead(status, doctorHeaders(origin)).end(JSON.stringify(body));
+  const json = (status: number, body: unknown) => res.writeHead(status, doctorHeaders(origin, token)).end(JSON.stringify(body));
   try {
     if (req.method === "OPTIONS") {
-      res.writeHead(204, { ...doctorHeaders(origin), "access-control-allow-methods": "GET, POST, DELETE", "access-control-allow-headers": "content-type" }).end();
+      res.writeHead(204, { ...doctorHeaders(origin, token), "access-control-allow-methods": "GET, POST, DELETE", "access-control-allow-headers": "content-type" }).end();
       return;
     }
     if (url.pathname === "/api/credentials") {
@@ -378,7 +384,7 @@ const http = createServer(async (req, res) => {
     }
     if (url.pathname === "/api/doctor") {
       const report = await doctor(home, { project: url.searchParams.get("project") ?? undefined, fresh: url.searchParams.has("fresh"), creds });
-      res.writeHead(200, doctorHeaders(req.headers.origin)).end(JSON.stringify(report));
+      res.writeHead(200, doctorHeaders(origin, token)).end(JSON.stringify(report));
       return;
     }
     if (url.pathname === "/api/diff" || url.pathname === "/api/file") {
@@ -391,11 +397,11 @@ const http = createServer(async (req, res) => {
     }
     res.writeHead(200, { "content-type": "text/plain" }).end("perzian daemon");
   } catch (e) {
-    res.writeHead(400, { "content-type": "text/plain", ...(origin && trustedOrigin(origin) ? { "access-control-allow-origin": origin } : {}) }).end(String((e as Error).message ?? e));
+    res.writeHead(400, { "content-type": "text/plain", ...(origin && trustedOrigin(origin, token) ? { "access-control-allow-origin": origin } : {}) }).end(String((e as Error).message ?? e));
   }
 });
 
-const wss = new WebSocketServer({ server: http, path: "/ws", verifyClient: ({ origin }: { origin?: string }) => trustedOrigin(origin) });
+const wss = new WebSocketServer({ server: http, path: "/ws", verifyClient: ({ origin, req }: { origin?: string; req: { url?: string } }) => trustedOrigin(origin, new URL(req.url ?? "/", daemonUrl).searchParams.get("t")) });
 const send = (ws: WebSocket, msg: ServerMessage) => ws.readyState === ws.OPEN && ws.send(JSON.stringify(msg));
 
 wss.on("connection", (ws) => {

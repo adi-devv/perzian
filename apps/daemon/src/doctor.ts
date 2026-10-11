@@ -118,9 +118,9 @@ export async function doctor(perzianHome: string, opts: { project?: string; fres
 
 // The desktop app loads the UI from file:// (origin "null"); dev goes through the Vite proxy (same origin).
 // Only those, never arbitrary websites, may read the report.
-export function doctorHeaders(origin: string | undefined): Record<string, string> {
+export function doctorHeaders(origin: string | undefined, token?: string | null): Record<string, string> {
   const h: Record<string, string> = { "content-type": "application/json", "cache-control": "no-store" };
-  const allow = corsOrigin(origin);
+  const allow = corsOrigin(origin, token);
   if (allow) h["access-control-allow-origin"] = allow;
   return h;
 }

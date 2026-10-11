@@ -48,6 +48,8 @@ export function permissionPolicy(req: PermissionRequest): PermissionVerdict {
   if (req.toolKind === "execute" && req.command !== undefined && isVerificationCommand(req.command)) return { action: "allow", why: "check" };
   // Exactly a declared check's command (surrounding whitespace aside); anything added to it asks as usual.
   if (req.toolKind === "execute" && req.command !== undefined && req.declared?.includes(req.command.trim())) return { action: "allow", why: "declared" };
+  // Claude asks about every shell command now (see session.ts), including plain looking around.
+  if (req.toolKind === "execute" && req.command !== undefined && isReadOnlyCommand(req.command)) return { action: "allow", why: "read" };
   if (req.mode === "auto") return { action: "allow", why: "auto" };
   if (req.mode === "edits" && req.toolKind && WORKER_EDITS.has(req.toolKind)) return { action: "allow", why: "edits" };
   return { action: "ask" };
@@ -88,7 +90,8 @@ function words(cmd: string): string[] | null {
 
 const SAFE_ENV = /^(CI|NODE_ENV|FORCE_COLOR|NO_COLOR|TZ)=[\w.:-]*$/;
 const CHECK_SCRIPT = /^(test|tests|unit|e2e|typecheck|type-check|types|check-types|tsc|lint|build|check|verify|(format|fmt|prettier):check)([:_-][\w.-]+)*$/i;
-const NOT_A_CHECK = /[:_-](fix|watch|dev|serve|start|update|write|clean|deploy|publish|release)$/i;
+// Any segment, not just the last: build:deploy:prod and test:reset-db aren't checks.
+const NOT_A_CHECK = /[:_-](fix|watch|dev|serve|start|update|write|clean|deploy|publish|release|reset|prod|production|migrate|seed|drop|push)(?=[:_.-]|$)/i;
 const isCheckScript = (s: string | undefined) => !!s && CHECK_SCRIPT.test(s) && !NOT_A_CHECK.test(s);
 
 // Flags a package manager may take before the script without changing what runs.
@@ -141,9 +144,9 @@ function runnerOk(prog: string, args: string[]): boolean {
     case "tsgo":
       return flagged(args, "--noEmit") && !flagged(args, "--watch", "-w");
     case "vitest":
-      return !["watch", "dev", "bench"].includes(args[0] ?? "") && !flagged(args, "--watch", "-w", "--ui", "-u", "--update");
+      return !["watch", "dev", "bench"].includes(args[0] ?? "") && !flagged(args, "--watch", "-w", "--ui", "-u", "--update") && !args.some((a) => a.startsWith("--outputFile")); // also --outputFile.junit=...
     case "jest":
-      return !flagged(args, "--watch", "--watchAll", "-u", "--updateSnapshot");
+      return !flagged(args, "--watch", "--watchAll", "-u", "--updateSnapshot", "--outputFile");
     case "mocha":
     case "ava":
       return !flagged(args, "--watch", "-w", "--update-snapshots", "-u");
@@ -153,7 +156,7 @@ function runnerOk(prog: string, args: string[]): boolean {
     case "eslint":
     case "oxlint":
     case "stylelint":
-      return !flagged(args, "--fix", "--fix-type");
+      return !flagged(args, "--fix", "--fix-type", "--output-file", "-o");
     case "prettier":
       return flagged(args, "--check", "-c", "--list-different", "-l") && !flagged(args, "--write", "-w");
     case "biome":
@@ -164,6 +167,7 @@ function runnerOk(prog: string, args: string[]): boolean {
       return args[0] === "run";
     case "pytest":
     case "py.test":
+      return !flagged(args, "--basetemp"); // pytest empties --basetemp before using it
     case "mypy":
     case "pyright":
     case "flake8":
@@ -329,7 +333,8 @@ function looseWords(part: string): string[] {
   return out.filter((x) => !/^\d*[<>]/.test(x));
 }
 
-const base = (w: string) => w.replace(/^.*\//, "");
+// \rm skips aliases but is still rm.
+const base = (w: string) => w.replace(/^\\/, "").replace(/^.*\//, "");
 const ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const PREFIXES = new Set(["sudo", "doas", "env", "time", "nice", "nohup", "command", "exec", "xargs", "timeout", "caffeinate", "npx", "pnpx", "bunx"]);
 
@@ -368,11 +373,15 @@ function gitReason(args: string[]): string | null {
     case "clean":
       return longFlag(rest, "--force") || shortFlag(rest, "f") ? "git clean -f" : null;
     case "checkout":
-      return longFlag(rest, "--force") || rest.includes("-f") || rest.includes(".") || (rest[0] === "--" && rest.length > 1) ? "git checkout discarding changes" : null;
+      return longFlag(rest, "--force") || rest.includes("-f") || rest.includes(".") || (rest.includes("--") && rest.indexOf("--") < rest.length - 1) ? "git checkout discarding changes" : null;
     case "restore":
-      return rest.some((a) => a === "." || a === ":/") ? "git restore discarding changes" : null;
+      // Only --staged alone leaves the working tree alone.
+      return (longFlag(rest, "--staged") || shortFlag(rest, "S")) && !longFlag(rest, "--worktree") && !shortFlag(rest, "W") ? null : "git restore discarding changes";
+    case "switch":
+      return longFlag(rest, "--force", "--discard-changes") || rest.includes("-f") || rest.includes("-C") ? "git switch discarding changes" : null;
     case "branch":
-      return rest.includes("-D") || (longFlag(rest, "--delete", "-d") && longFlag(rest, "--force", "-f")) ? "git branch -D" : null;
+      if (rest.includes("-D") || (longFlag(rest, "--delete", "-d") && longFlag(rest, "--force", "-f"))) return "git branch -D";
+      return longFlag(rest, "--force") || rest.includes("-f") || rest.includes("-M") || rest.includes("-C") ? "git branch --force" : null;
     case "stash":
       return rest[0] === "clear" || rest[0] === "drop" ? `git stash ${rest[0]}` : null;
     case "filter-branch":
@@ -445,6 +454,10 @@ function segmentReason(raw: string[]): string | null {
 }
 
 const SQL: [RegExp, string][] = [
+  // Downloaded scripts piped into an interpreter, and deletes written as inline code.
+  [/\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(\S*\/)?(sh|bash|zsh|dash|python3?|node|perl|ruby)\b/i, "runs a downloaded script"],
+  [/\b(sh|bash|zsh)\s+<\(\s*(curl|wget)\b/i, "runs a downloaded script"],
+  [/\b(shutil\.rmtree|os\.(remove|unlink|rmdir|removedirs)|rmSync|rmdirSync|unlinkSync|fs\.(rm|rmdir|unlink)\b|fs\.promises\.(rm|rmdir|unlink)|FileUtils\.rm_r|rimraf)/, "deletes files from code"],
   [/\bdrop\s+(database|schema|table|collection)\b/i, "drops a database"],
   [/\btruncate\s+(table\s+)?[\w"`.]+/i, "truncates a table"],
   [/\.drop(Database|Collection)\s*\(/i, "drops a database"],

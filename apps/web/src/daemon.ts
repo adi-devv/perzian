@@ -7,7 +7,11 @@ import { demoAutoplay, demoSend } from "./demoScript.ts";
 const direct = location.protocol === "file:";
 const port = new URLSearchParams(location.search).get("port") ?? "4317";
 export const API_BASE = direct ? `http://127.0.0.1:${port}` : "";
-const WS_URL = direct ? `ws://127.0.0.1:${port}/ws` : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
+// The desktop app passes the daemon's token (?t=); file:// pages count only with it.
+const token = new URLSearchParams(location.search).get("t");
+/** An API URL, carrying the desktop token when there is one. */
+export const api = (path: string) => (direct && token ? `${API_BASE}${path}${path.includes("?") ? "&" : "?"}t=${encodeURIComponent(token)}` : `${API_BASE}${path}`);
+const WS_URL = direct ? `ws://127.0.0.1:${port}/ws${token ? `?t=${encodeURIComponent(token)}` : ""}` : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 export const isDesktop = direct;
 export const isDemo = new URLSearchParams(location.search).has("demo");
 /** Shown when the daemon can't be reached. */
@@ -21,7 +25,7 @@ export type Link = "connecting" | "online" | "offline" | "refused";
 // a 401/403 means it's running and saying no; a network error or proxy 5xx means it's down.
 async function refused(): Promise<boolean> {
   try {
-    const r = await fetch(`${API_BASE}/api/ping`, { cache: "no-store" });
+    const r = await fetch(api(`/api/ping`), { cache: "no-store" });
     return r.status === 401 || r.status === 403;
   } catch {
     return false;
@@ -100,7 +104,7 @@ export function useDoctor(project: string, enabled: boolean) {
     fresh.current = false;
     const timer = setTimeout(() => {
       setLoading(true);
-      fetch(`${API_BASE}/api/doctor?${q}`)
+      fetch(api(`/api/doctor?${q}`))
         .then((r) => (r.ok ? (r.json() as Promise<DoctorReport>) : Promise.reject(new Error(String(r.status)))))
         .then((r) => !cancelled && (setReport(r), setFailed(false)), () => !cancelled && setFailed(true))
         .finally(() => !cancelled && setLoading(false));
@@ -121,7 +125,7 @@ export function useDoctor(project: string, enabled: boolean) {
 export function useCredentials(enabled: boolean) {
   const [list, setList] = useState<CredentialStatus[] | null>(null);
   const call = async (method: string, query = "", body?: unknown) => {
-    const res = await fetch(`${API_BASE}/api/credentials${query}`, { method, ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}) });
+    const res = await fetch(api(`/api/credentials${query}`), { method, ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}) });
     if (!res.ok) throw new Error(await res.text());
     setList((await res.json()) as CredentialStatus[]);
   };
@@ -137,14 +141,14 @@ export function useCredentials(enabled: boolean) {
 }
 
 export async function installAgent(agent: AgentKind): Promise<InstallResult> {
-  const res = await fetch(`${API_BASE}/api/install`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent }) });
+  const res = await fetch(api(`/api/install`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent }) });
   if (!res.ok) return { ok: false, output: await res.text() };
   return (await res.json()) as InstallResult;
 }
 
 export async function fetchText(kind: "diff" | "file", session: string, path: string): Promise<string> {
   if (isDemo) return kind === "diff" ? DEMO_DIFF : "// Demo mode: file contents come from the daemon.";
-  const res = await fetch(`${API_BASE}/api/${kind}?session=${encodeURIComponent(session)}&path=${encodeURIComponent(path)}`);
+  const res = await fetch(api(`/api/${kind}?session=${encodeURIComponent(session)}&path=${encodeURIComponent(path)}`));
   const text = await res.text();
   if (!res.ok) throw new Error(text);
   return text;

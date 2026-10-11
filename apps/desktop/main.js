@@ -3,7 +3,7 @@
 // without looking at the window.
 import { app, BrowserWindow, Menu, Notification, shell } from "electron";
 import { execFile, spawn } from "node:child_process";
-import { createWriteStream, mkdirSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
@@ -137,6 +137,13 @@ function spawnDaemon() {
       spawnDaemon();
     }, 500 * restarts);
   });
+}
+
+// The daemon writes <PERZIAN_HOME>/desktop-token at startup; a just-spawned one may need a moment.
+async function desktopToken() {
+  const file = join(process.env.PERZIAN_HOME ?? join(homedir(), ".perzian"), "desktop-token");
+  for (let i = 0; i < 50 && !existsSync(file); i++) await new Promise((r) => setTimeout(r, 100));
+  return existsSync(file) ? readFileSync(file, "utf8").trim() : "";
 }
 
 async function ensureDaemon() {
@@ -326,7 +333,8 @@ async function createWindow() {
   else {
     const index = packaged ? join(process.resourcesPath, "web/index.html") : join(root, "apps/web/dist/index.html");
     // ?port= tells the UI which daemon to dial (preload.cjs applies it until the UI reads it itself).
-    await win.loadFile(index, { query: { port: String(PORT) } });
+    // ?t= is the daemon's token: without it the daemon refuses file:// pages (origin "null").
+    await win.loadFile(index, { query: { port: String(PORT), t: await desktopToken() } });
   }
 }
 
