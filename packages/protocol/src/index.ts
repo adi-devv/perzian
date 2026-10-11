@@ -31,6 +31,8 @@ export interface SessionInfo {
   checks?: string[];
   /** Checks declared in the repo's perzian.json, read once at spawn. The daemon runs them when the agent finishes. */
   declaredChecks?: DeclaredCheck[];
+  /** Custom setup steps from perzian.json `setup`, run after the built-in worktree setup. */
+  declaredSetup?: DeclaredCheck[];
   /** Why perzian.json couldn't be used (malformed JSON, a bad field); its checks don't run until fixed. */
   checksError?: string;
   /** The latest run of the declared checks. */
@@ -100,6 +102,8 @@ export interface BackgroundProc {
   port?: number;
   /** The agent's own id for the background task, when it reported one. */
   taskId?: string;
+  /** Process id, when the command's output showed one (`[1] 4242`, `pid: 4242`); lets `kill <pid>` end it. */
+  pid?: number;
   /** Killed, or failed to start. */
   ended?: boolean;
 }

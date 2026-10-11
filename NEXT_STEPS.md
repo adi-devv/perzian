@@ -17,7 +17,6 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 ## Features
 1. **Phone access, phase 2 (phase 1 is built, see FEATURES.md).** Try phase 1 on a real phone first (`Open on phone` in the sidebar).
    - Web Push: the daemon sends it itself (VAPID, straight to Apple/Google push, no servers of ours) when a session needs you, finishes or fails.
-   - Keep the Mac awake while agents work.
    - Same Wi-Fi without Tailscale is a view-only fallback (no HTTPS, so no push).
    - **"No setup" mode:** bundle a Cloudflare quick tunnel so neither device installs anything; HTTPS, so push works; $0 to us;
      the pairing token is the only gate and quick tunnels have no uptime guarantee. About 1-2 days.
@@ -27,11 +26,9 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    fetch and branch from `origin/<base>` (offline falls back to local with a note), PR as the default action with Merge in a menu
    (`perzian.json` `"ship"` overrides), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
 3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
-4. **Ready worktrees, later:** per-repo custom setup steps.
 5. **Observation UI, leftovers (the rest is drawn: chips and facts on tiles and the session header, outside-project tag on cards, nested subagent calls, default-mode picker, persisted projects).**
    Still to draw: a leftover-worktrees list (`GET /api/worktrees/leftover`) and an Extra folders field on New session (`extraDirs`).
-   Not done: background processes are marked ended only from the agent's own exit/kill report, not by detecting a `kill <pid>` command;
-   `createSession`'s default-mode fallback in `apps/daemon/src/index.ts` has no test (it is a script); Codex gets no `additionalDirectories`.
+   Not done: `createSession`'s default-mode fallback in `apps/daemon/src/index.ts` has no test (it is a script); Codex gets no `additionalDirectories`.
 - **Usage card at 95%, one per account (not per session):** "Usage 95% · resets 10:15 pm · [Pause sessions] [Keep going]".
   - Keep going: run to the real limit, then auto-pause and auto-resume at reset (already built).
   - No answer: pause.

@@ -160,6 +160,30 @@ describe("readyWorktree", () => {
   });
 });
 
+describe("custom setup steps", () => {
+  test("run after the built-in steps, in the worktree; a failure stops with the step's name", async () => {
+    const { project, wt } = await repo({ "yarn.lock": "" });
+    const env = pathWith(fakeBin({}));
+    const ok = await readyWorktree(project, wt, { env, steps: [{ name: "seed", run: "echo $CI > seeded.txt" }] });
+    assert.equal(ok.state, "ok");
+    assert.deepEqual(ok.install, ["seed"]);
+    assert.equal(readFileSync(join(wt, "seeded.txt"), "utf8"), "1\n");
+    const bad = await readyWorktree(project, wt, { env, steps: [{ name: "db", run: "echo boom >&2; exit 3" }, { name: "after", run: "touch after.txt" }] });
+    assert.equal(bad.state, "failed");
+    assert.deepEqual(bad.error, { command: "db", tail: "boom" });
+    assert.ok(!existsSync(join(wt, "after.txt")));
+  });
+
+  test("perzian.json setup is validated like checks", async () => {
+    const { parsePerzianSetup, parsePerzianConfig } = await import("../src/checks.ts");
+    assert.deepEqual(parsePerzianSetup(JSON.stringify({ setup: [{ name: "db", run: "make db", timeoutSec: 60 }], checks: [{ name: "u", run: "npm test" }] })), [{ name: "db", run: "make db", timeoutSec: 60 }]);
+    assert.deepEqual(parsePerzianConfig(JSON.stringify({ setup: [{ name: "db", run: "make db" }] })), []);
+    assert.deepEqual(parsePerzianSetup("{}"), []);
+    assert.throws(() => parsePerzianSetup(JSON.stringify({ setup: [{ name: "x" }] })), /setup\[0\]\.run/);
+    assert.throws(() => parsePerzianSetup(JSON.stringify({ setup: "x" })), /"setup" must be a list/);
+  });
+});
+
 describe("setup gate", () => {
   test("holds waiters until opened or cancelled", async () => {
     const g = new SetupGate();

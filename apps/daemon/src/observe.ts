@@ -96,6 +96,31 @@ export function isBackground(rawInput: unknown): boolean {
   return !!cmd && /(?:^|[^&])&\s*$/.test(cmd);
 }
 
+/** A process id the output makes obvious: a shell job line `[1] 4242`, `pid: 4242`, or a lone number (`echo $!`). */
+export function pidOf(output: string | undefined): number | undefined {
+  if (!output) return undefined;
+  const m = /^\[\d+\]\s+(\d+)\s*$/m.exec(output) ?? /\bpid[ :=]+(\d+)\b/i.exec(output) ?? /^(\d{2,7})\s*$/m.exec(output);
+  return m ? Number(m[1]) : undefined;
+}
+
+/** What a `kill`/`pkill`/`killall` command targets: pids, a command-name pattern, or a port (`lsof -ti:3000`). */
+export function killTargets(command: string | undefined): { pids: number[]; patterns: string[]; ports: number[] } {
+  const out = { pids: [] as number[], patterns: [] as string[], ports: [] as number[] };
+  if (!command) return out;
+  for (const part of command.split(/&&|\|\||;|\n/)) {
+    const m = /(?:^|[\s(])(kill|pkill|killall)\s+(.*)$/.exec(part.trim().replace(/^sudo\s+/, ""));
+    if (!m) continue;
+    const words = m[2].split(/\s+/).filter(Boolean);
+    const pos = words.filter((w) => !w.startsWith("-"));
+    if (m[1] === "kill") {
+      for (const w of pos) if (/^\d+$/.test(w)) out.pids.push(Number(w));
+      const port = /lsof[^)`]*?:(\d{2,5})/.exec(m[2])?.[1];
+      if (port) out.ports.push(Number(port));
+    } else if (pos[0]) out.patterns.push(pos[0].replace(/^["']|["']$/g, ""));
+  }
+  return out;
+}
+
 function textOf(v: unknown): string {
   if (typeof v === "string") return v;
   if (Array.isArray(v)) return v.map(textOf).filter(Boolean).join("\n");
@@ -187,15 +212,28 @@ export class ToolObserver {
       const cur = i === -1 ? undefined : this.background[i];
       const port = cur?.port ?? portOf(command) ?? portOf(output);
       const taskId = cur?.taskId ?? backgroundTaskId(u, output);
+      const pid = cur?.pid ?? pidOf(output);
       const next: BackgroundProc = {
         id: u.toolCallId,
         command: command || cur?.command || "",
         ...(port !== undefined ? { port } : {}),
         ...(taskId ? { taskId } : {}),
+        ...(pid !== undefined ? { pid } : {}),
         ...(cur?.ended || u.status === "failed" ? { ended: true } : {}),
       };
       if (next.command && JSON.stringify(next) !== JSON.stringify(cur)) {
         this.background = i === -1 ? [...this.background, next].slice(-MAX_BACKGROUND) : this.background.map((b, j) => (j === i ? next : b));
+        patch.background = this.background;
+      }
+    }
+
+    // The agent killing a tracked process from the shell: `kill 4242`, `pkill -f "vite"`, `kill $(lsof -ti:3000)`.
+    if (cls.exec && this.background.some((b) => !b.ended)) {
+      const t = killTargets(str(raw.command));
+      const hit = (b: BackgroundProc) =>
+        !b.ended && ((b.pid !== undefined && t.pids.includes(b.pid)) || (b.port !== undefined && t.ports.includes(b.port)) || t.patterns.some((p) => b.command.includes(p)));
+      if (this.background.some(hit)) {
+        this.background = this.background.map((b) => (hit(b) ? { ...b, ended: true } : b));
         patch.background = this.background;
       }
     }
