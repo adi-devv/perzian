@@ -2,7 +2,7 @@
 
 **Talk to one. Command them all.**
 
-*Perzian* is pronounced per-ZEE-an.
+*Perzian* is pronounced like "Persian", with a z: PER-zee-an.
 
 [perzian.dev](https://perzian.dev) · [live demo](https://perzian.dev/demo/)
 
