@@ -44,4 +44,6 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 
 ## Site/demo
 - ✅ Site at perzian.dev (`apps/site`) and a live demo at perzian.dev/demo.
+- ✅ Site feature cards for declared checks ("Your checks run every time") and usage-limit resume ("Hit your limit at 2 am?").
+- ✅ Site mockups follow the calm color rule: amber only for needs-you, red only for failed, everything else grey.
 - ✅ Try the UI without agents: `http://localhost:4318/?demo`.

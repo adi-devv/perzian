@@ -20,12 +20,9 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 3. **Branches for teams (in progress).** Teams don't ship straight to main. Next: base picker on New session (lead can pass `base`),
    fetch and branch from `origin/<base>` (offline falls back to local with a note), PR as the default action with Merge in a menu
    (`perzian.json` `"ship"` overrides), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
-4. **Declared checks, follow-through.** Site card "Your checks run every time"; a "Run checks" button.
-5. **Calm visuals, follow-through.** Apply the amber/red-only color rule to the site's feature mockups (`apps/site`);
-   review the app with real sessions for leftover noise.
-6. **Usage-limit marketing.** Lead with "Hit your limit at 2 am? Perzian picks up when it resets." as a site feature card.
-   Unverified against a real Claude limit; Codex has no early pause (its usage isn't sent over ACP).
-7. **Ready worktrees, later:** per-repo custom setup steps.
+4. **Declared checks, follow-through.** A "Run checks" button.
+5. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
+6. **Ready worktrees, later:** per-repo custom setup steps.
 
 ## Brand
 - **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).
