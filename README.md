@@ -2,6 +2,8 @@
 
 **Talk to one. Command them all.**
 
+*Perzian* is pronounced per-ZEE-an.
+
 [perzian.dev](https://perzian.dev) · [live demo](https://perzian.dev/demo/)
 
 Perzian is an open-source agentic development environment (ADE). You talk to one main agent, **Perzian**,

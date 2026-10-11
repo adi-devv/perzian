@@ -30,6 +30,12 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 5. **Phone access (after trying the Mac app).** QR code + one-time pairing token opens the UI on your phone,
    on the same Wi-Fi or through Tailscale. Mainly for answering decision cards. Needs token auth on the daemon.
 
+## Brand
+- **Logo.** Direction: "one center, many orbits": a core (the lead) with a ring and two or three small satellites (the agents).
+  Monochrome, Persian-blue core. Must read at 16px (tab icon, menu bar) and as the app icon. Replace `assets/mark.svg` + app icon.
+- **Thinking animation from the logo** (like Claude's spark): satellites orbit the core while the lead works; one satellite
+  per active session. Use it for the lead's "working" state instead of the generic spinner, and on the site hero.
+
 ## From competitors (Conductor, Vibe Kanban, Cursor, Zed)
 - **PR + CI status on the session** after "Open PR": checks passing/failing, merged.
 - **Run the app from a session:** start its dev server on its own port to try the change before merging.
