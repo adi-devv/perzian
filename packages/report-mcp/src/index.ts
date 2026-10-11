@@ -113,6 +113,10 @@ server.tool(
     mode: z.enum(["ask", "edits", "plan", "auto"]).optional().describe("Omit for the developer's default. plan = analysis only, no edits; auto = only if the developer asked for hands-off"),
     worktree: z.boolean().optional().describe("Omit: every session gets its own git worktree and branch by default. false only when the developer asks to work directly on their branch"),
     extraDirs: z.array(z.string()).optional().describe("Absolute paths of extra folders (besides project) the session may edit without asking, e.g. a sibling package"),
+    base: z
+      .string()
+      .optional()
+      .describe("Branch to start the worktree from, e.g. \"develop\", or another session's branch to stack on it. Omit for the repo's default branch (origin/HEAD, else main/master). Fetched from origin first; PRs target it"),
   },
   async (args) => text(await send({ tool: "spawn_session", sessionId, args })),
 );

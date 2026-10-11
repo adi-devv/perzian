@@ -6,7 +6,7 @@ import { FailureNotice } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import { Slot, useExiting } from "./motion.tsx";
 import { RepoMap } from "./repomap.tsx";
-import { Composer, DecisionCard, DecisionLine, gitChip, ModePicker, ModelPicker, StatusGlyph, Usage, ago, churn, retryTarget, statusText } from "./bits.tsx";
+import { Composer, DecisionCard, DecisionLine, gitChip, ModePicker, ModelPicker, StatusGlyph, Usage, ago, churn, prSummary, retryTarget, stackedOn, statusText } from "./bits.tsx";
 
 type Send = (c: Command) => void;
 type Tab = "changes" | "map" | "checks" | "transcript";
@@ -103,7 +103,7 @@ export function SessionDetail({ s, state, send, onBack, onOpen, leadNew }: { s: 
           <ArchiveButton s={s} files={files.length} send={send} onDone={onBack} />
         </div>
 
-        <Facts s={s} quietOutside={pending.some((p) => p.item.outside?.length)} />
+        <Facts s={s} state={state} send={send} onOpen={onOpen} quietOutside={pending.some((p) => p.item.outside?.length)} />
         <SetupBar s={s} send={send} />
         {retry && failure?.kind === "notice" && <FailureNotice text={failure.text} onRetry={() => send({ type: "session.prompt", sessionId: s.id, prompt: retry.prompt })} />}
         {pending.length > 0 && (
@@ -147,16 +147,51 @@ export function SessionDetail({ s, state, send, onBack, onOpen, leadNew }: { s: 
 
 /* ───────────── Facts the daemon observed: what the agent did on its own ───────────── */
 
-function Facts({ s, quietOutside }: { s: SessionInfo; quietOutside?: boolean }) {
+function Facts({ s, state, send, onOpen, quietOutside }: { s: SessionInfo; state: State; send: Send; onOpen: (id: string) => void; quietOutside?: boolean }) {
   const wt = s.extraWorktrees ?? [];
   const sub = s.subagents ?? [];
   const outside = quietOutside ? [] : (s.outsidePaths ?? []);
   const bg = (s.background ?? []).filter((b) => !b.ended);
   const dirs = s.extraDirs ?? [];
   const g = gitChip(s);
-  if (!wt.length && !sub.length && !outside.length && !bg.length && !dirs.length && !g) return null;
+  const parent = stackedOn(s, state);
+  const behind = s.worktree && s.ship?.state !== "merged" ? (s.git?.behind ?? 0) : 0;
+  const pr = s.git?.pr;
+  if (!wt.length && !sub.length && !outside.length && !bg.length && !dirs.length && !g && !parent && !behind && !pr) return null;
   return (
     <dl className="d-facts">
+      {(parent || behind > 0) && (
+        <div>
+          <dt>Base</dt>
+          <dd className="fact-base">
+            {parent ? <button className="crumb" onClick={() => onOpen(parent.id)} title="The session whose branch this one started from">on {parent.title}</button> : <code>{s.baseBranch}</code>}
+            {behind > 0 && (
+              <span className="fact-line">
+                <span title={`${s.baseBranch} has commits this branch doesn't have yet`}>Base moved · {behind} behind</span>
+                <button className="btn small" disabled={s.status === "working"} title={s.status === "working" ? "Wait for the agent to finish" : `Ask the agent to merge or rebase ${s.baseBranch} into this branch`} onClick={() => send({ type: "session.updateBase", sessionId: s.id })}>
+                  Update
+                </button>
+              </span>
+            )}
+          </dd>
+        </div>
+      )}
+      {pr && (
+        <div>
+          <dt>Pull request</dt>
+          <dd>
+            <span className={`fact-line${pr.checks === "failing" ? " bad" : ""}`}>
+              <a href={pr.url} target="_blank" rel="noopener">{prSummary(s)} ↗</a>
+              {pr.checks === "failing" && pr.failing.map((n) => <code key={n}>{n}</code>)}
+              {pr.checks === "failing" && (
+                <button className="btn small" disabled={s.status === "working"} title="Sends the agent the failing check names and how to read their logs" onClick={() => send({ type: "session.fixCi", sessionId: s.id })}>
+                  Ask agent to fix CI
+                </button>
+              )}
+            </span>
+          </dd>
+        </div>
+      )}
       {g && (
         <div>
           <dt>Git</dt>

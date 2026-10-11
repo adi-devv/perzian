@@ -145,8 +145,12 @@ export async function ship(info: SessionInfo, how: "merge" | "pr", stop: () => v
   if (info.baseBranch && into !== info.baseBranch) return fail(`Your checkout is on ${into}, but this session started from ${info.baseBranch}. Switch to ${info.baseBranch}, or open a PR instead.`);
   const dirty = (await run(project, "git", ["status", "--porcelain", "--untracked-files=no"])).out.trim();
   if (dirty) return fail(`Your checkout has uncommitted changes in ${dirty.split("\n").length} file(s). Commit or stash them, then merge.`);
-  const ahead = await run(project, "git", ["rev-list", "--count", `${into}..${branch}`]);
-  if (ahead.ok && ahead.out.trim() === "0") return fail("Nothing to merge: the branch has no new commits.");
+  // The session may have started from a fresher origin/<base> than the local branch; git merge brings
+  // those commits along. "Nothing new" means nothing past where the session started.
+  for (const from of info.baseSha ? [info.baseSha, into] : [into]) {
+    const ahead = await run(project, "git", ["rev-list", "--count", `${from}..${branch}`]);
+    if (ahead.ok && ahead.out.trim() === "0") return fail("Nothing to merge: the branch has no new commits.");
+  }
 
   const m = await run(project, "git", ["merge", "--no-ff", "--no-edit", "-m", `Merge ${branch}: ${info.title}`, branch]);
   if (!m.ok) {

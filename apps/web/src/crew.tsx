@@ -3,7 +3,7 @@ import { isUnseen, needsYou, pendingUsageCard, shownStatus, type Command, type D
 import { explainFailure, isFailureNotice } from "./onboarding.tsx";
 import { PhoneButton } from "./phone.tsx";
 import { useFlip } from "./motion.tsx";
-import { Chips, OutsideTag, StatusGlyph, cost, denyOption, resumeTime, retryTarget, statusText, useFocusOnMount } from "./bits.tsx";
+import { Chips, OutsideTag, StatusGlyph, cost, denyOption, prLabel, resumeTime, retryTarget, stackedOn, statusText, useFocusOnMount } from "./bits.tsx";
 import { isDemo, isDesktop } from "./daemon.ts";
 
 type Send = (c: Command) => void;
@@ -64,6 +64,9 @@ export function tileLine(s: SessionInfo, state: State, pending: Decision[]): str
   }
   // done
   if (s.ship?.state === "merged") return `Merged into ${s.ship.into ?? "main"}`;
+  // The PR as gh last reported it ("PR · checks ✓", "PR · 2 failing", "Merged"); until then, just that it was opened.
+  const pr = prLabel(s);
+  if (pr) return pr.text;
   if (s.ship?.state === "pr") return "PR opened";
   const o = state.outcomes[s.id];
   const run = s.checkRun;
@@ -165,6 +168,7 @@ function Tile({ s, state, send, selected, onOpen, kids = [], selectedId }: { s: 
   const status = shownStatus(s);
   const done = status === "done" || status === "idle";
   const first = pending[0];
+  const stacked = stackedOn(s, state);
   const [kidsOpen, setKidsOpen] = useState(false);
   const fold = kids.length > KIDS_FOLD && !kidsOpen;
   // A child that needs you (or is open) stays visible even when the list is folded.
@@ -194,7 +198,7 @@ function Tile({ s, state, send, selected, onOpen, kids = [], selectedId }: { s: 
       data-tile={s.id}
       data-flip={s.id}
       aria-current={selected ? "true" : undefined}
-      title={`${s.title} · ${statusText(s)}${s.branch ? ` · ${s.branch}` : ""}`}
+      title={`${s.title} · ${statusText(s)}${s.branch ? ` · ${s.branch}` : ""}${stacked ? ` · on ${stacked.title}` : ""}`}
       onClick={() => onOpen(s.id)}
       onKeyDown={(e) => {
         if ((e.key === "Enter" || e.key === " ") && e.target === e.currentTarget) {
@@ -206,8 +210,9 @@ function Tile({ s, state, send, selected, onOpen, kids = [], selectedId }: { s: 
       <div className="t-head">
         <StatusGlyph s={s} />
         <span className="t-title">{s.title}</span>
-        {done && <span className="t-meta">{line}</span>}
+        {done && <span className={`t-meta${prLabel(s)?.bad ? " bad" : ""}`}>{line}</span>}
       </div>
+      {stacked && <div className="t-on" title={`Started from ${stacked.title}'s branch`}>on {stacked.title}</div>}
       {!done && (
         <div className="t-line" key={line}>
           {line}

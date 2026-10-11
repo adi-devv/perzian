@@ -40,6 +40,9 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ "Merge into <base>" from the session detail; merges only what the agent changed (never `.env`/keys), asks first (and warns when required checks fail), removes the worktree.
 - ✅ Merge conflicts are listed with "Ask the agent to resolve"; a dirty checkout is refused with one plain line.
 - ✅ Accounts shows "Connected as <user>" for the project's origin host (read-only `gh auth status`, cached) or a copyable `gh auth login`; never blocks local use. Accounts also lists leftover worktrees (path, branch, age) with a Remove button (a plain worktree remove: refuses with uncommitted changes, never deletes the branch); New session has an "Also edit" field for extra folders.
+- ✅ New session has a base picker (default: the repo's default branch; the lead passes `base`). The worktree is cut from a fresh `origin/<base>`; offline it falls back to the local branch with a note on the session.
+- ✅ "Base moved · N behind" in the session header with a one-click Update that asks the agent to merge or rebase (the agent handles conflicts). A session based on another session's branch shows "on <parent title>".
+- ✅ After Open PR the tile shows "PR · checks ✓", "PR · 2 failing" (red) or "Merged"; the detail lists failing checks with "Ask agent to fix CI". Polled via `gh` at most once a minute; unverified against a real PR yet.
 - ⚠️ "Open PR": checks origin and `gh` auth before pushing (a non-GitHub origin stops there, tried for real); the push and `gh pr create` haven't run against a real repo.
 
 ## Usage and limits

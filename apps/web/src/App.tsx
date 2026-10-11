@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AGENTS, isUnseen, pendingUsageCard, shownPrompt, shownStatus, type Command, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
-import { isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
+import { AGENTS, isUnseen, pendingUsageCard, shownPrompt, shownStatus, type BranchList, type Command, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
+import { isDemo, useBranches, useDaemon, useDoctor, type Link } from "./daemon.ts";
 import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, parseFolders, readiness, saveProject, withProject } from "./onboarding.tsx";
 import { PairScreen, PhoneHome, useNarrow } from "./phone.tsx";
-import { Composer, DecisionLine, LEAD_PLACEHOLDER, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
+import { BasePicker, Composer, DecisionLine, LEAD_PLACEHOLDER, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
 import { Crew } from "./crew.tsx";
 import { SessionDetail } from "./detail.tsx";
 
@@ -38,9 +38,15 @@ export function App() {
   }, [projectPath]);
   // The same checks gate the example buttons and the free-text composer on first run.
   const gate = firstRun ? readiness(doctor.report, project) : { ready: true, blocker: "" };
+  // The branch new sessions start from ("" = the repo's default), picked beside the composer. Only a non-default one is sent.
+  const [base, setBase] = useState("");
+  const baseProject = leadProject ?? (firstRun ? (projectPath ?? null) : null);
+  const branches = useBranches(baseProject);
+  useEffect(() => setBase(""), [baseProject]);
+  const baseArg = base && base !== branches?.default && branches?.branches.includes(base) ? base : undefined;
   const startLead = (prompt: string) => {
     if (!gate.ready) return;
-    send({ type: "main.start", prompt: firstRun && projectPath ? withProject(prompt, projectPath) : prompt });
+    send({ type: "main.start", prompt: firstRun && projectPath ? withProject(prompt, projectPath, [], baseArg) : prompt });
   };
 
   // Use a folder for the lead's next message and land in Perzian's chat.
@@ -173,6 +179,10 @@ export function App() {
           firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} recent={recent} /> : null}
           leadProject={leadProject}
           onProjectUsed={() => setLeadProject(null)}
+          branches={branches}
+          base={base}
+          onBase={setBase}
+          baseArg={baseArg}
         />
         {sel && <SessionDetail key={sel.id} s={sel} state={state} send={send} onBack={() => { open(null); focusLead(); }} onOpen={open} leadNew={leadNew} />}
       </div>
@@ -227,7 +237,7 @@ function AddProject({ recent, onClose, onPick }: { recent: string[]; onClose: ()
 
 /* ───────────── Perzian's chat: the one place work starts ───────────── */
 
-function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, focus, firstRun, leadProject, onProjectUsed }: { hidden: boolean; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode; leadProject: string | null; onProjectUsed: () => void }) {
+function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, focus, firstRun, leadProject, onProjectUsed, branches, base, onBase, baseArg }: { hidden: boolean; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode; leadProject: string | null; onProjectUsed: () => void; branches: BranchList | null; base: string; onBase: (b: string) => void; baseArg?: string }) {
   const items = main ? (state.transcripts[main.id] ?? []) : [];
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
@@ -293,24 +303,29 @@ function Thread({ hidden, state, main, send, onOpen, link, onStart, blocked, foc
           busy={main?.status === "working"}
           blocked={main ? undefined : blocked}
           controls={<ModePicker value={state.settings.defaultMode} onChange={(mode) => send({ type: "settings.setDefaultMode", mode })} title="Permission mode new sessions start in" />}
-          note={folder && (
+          note={(folder || branches) && (
             <>
-              <span className="proj-chip" title={leadProject ?? undefined}>
-                in <b>{folder}</b>
-                <button type="button" className="icon" aria-label="Clear project" onClick={onProjectUsed}>✕</button>
-              </span>
-              <input
-                className="extra-dirs"
-                value={extras}
-                onChange={(e) => setExtras(e.target.value)}
-                placeholder="Also edit: ~/other-repo, …"
-                aria-label="Extra folders the sessions may also edit"
-                spellCheck={false}
-              />
+              {folder && (
+                <span className="proj-chip" title={leadProject ?? undefined}>
+                  in <b>{folder}</b>
+                  <button type="button" className="icon" aria-label="Clear project" onClick={onProjectUsed}>✕</button>
+                </span>
+              )}
+              {branches && <BasePicker list={branches} value={base} onChange={onBase} state={state} />}
+              {folder && (
+                <input
+                  className="extra-dirs"
+                  value={extras}
+                  onChange={(e) => setExtras(e.target.value)}
+                  placeholder="Also edit: ~/other-repo, …"
+                  aria-label="Extra folders the sessions may also edit"
+                  spellCheck={false}
+                />
+              )}
             </>
           )}
           onSubmit={(text) => {
-            const prompt = leadProject ? withProject(text, leadProject, parseFolders(extras)) : text;
+            const prompt = leadProject ? withProject(text, leadProject, parseFolders(extras), baseArg) : text;
             if (leadProject) {
               onProjectUsed();
               setExtras("");

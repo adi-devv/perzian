@@ -265,3 +265,12 @@ test("shownPrompt hides the project-folder line withProject adds, and nothing el
 test("shownPrompt also hides the extra-folders line", () => {
   assert.equal(shownPrompt(withProject("task", "/a", ["~/b", "~/c"])), "task");
 });
+
+test("withProject carries a base branch the lead passes on, and shownPrompt hides it", () => {
+  const p = withProject("task", "/a", ["~/b"], "develop");
+  assert.match(p, /\nBase branch \(pass as base when starting sessions\): develop$/);
+  assert.equal(shownPrompt(p), "task");
+  assert.equal(shownPrompt(withProject("task", "/a", [], "develop")), "task");
+  assert.equal(withProject("task", "/a"), withProject("task", "/a", [], undefined), "no base line unless one was picked");
+  assert.equal(shownPrompt("a\n\nProject folder: /x\nBase branch (pass as base when starting sessions): y\nthen more"), "a\n\nProject folder: /x\nBase branch (pass as base when starting sessions): y\nthen more");
+});

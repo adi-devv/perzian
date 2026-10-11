@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type Command, type CredentialStatus, type DoctorReport, type InstallResult, type LeftoverWorktree, type PerzianEvent, type RepoTree, type ServerMessage, type State } from "@perzian/protocol";
+import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type BranchList, type Command, type CredentialStatus, type DoctorReport, type InstallResult, type LeftoverWorktree, type PerzianEvent, type RepoTree, type ServerMessage, type State } from "@perzian/protocol";
 import { demoEvents } from "./demo.ts";
 import { demoAutoplay, demoSend } from "./demoScript.ts";
 
@@ -211,6 +211,23 @@ export function useLeftover(enabled: boolean) {
       cancelled = true;
     };
   }, [enabled]);
+  return list;
+}
+
+/** The branches a new session in `project` can start from (GET /api/branches); null until known, in the demo, or for a folder that isn't a repo. */
+export function useBranches(project: string | null) {
+  const [list, setList] = useState<BranchList | null>(null);
+  useEffect(() => {
+    setList(null);
+    if (!project || isDemo) return;
+    let cancelled = false;
+    fetch(api(`/api/branches?project=${encodeURIComponent(project)}`))
+      .then((r) => (r.ok ? (r.json() as Promise<BranchList>) : null))
+      .then((l) => !cancelled && setList(l?.repo ? l : null), () => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [project]);
   return list;
 }
 

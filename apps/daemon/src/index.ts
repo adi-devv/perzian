@@ -28,7 +28,7 @@ import { repoTree } from "./repotree.ts";
 import { startMode } from "./defaults.ts";
 import { UsageGovernor } from "./usagecard.ts";
 import { fileURLToPath } from "node:url";
-import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
+import type { AgentKind, ApiKeyProvider, BranchList, InstallResult } from "@perzian/protocol";
 
 const port = Number(process.env.PERZIAN_PORT ?? DAEMON_PORT);
 const home = resolve(process.env.PERZIAN_HOME ?? join(homedir(), ".perzian"));
@@ -158,7 +158,10 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   if (!existsSync(project) || !statSync(project).isDirectory()) throw new Error(`Project folder not found: ${project}`);
   const id = crypto.randomUUID();
   const title = args.title?.trim() || args.prompt.split("\n")[0].slice(0, 48) || basename(project);
-  const ws = await prepareWorkspace(project, home, title, id, args.worktree);
+  // A base branch only means something for a worktree: the checkout itself is never switched.
+  const base = args.base?.trim() || undefined;
+  if (base && args.worktree === false) throw new Error(`Starting from ${base} needs its own worktree; your checkout is never switched. Turn the worktree on, or leave the base out.`);
+  const ws = await prepareWorkspace(project, home, title, id, args.worktree, base);
   // perzian.json from the worktree (committed), else the checkout (not committed yet). Read once, here.
   const declared = loadDeclaredChecks(ws.cwd, project);
   const setupCfg = loadDeclaredSetup(ws.cwd, project);
@@ -168,6 +171,7 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
     { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: startMode(args.mode, store.state().settings), ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, declaredSetup: setupCfg.steps, checksError: declared.error ?? setupCfg.error, ...(shipDefault ? { shipDefault } : {}), ...extra },
     deps,
   );
+  if ("notice" in ws && ws.notice) s.notice(ws.notice);
   if (args.worktree !== false && !ws.worktree) s.notice("This folder isn't a git repo, so the session works in it directly (no worktree)");
   if (declared.error) s.notice(`${declared.error}. Declared checks won't run until it's fixed.`);
   notifier.childPrompted(s.info.id, !!extra.parentId);
@@ -279,6 +283,14 @@ async function handleCommand(cmd: Command): Promise<void> {
       if (!s) throw new Error("Unknown session");
       void s.rerunChecks().catch((e) => console.error(`[${s.info.id}]`, e));
       break;
+    case "session.updateBase":
+      if (!s) throw new Error("Unknown session");
+      void s.updateBase().catch((e) => console.error(`[${s.info.id}]`, e));
+      break;
+    case "session.fixCi":
+      if (!s) throw new Error("Unknown session");
+      void s.fixCi().catch((e) => console.error(`[${s.info.id}]`, e));
+      break;
     case "session.setup":
       if (!s) throw new Error("Unknown session");
       // The held first prompt came from the lead when it spawned this session: report the result to it.
@@ -307,6 +319,10 @@ function brief(info: SessionInfo) {
     title: info.title,
     project: info.project,
     branch: info.branch,
+    ...(info.baseBranch ? { base: info.baseBranch } : {}),
+    // Pull request state and checks as last read from gh, and how far the base moved: "ready to merge" needs these.
+    ...(info.git?.pr ? { pr: info.git.pr } : {}),
+    ...(info.git?.behind ? { baseMoved: `${info.git.behind} commits behind ${info.baseBranch}` } : {}),
     status: info.status,
     ...(info.pause ? { pausedUntil: new Date(info.pause.resumeAt).toISOString(), pauseReason: info.pause.reason } : {}),
     progress: info.progress,
@@ -357,7 +373,7 @@ async function handleReport(call: ReportCall): Promise<unknown> {
       const blocked = spawnBlocker(s.info.id, (id) => sessions.get(id)?.info);
       if (blocked) throw new Error(blocked);
       const child = await createSession(call.args, { parentId: s.info.id });
-      return { id: child.info.id, title: child.info.title, cwd: child.info.cwd, branch: child.info.branch };
+      return { id: child.info.id, title: child.info.title, cwd: child.info.cwd, branch: child.info.branch, baseBranch: child.info.baseBranch };
     }
     case "send_to_session": {
       const t = sessions.get(call.args.id);
@@ -446,6 +462,12 @@ const http = createServer(async (req, res) => {
       const s = sessions.get(url.searchParams.get("session") ?? "");
       if (!s) throw new Error("unknown session");
       json(200, await repoTree(s.info.cwd));
+      return;
+    }
+    if (url.pathname === "/api/branches") {
+      const project = expand(url.searchParams.get("project") ?? "");
+      const list: BranchList = existsSync(project) && statSync(project).isDirectory() ? await git.listBranches(project) : { repo: false, branches: [] };
+      json(200, list);
       return;
     }
     if (url.pathname === "/api/diff" || url.pathname === "/api/file") {

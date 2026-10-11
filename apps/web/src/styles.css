@@ -140,6 +140,8 @@ kbd { font-size: 10px; color: var(--fg-3); padding: 0 3px; }
 .t-title { flex: 1 1 auto; min-width: 0; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ctile:not(.compact) .t-title { flex: 1; }
 .ctile.unseen-row .t-title { font-weight: 650; }
+.t-meta.bad { color: var(--failed); }
+.t-on { margin: -2px 0 0 22px; font-size: 11px; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .t-meta { flex: 1 0 auto; max-width: 100%; text-align: right; font-size: 11.5px; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .t-line { padding-left: 22px; font-size: 12px; line-height: 1.4; color: var(--fg-2); overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .ctile.s-failed .t-line { color: var(--fg-2); }
@@ -684,6 +686,8 @@ code.chip { font-size: 11px; }
 
 /* ── observed facts: grey micro-chips, details in the session header; color stays reserved for needs-you and failed ── */
 .chips-row { display: flex; flex-wrap: wrap; gap: 4px; padding-left: 22px; min-width: 0; }
+.mchip.bad { color: var(--failed); border-color: color-mix(in srgb, var(--failed) 50%, var(--line)); }
+a.mchip { text-decoration: none; }
 .mchip { display: inline-block; max-width: 100%; padding: 0 7px; border: 1px solid var(--line-soft); border-radius: 999px; font-size: 11px; line-height: 17px; color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mchip a { color: inherit; text-decoration: none; }
 a.mchip { text-decoration: none; }
@@ -695,6 +699,8 @@ a.mchip { text-decoration: none; }
 .d-facts > div { display: flex; gap: 12px; align-items: baseline; min-width: 0; }
 .d-facts dt { flex: none; width: 96px; color: var(--fg-3); }
 .d-facts dd { margin: 0; flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 12px; color: var(--fg-2); }
+.d-facts .fact-line.bad > a { color: var(--failed); }
+.d-facts .fact-base { align-items: center; }
 .d-facts code { font-size: 11px; overflow-wrap: anywhere; }
 .d-facts a { color: inherit; text-underline-offset: 3px; text-decoration-color: var(--line); }
 .d-facts a:hover { color: var(--fg); }

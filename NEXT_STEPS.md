@@ -19,8 +19,6 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 1. **Phone access, try phases 1 and 2 on a real phone** (`Open on phone` in the sidebar): Tailscale and the Cloudflare quick tunnel, then Web Push on an iPhone (Home Screen app) and Android.
    Confirm a real push arrives and tapping opens the session. The account usage card pushes too (while unanswered).
    Same Wi-Fi without Tailscale is a view-only fallback (no HTTPS, so no push), only if people ask.
-2. **Branches for teams.** Teams don't ship straight to main. PR is already the default ship action. Next: base picker on New session (lead can pass `base`),
-   fetch and branch from `origin/<base>` (offline falls back to local with a note), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
 3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
 5. **Observation UI, leftovers (the rest is drawn: chips and facts on tiles and the session header, outside-project tag on cards, nested subagent calls, default-mode picker, persisted projects).**
    Not done: Codex gets no `additionalDirectories`. The usage card is unit-tested only: try it against a real account near its limit; the phone inbox doesn't show it yet.
@@ -33,7 +31,6 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 - **Thinking animation from the logo** (like Claude's spark), for the lead's "working" state and the site hero. Design after the pick.
 
 ## From competitors (Conductor, Vibe Kanban, Cursor, Zed)
-- **PR + CI status on the session** after "Open PR": checks passing/failing, merged.
 - **Run the app from a session:** start its dev server on its own port to try the change before merging.
 - **Checkpoints:** roll a session back to before a given turn.
 - **Sessions from issues:** pick a GitHub/Linear issue; it becomes the brief.
