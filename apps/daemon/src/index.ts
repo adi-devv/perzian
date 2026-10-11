@@ -12,6 +12,8 @@ import { mergeProofs } from "./proof.ts";
 import { doctor, doctorHeaders, installCommand, resetDoctorCache } from "./doctor.ts";
 import { Credentials, PROVIDERS } from "./credentials.ts";
 import { exec } from "node:child_process";
+import { detectChecks } from "./checks.ts";
+import { LeadNotifier, type ChildReport } from "./notify.ts";
 import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
 
 const port = Number(process.env.PERZIAN_PORT ?? DAEMON_PORT);
@@ -69,6 +71,34 @@ const OPEN_TOOL = (status: string) => status !== "completed" && status !== "fail
   }
 }
 
+// The lead hears about the sessions it started when they finish (see notify.ts).
+const notifier = new LeadNotifier({
+  busy: (leadId) => {
+    const st = sessions.get(leadId)?.info.status;
+    return st === "working" || st === "needs_you";
+  },
+  report: (childId): ChildReport | undefined => {
+    const state = store.state();
+    const info = state.sessions[childId];
+    if (!info) return undefined;
+    const o = state.outcomes[childId];
+    return { id: info.id, title: info.title, status: info.status, outcome: o && { status: o.status, intent: o.intent, proof: o.proof, derived: o.derived }, changedFiles: (state.changes[childId] ?? []).length };
+  },
+  deliver: (leadId, text) => {
+    const lead = sessions.get(leadId);
+    if (lead && !lead.info.archived) void lead.prompt(text, { system: true }).catch((e) => console.error(`[${leadId}]`, e));
+  },
+  notice: (leadId, text) => sessions.get(leadId)?.notice(text),
+});
+store.subscribe((e) => {
+  if (e.type !== "session.status") return;
+  const info = store.state().sessions[e.sessionId];
+  if (!info) return;
+  // Deferred: delivering prompts the lead, which emits events, and we're inside an emit.
+  if (info.parentId && (e.status === "done" || e.status === "failed")) setImmediate(() => notifier.childSettled(info.parentId!, info.id));
+  if (info.role === "main" && e.status !== "working" && e.status !== "needs_you") setImmediate(() => notifier.leadIdle(info.id));
+});
+
 const expand = (p: string) => resolve(p.replace(/^~(?=$|\/)/, homedir()));
 
 async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "worker"; parentId?: string } = {}): Promise<AgentSession> {
@@ -77,10 +107,12 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   const id = crypto.randomUUID();
   const title = args.title?.trim() || args.prompt.split("\n")[0].slice(0, 48) || basename(project);
   const ws = await prepareWorkspace(project, home, title, id, !!args.worktree);
+  const checks = detectChecks(ws.cwd);
   const s = AgentSession.create(
-    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode, ...extra },
+    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode, checks, ...extra },
     deps,
   );
+  notifier.childPrompted(s.info.id, !!extra.parentId);
   sessions.set(s.info.id, s);
   if (extra.parentId) {
     store.emit({ type: "session.transcript", sessionId: extra.parentId, item: { kind: "spawn", childId: s.info.id, title, at: Date.now() } });
@@ -103,6 +135,7 @@ async function handleCommand(cmd: Command): Promise<void> {
       const existing = mainSession();
       if (existing) {
         if (cmd.model !== undefined) await existing.applyModel(cmd.model);
+        if (cmd.prompt) notifier.developerPrompted(existing.info.id);
         if (cmd.prompt) void existing.prompt(cmd.prompt);
         break;
       }
@@ -116,6 +149,8 @@ async function handleCommand(cmd: Command): Promise<void> {
     }
     case "session.prompt":
       if (!s) throw new Error("Unknown session");
+      if (s.info.role === "main") notifier.developerPrompted(s.info.id);
+      else notifier.childPrompted(s.info.id, false);
       void s.prompt(cmd.prompt);
       break;
     case "session.cancel":
@@ -166,6 +201,7 @@ function brief(info: SessionInfo) {
     branch: info.branch,
     status: info.status,
     progress: info.progress,
+    checks: info.checks,
     changedFiles: (state.changes[info.id] ?? []).map((f) => `${f.kind[0].toUpperCase()} ${f.path} +${f.additions}/-${f.deletions}`),
     outcome: outcome && { status: outcome.status, intent: outcome.intent, proof: outcome.proof, risks: outcome.risks },
     lastMessage: lastAgent && lastAgent.kind === "agent" ? lastAgent.text.slice(0, 500) : undefined,
@@ -211,6 +247,7 @@ async function handleReport(call: ReportCall): Promise<unknown> {
     case "send_to_session": {
       const t = sessions.get(call.args.id);
       if (!t) throw new Error("no such session");
+      notifier.childPrompted(t.info.id, s.info.role === "main");
       void t.prompt(call.args.prompt);
       return "sent";
     }

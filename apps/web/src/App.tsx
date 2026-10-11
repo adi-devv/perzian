@@ -140,7 +140,7 @@ function retryTarget(items: TranscriptItem[], status: SessionInfo["status"]): { 
   if (fail < 0) return null;
   for (let i = fail - 1; i >= 0; i--) {
     const it = items[i];
-    if (it.kind === "user") return { index: fail, prompt: it.text };
+    if (it.kind === "user") return it.system ? null : { index: fail, prompt: it.text };
   }
   return null;
 }
@@ -326,7 +326,8 @@ function ThreadItems({ items, state, onOpen, retry }: { items: TranscriptItem[];
         if (Array.isArray(b)) return <ToolStrip key={i} tools={b} />;
         switch (b.kind) {
           case "user":
-            return <div key={i} className="msg user">{b.text}</div>;
+            // Daemon updates to the lead ("sessions finished") are plumbing, not something the developer typed.
+            return b.system ? <SystemUpdate key={i} text={b.text} /> : <div key={i} className="msg user">{b.text}</div>;
           case "agent":
             return <div key={i} className="msg agent">{b.text}</div>;
           case "notice":
@@ -344,6 +345,16 @@ function ThreadItems({ items, state, onOpen, retry }: { items: TranscriptItem[];
         }
       })}
     </>
+  );
+}
+
+function SystemUpdate({ text }: { text: string }) {
+  const lines = text.split("\n").filter((l) => l.startsWith("- "));
+  const label = lines.length === 1 ? (/title="([^"]*)"/.exec(lines[0])?.[1] ?? "A session") + " finished" : `${lines.length || "Sessions"} sessions finished`;
+  return (
+    <div className="notice system-update" title={text}>
+      ↳ {label} · Perzian notified
+    </div>
   );
 }
 

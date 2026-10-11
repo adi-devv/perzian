@@ -70,7 +70,7 @@ export function ProofPills({ o }: { o: Outcome }) {
 export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decision; session?: SessionInfo; onAnswer: (id: string | null) => void; onOpen?: () => void; index?: number }) {
   const perm = d.source === "permission";
   return (
-    <article className={`decision ${perm ? "perm" : "ask"}`}>
+    <article className={`decision ${perm ? "perm" : "ask"} ${d.destructive ? "destructive" : ""}`}>
       <header>
         <button className="decision-src" onClick={onOpen} title="Open session">
           <span className="dot" />
@@ -81,6 +81,7 @@ export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decis
       </header>
       {perm ? (
         <div className="perm-body">
+          {d.destructive && <span className="danger-tag">Destructive · {d.destructive}</span>}
           <span className="perm-tool">{d.question}</span>
           {d.detail && <code>{d.detail}</code>}
         </div>

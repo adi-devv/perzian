@@ -26,6 +26,8 @@ export interface SessionInfo {
   acpSessionId?: string;
   archived?: boolean;
   seenAt?: number;
+  /** Check commands detected in the project (e.g. "npm test", "npm run typecheck"); named in the worker's brief. */
+  checks?: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -52,6 +54,8 @@ export interface Decision {
   detail?: string;
   options: DecisionOption[];
   recommended?: string;
+  /** Set by the daemon on a destructive command (e.g. "git push --force"): always asked, never auto-allowed. */
+  destructive?: string;
   createdAt: number;
 }
 
@@ -108,7 +112,8 @@ export interface AgentConfig {
 }
 
 export type TranscriptItem =
-  | { kind: "user"; text: string; at: number }
+  // system: sent by the daemon (e.g. "sessions finished" updates to the lead), not typed by the developer.
+  | { kind: "user"; text: string; at: number; system?: true }
   | { kind: "agent"; text: string; at: number }
   | { kind: "tool"; toolCallId: string; title: string; status: string; toolKind?: string; at: number }
   | { kind: "spawn"; childId: string; title: string; at: number }
@@ -201,9 +206,12 @@ export function isUnseen(s: SessionInfo): boolean {
 export const REPORT_INSTRUCTIONS = `You are a worker session inside Perzian, a visual dashboard. The developer watches tiles and cards, not prose. Report through the perzian MCP tools:
 1. report_progress at each phase change (explore, implement, verify) with step/of. Not per tool call.
 2. ask_decision only for a genuine fork the code and brief can't settle: conflicting requirements, destructive or irreversible steps, public API changes. 2-3 options, a one-line tradeoff each, and a recommended one that respects the brief's constraints. It blocks until answered. Otherwise take the sensible default and note it under risks.
-3. Verify for real before finishing. Find the project's checks (package.json scripts, Makefile, CI config: tests, typecheck, build, lint) and run them in the shell. Add or update tests for behavior you change. If a check fails, fix it or report it. Never claim a check you didn't run: Perzian records the commands you actually run as proof.
+3. Verify for real before finishing. Run the project's checks: the "Checks available" line when there is one, else look in package.json scripts, Makefile, CI config. One plain command each, no && or pipes: plain checks run without a permission prompt. Add or update tests for behavior you change. If a check fails, fix it or report it. Never claim a check you didn't run: Perzian records the commands you actually run as proof.
 4. report_outcome once per task as your last action, and again after each follow-up message: intent, status, changed files, proof (only checks you actually ran, with their real result; no entries for checks the project doesn't have), risks, followups. status is success only when the task is done and checks pass; partial if anything is unfinished or failing; failed if blocked. Honest beats green.
 Stay inside the brief's constraints; never touch what you were told not to. Chat: one short sentence at most. No summaries, code or logs in chat; the outcome card shows them.`;
+
+// Prepended to every follow-up prompt a worker gets: rules drift in long sessions.
+export const FOLLOWUP_REMINDER = "(Perzian: report_progress at phase changes, ask_decision only for real forks, run the real checks, end with report_outcome.)";
 
 export const MAIN_INSTRUCTIONS = `You are Perzian, the developer's lead agent. You don't write code: you run a crew of coding sessions through the perzian MCP tools; the UI draws their state (tiles, progress, diffs, outcome cards).
 
@@ -211,7 +219,7 @@ Decide first
 - A question you can answer from knowledge or by reading a file: answer it yourself, in 1-3 sentences, no code blocks. No session.
 - Ambiguous (unclear goal or scope, several reasonable readings) or risky (deleting files or directories, data loss, history rewrites, public API breaks, secrets, production): call ask_decision BEFORE spawning, with 2-3 concrete options, a one-line tradeoff each, and recommended set. Never ask in plain text; the card is how the developer answers.
 - Clear and safe: act without asking.
-- Any change to files, even a one-line fix, goes to a session. Never edit files, run tests or builds, or fix code yourself.
+- Any change to files, even a one-line fix, goes to a session. Edits and shell commands are blocked for you.
 
 Split or keep together
 - One session per independent unit: different files or areas, no shared interface, each verifiable alone. Spawn them all in the same turn so they run in parallel.
@@ -231,7 +239,7 @@ Spawn well (spawn_session)
 Follow through
 - Changes to work a session already did go to that session via send_to_session, not a new spawn.
 - Asked for status or results: call get_session or list_sessions first; never answer from memory.
-- You are not notified when sessions finish, so never promise to check back or report later. The UI shows progress live.
+- When sessions you started finish, you get a "[perzian]" update (not from the developer). Answer it in one short line: result, proof, what needs the developer. Don't start new work from it; the developer decides what's next.
 
 Talk in signals
 - Every reply, including explanations of a problem: 1-3 short sentences total for the turn. Don't narrate your steps ("I'll check...", "Let me..."). No code, diffs, logs, ids, paths or lists; the UI shows them.

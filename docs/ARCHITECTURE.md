@@ -46,9 +46,23 @@ Per session the daemon:
    when the agent supports `loadSession`, so sessions resume after a daemon restart.
 4. Applies the permission mode and model, reads the agent's available modes/models into `session.config`.
 5. `session/prompt`; normalizes `session/update` (chunks, tool calls) into transcript events.
-6. `session/request_permission` → `decision.requested` → waits for the UI's answer.
+6. `session/request_permission` → the daemon's policy (`permissions.ts`) answers, or `decision.requested` →
+   waits for the UI's answer.
 
 **Permission modes** (`ask` · `edits` · `plan` · `auto`) map to each agent's own mode ids; first match wins.
+For Claude, `edits` and `auto` run the agent in its asking mode and the daemon answers, so every request
+passes through one policy:
+
+| Request | Answer |
+|---|---|
+| perzian MCP tools | allowed |
+| lead: edit/delete/move/execute | rejected, with a `Blocked: …` notice (no card) |
+| lead: read/search | allowed |
+| worker: destructive command (`rm -rf`, force push, `reset --hard`, `clean -f`, dropping a database…) | always a card, flagged `destructive`, no "always allow" option |
+| worker: one plain check command (`npm test`, `npm run typecheck`, `tsc --noEmit`, `pytest`, `cargo test`, `go test`…; no `;` `&&` `\|` `$(` redirects) | allowed once |
+| worker in `edits`: edits and reads | allowed once |
+| worker in `auto`: anything else | allowed once |
+| otherwise | a card |
 **Model picker** is per session, applied through the agent's model config option.
 
 ## Structured reporting
@@ -64,6 +78,12 @@ Agents get `REPORT_INSTRUCTIONS` and the report MCP so they report **data**:
 **Derived outcomes:** if a worker's turn ends (`end_turn`) with file changes but no `report_outcome`, the daemon
 builds one (`derived: true`) from the prompt and the session's git changes.
 
+**Checks:** at spawn the daemon detects the project's check commands (`checks.ts`: package.json scripts
+test/typecheck/lint/build with the lockfile's package manager, pytest/mypy/ruff, Cargo, go.mod, a Makefile
+`test` target) into `SessionInfo.checks`, appends `Checks available: …` to the worker's first prompt, and
+returns them from `list_sessions`/`get_session`. Later worker prompts get a one-line rules reminder
+(`FOLLOWUP_REMINDER`).
+
 ## Change map
 
 After each turn, and shortly after edit/delete/move/execute tool calls complete, the daemon runs `git.changes(cwd, baseSha)`: `git diff --name-status`
@@ -76,7 +96,15 @@ shows as deleted + added.
 
 A session with `role: "main"`, started by `main.start`, running in `$PERZIAN_HOME/main` with
 `MAIN_INSTRUCTIONS`. It delegates through the orchestration tools; spawned sessions carry `parentId` and
-appear in its thread as `spawn` transcript items.
+appear in its thread as `spawn` transcript items. It always runs in Ask mode and can't edit or run commands
+(see the policy above).
+
+**Child-finished updates** (`notify.ts`): when a turn the lead started (spawn or `send_to_session`) ends
+done/failed, the daemon batches it with others finishing within ~1.5 s and, once the lead is between turns,
+prompts the lead with one machine-readable line per child (`id`, `title`, `status`, `outcome`, observed
+`proof`, `files`, `intent`). These are `user` transcript items with `system: true`, drawn as a notice, not a
+developer bubble. Turns the developer drove in a child aren't reported, and after 6 automatic lead turns
+without a developer message, updates pause until the developer speaks.
 
 ## Session state machine
 

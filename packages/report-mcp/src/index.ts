@@ -96,10 +96,10 @@ server.tool(
 );
 
 if (role === "main") {
-  server.tool("list_sessions", "List the developer's coding sessions with status, progress, changed files and outcomes.", {}, async () =>
+  server.tool("list_sessions", "List the developer's coding sessions with status, progress, changed files, outcomes and detected check commands.", {}, async () =>
     text(await send({ tool: "list_sessions", sessionId, args: {} })),
   );
-  server.tool("get_session", "Get one session's status, progress, changed files, outcome (with observed proof) and last message. You are not notified when sessions finish: call this before reporting status or results.", { id: z.string() }, async (args) =>
+  server.tool("get_session", "Get one session's status, progress, changed files, outcome (with observed proof), detected check commands and last message. Call this before reporting status or results the developer asks for.", { id: z.string() }, async (args) =>
     text(await send({ tool: "get_session", sessionId, args })),
   );
   server.tool(

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import {
+  FOLLOWUP_REMINDER,
   MAIN_INSTRUCTIONS,
   REPORT_INSTRUCTIONS,
   type AgentConfig,
@@ -21,6 +22,7 @@ import { ProofTracker, mergeProofs } from "./proof.ts";
 import { existsSync } from "node:fs";
 import { adapterEntry, agentEnv } from "./agents.ts";
 import type { Credentials } from "./credentials.ts";
+import { permissionPolicy } from "./permissions.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const reportMcpEntry = join(here, "../../../packages/report-mcp/src/index.ts");
@@ -31,12 +33,15 @@ const reportMcpArgs = (): string[] =>
   process.env.PERZIAN_REPORT_MCP ? [process.env.PERZIAN_REPORT_MCP] : existsSync(bundledReportMcp) ? [bundledReportMcp] : [tsxCli, reportMcpEntry];
 
 
-// Our permission modes -> candidate mode ids, first one the agent offers wins.
+// Our permission modes -> candidate mode ids, first one the agent offers wins. For Claude, "edits" and
+// "auto" also run in its asking mode and the daemon answers (see permissions.ts): in accept-edits or bypass
+// mode Claude doesn't ask before rm -rf or a force push, so the daemon couldn't put a card in front of them.
+// Codex has no such mode we can drive yet, so it keeps its own.
 const MODE_IDS: Record<PermissionMode, string[]> = {
   ask: ["default", "ask", "read-only"],
-  edits: ["acceptEdits", "auto", "auto-edit"],
+  edits: ["default", "auto-edit", "auto"],
   plan: ["plan", "read-only"],
-  auto: ["bypassPermissions", "dontAsk", "full-access", "yolo"],
+  auto: ["default", "auto-edit", "auto", "full-access"],
 };
 
 const DEBUG = !!process.env.PERZIAN_DEBUG;
@@ -95,7 +100,7 @@ export class AgentSession {
   }
 
   static create(
-    opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; id?: string },
+    opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; id?: string; checks?: string[] },
     deps: SessionDeps,
   ): AgentSession {
     const now = Date.now();
@@ -112,6 +117,7 @@ export class AgentSession {
       agent: opts.agent,
       model: opts.model || undefined,
       mode: opts.mode ?? "ask",
+      ...(opts.checks?.length ? { checks: opts.checks } : {}),
       status: "idle",
       createdAt: now,
       updatedAt: now,
@@ -297,6 +303,12 @@ export class AgentSession {
   }
 
   applyMode(mode: PermissionMode): Promise<void> {
+    // The lead never edits, so it has nothing to auto-accept; in those modes the agent wouldn't ask and
+    // the daemon couldn't block its edits.
+    if (this.info.role === "main" && (mode === "edits" || mode === "auto")) {
+      this.notice("The lead always runs in Ask mode: it delegates edits to sessions");
+      mode = "ask";
+    }
     if (this.info.mode !== mode) this.update({ mode });
     return this.queueConfig(async () => {
       if (!this.conn || !this.info.acpSessionId || this.info.mode !== mode) return; // superseded
@@ -341,8 +353,9 @@ export class AgentSession {
     return (family && (opts.find((o) => o.value === family) ?? opts.find((o) => o.value.includes(family)))?.value) || model;
   }
 
-  async prompt(text: string): Promise<void> {
-    this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "user", text, at: Date.now() } });
+  /** `system`: sent by the daemon, not typed by the developer (marked in the transcript). */
+  async prompt(text: string, opts: { system?: boolean } = {}): Promise<void> {
+    this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "user", text, at: Date.now(), ...(opts.system ? { system: true as const } : {}) } });
     // A prompt sent while a turn is running is queued by the agent; the session stays "working" until
     // the last one returns.
     const first = this.inflight++ === 0;
@@ -355,8 +368,7 @@ export class AgentSession {
       await this.ensureStarted();
       if (!this.conn || !this.info.acpSessionId) throw new Error("session not started");
       if (first) this.turnBaseline = this.info.baseSha ? JSON.stringify(await git.changes(this.info.cwd, this.info.baseSha).catch(() => [])) : undefined;
-      const preamble = this.info.role === "main" ? MAIN_INSTRUCTIONS : REPORT_INSTRUCTIONS;
-      const body = this.turn++ === 0 ? `${preamble}\n\n---\n\n${text}` : text;
+      const body = this.promptBody(text, this.turn++ === 0);
       const res = await this.conn.prompt({ sessionId: this.info.acpSessionId, prompt: [{ type: "text", text: body }] });
       this.flushAgentText();
       // Close the cancelled turn's tools now, even if a newer prompt is already queued behind it;
@@ -374,6 +386,15 @@ export class AgentSession {
     } finally {
       this.inflight--;
     }
+  }
+
+  // What the agent receives: instructions on the first turn, plus for workers the detected checks; a
+  // one-line rules reminder on later worker turns, since long sessions drift.
+  private promptBody(text: string, first: boolean): string {
+    if (this.info.role === "main") return first ? `${MAIN_INSTRUCTIONS}\n\n---\n\n${text}` : text;
+    if (!first) return `${FOLLOWUP_REMINDER}\n\n${text}`;
+    const checks = this.info.checks?.length ? `\n\nChecks available: ${this.info.checks.join(", ")}` : "";
+    return `${REPORT_INSTRUCTIONS}\n\n---\n\n${text}${checks}`;
   }
 
   // Tool calls the agent never closed (cancelled turn, crash) would spin forever in the UI.
@@ -501,19 +522,40 @@ export class AgentSession {
   private client(): acp.Client {
     return {
       requestPermission: async (params) => {
-        const title = params.toolCall.title ?? this.tools.get(params.toolCall.toolCallId)?.title ?? "";
-        // Our own reporting tools never need the developer.
-        if (OWN_TOOL.test(title) || this.tools.get(params.toolCall.toolCallId)?.own) {
-          const allow = params.options.find((o) => o.kind === "allow_always") ?? params.options.find((o) => o.kind === "allow_once");
-          if (allow) return { outcome: { outcome: "selected", optionId: allow.optionId } };
-        }
+        const known = this.tools.get(params.toolCall.toolCallId);
+        const title = params.toolCall.title ?? known?.title ?? "";
         const raw = params.toolCall.rawInput as Record<string, unknown> | undefined;
-        const detail = typeof raw?.command === "string" ? raw.command : typeof raw?.file_path === "string" ? raw.file_path : undefined;
+        const kind = params.toolCall.kind ?? known?.kind;
+        const command = typeof raw?.command === "string" ? raw.command : undefined;
+        const verdict = permissionPolicy({
+          role: this.info.role,
+          mode: this.info.mode,
+          toolKind: kind ?? undefined,
+          command,
+          title,
+          own: OWN_TOOL.test(title) || OWN_TOOL.test(toolName(params.toolCall) ?? "") || !!known?.own,
+        });
+        const pick = (...kinds: acp.PermissionOptionKind[]) => kinds.map((k) => params.options.find((o) => o.kind === k)).find(Boolean);
+        if (DEBUG) console.error(`[perm ${this.info.id.slice(0, 6)}] ${kind} ${JSON.stringify(command ?? title).slice(0, 120)} -> ${JSON.stringify(verdict)}`);
+        if (verdict.action === "allow") {
+          // Our own tools may be remembered; anything else is allowed once, so no standing rule is written.
+          const allow = verdict.why === "own" ? pick("allow_always", "allow_once") : pick("allow_once");
+          if (allow) return { outcome: { outcome: "selected", optionId: allow.optionId } };
+        } else if (verdict.action === "deny") {
+          this.notice(`Blocked: the lead doesn't ${verdict.why === "lead-edit" ? "edit files" : "run commands"} (${(command ?? title).slice(0, 80)})`);
+          const reject = pick("reject_once", "reject_always");
+          return reject ? { outcome: { outcome: "selected", optionId: reject.optionId } } : { outcome: { outcome: "cancelled" } };
+        }
+        const destructive = verdict.action === "ask" ? verdict.destructive : undefined;
+        const detail = command ?? (typeof raw?.file_path === "string" ? raw.file_path : undefined);
+        // A destructive command is allowed once at most: an "always" rule would let the next one through unasked.
+        const options = params.options.filter((o) => !destructive || o.kind !== "allow_always");
         const optionId = await this.requestDecision({
           source: "permission",
           question: title || "Allow this action?",
           detail: detail && detail !== title ? detail : undefined,
-          options: params.options.map((o) => ({ id: o.optionId, label: o.name, kind: o.kind })),
+          options: options.map((o) => ({ id: o.optionId, label: o.name, kind: o.kind })),
+          ...(destructive ? { destructive } : {}),
         });
         return optionId === null ? { outcome: { outcome: "cancelled" } } : { outcome: { outcome: "selected", optionId } };
       },

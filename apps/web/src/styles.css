@@ -270,6 +270,9 @@ em.a { color: var(--add); font-style: normal; font-family: var(--mono); font-siz
 .decision-src:hover { color: var(--fg); }
 .decision-q { margin: 0; font-weight: 500; font-size: 14px; }
 .perm-body { display: flex; flex-direction: column; gap: 6px; }
+.decision.destructive { border-color: var(--failed); box-shadow: inset 3px 0 0 var(--failed); }
+.danger-tag { align-self: flex-start; font-size: 11px; font-weight: 600; color: var(--failed); text-transform: uppercase; letter-spacing: .04em; }
+.notice.system-update { font-style: italic; }
 .perm-tool { font-weight: 500; font-size: 13px; overflow-wrap: anywhere; }
 .perm-body code { display: block; background: var(--bg); border-radius: 6px; padding: 7px 9px; overflow-x: auto; white-space: pre; color: var(--fg-2); }
 .options { display: flex; flex-direction: column; gap: 2px; }

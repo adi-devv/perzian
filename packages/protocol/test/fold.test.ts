@@ -160,3 +160,15 @@ test("isUnseen: only finished sessions updated after last seen", () => {
   assert.equal(isUnseen(session("a", { status: "working", updatedAt: 5 })), false);
   assert.equal(isUnseen(session("a", { status: "needs_you", updatedAt: 5 })), false);
 });
+
+test("daemon-sent user items keep their system flag through the fold", () => {
+  const s = fold([
+    created(session("lead", { role: "main" })),
+    { type: "session.transcript", sessionId: "lead", item: { kind: "user", text: "hi", at: 1 } },
+    { type: "session.transcript", sessionId: "lead", item: { kind: "user", text: "[perzian] a session finished.", at: 2, system: true } },
+  ]);
+  const items = s.transcripts.lead;
+  assert.equal(items.length, 2);
+  assert.equal(items[0].kind === "user" && items[0].system, undefined);
+  assert.equal(items[1].kind === "user" && items[1].system, true);
+});
