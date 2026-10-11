@@ -1,9 +1,9 @@
 // End-to-end smoke test: drives a real agent session through the daemon.
 // Usage: npx tsx scripts/e2e.ts <repoPath> "<prompt>" [model]
-//   env: WORKTREE=1, MODE=ask|edits|plan|auto, SESSION=<id> (send a follow-up prompt to an existing session instead)
+//   env: WORKTREE=1, MODE=ask|edits|plan|auto, AGENT=claude-code|codex, SESSION=<id> (send a follow-up prompt to an existing session instead)
 // Auto-answers every decision with the first allow/recommended option and exits when the session settles.
 import WebSocket from "ws";
-import type { Command, PerzianEvent, PermissionMode, ServerMessage } from "@perzian/protocol";
+import type { AgentKind, Command, PerzianEvent, PermissionMode, ServerMessage } from "@perzian/protocol";
 
 const [project, prompt, model] = process.argv.slice(2);
 if (!project || !prompt) {
@@ -27,7 +27,7 @@ ws.on("open", () => {
   if (sessionId) {
     send({ type: "session.prompt", sessionId, prompt });
     prompted = true;
-  } else send({ type: "session.create", project, prompt, model, title, mode: process.env.MODE as PermissionMode | undefined, worktree: process.env.WORKTREE === "1" });
+  } else send({ type: "session.create", project, prompt, model, title, agent: process.env.AGENT as AgentKind | undefined, mode: process.env.MODE as PermissionMode | undefined, worktree: process.env.WORKTREE === "1" });
 });
 ws.on("message", (raw) => {
   const msg = JSON.parse(String(raw)) as ServerMessage;
