@@ -2,6 +2,7 @@
 // in place, then a compact crew summary. Tap or swipe a card to open its session. Everything here is a fold over
 // the daemon's events (inbox() in the protocol); answers go out as the same decision.answer the Mac sends.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { disablePush, enablePush, pushState, pushSupport, type PushState } from "./push.ts";
 import { byAttention, crewMatch, crewStatus, failureLine, inbox, isUnseen, type Command, type CrewKey, type Decision, type InboxItem, type SessionInfo, type State } from "@perzian/protocol";
 import type { Link } from "./daemon.ts";
 import { DecisionCard, StatusGlyph, ago, statusText, useTick } from "./bits.tsx";
@@ -20,6 +21,29 @@ function useOpenSession(): [string | null, (id: string | null) => void] {
     const on = () => setOpen(read());
     window.addEventListener("popstate", on);
     return () => window.removeEventListener("popstate", on);
+  }, []);
+  // A tapped notification opens its session: a #session= link (app not running) or a message from the service worker.
+  useEffect(() => {
+    const fromHash = () => {
+      const id = new URLSearchParams(location.hash.slice(1)).get("session");
+      if (!id) return;
+      history.replaceState({ perzianSession: id }, "", location.pathname + location.search);
+      setOpen(id);
+    };
+    fromHash();
+    const onMessage = (e: MessageEvent) => {
+      const d = e.data as { type?: string; sessionId?: string } | null;
+      if (d?.type === "perzian.open" && typeof d.sessionId === "string") {
+        history.pushState({ perzianSession: d.sessionId }, "");
+        setOpen(d.sessionId);
+      }
+    };
+    window.addEventListener("hashchange", fromHash);
+    navigator.serviceWorker?.addEventListener("message", onMessage);
+    return () => {
+      window.removeEventListener("hashchange", fromHash);
+      navigator.serviceWorker?.removeEventListener("message", onMessage);
+    };
   }, []);
   const go = (id: string | null) => {
     if (id) {
@@ -96,8 +120,43 @@ export function PhoneHome({ state, send, link, error }: { state: State; send: Se
         <>
           <Inbox items={items} online={online} card={(i) => card(i, true)} />
           <CrewSummary state={state} onOpen={openSession} />
+          <Notifications online={online} />
         </>
       )}
+    </div>
+  );
+}
+
+/** "Turn on notifications": a tap (iOS needs the gesture), and on iOS only from the Home Screen app. */
+function Notifications({ online }: { online: boolean }) {
+  const support = useMemo(pushSupport, []);
+  const [state, setState] = useState<PushState | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (support === "ok" && online) void pushState().then(setState);
+  }, [support, online]);
+  if (support === "unsupported") return null;
+  if (support === "ios-install") return <p className="quiet phone-note">Add to Home Screen first (Share, then Add to Home Screen), then open Perzian from there to get notifications.</p>;
+  if (state === "blocked") return <p className="quiet phone-note">Notifications are blocked. Allow them for Perzian in Settings.</p>;
+  if (state === null) return null;
+  const toggle = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      setState(await (state === "on" ? disablePush() : enablePush()));
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="notify">
+      <button className="btn small" disabled={busy || !online} onClick={toggle}>
+        {state === "on" ? "Turn off notifications" : "Turn on notifications"}
+      </button>
+      {err && <span className="phone-err">{err}</span>}
     </div>
   );
 }

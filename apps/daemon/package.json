@@ -13,9 +13,11 @@
     "@agentclientprotocol/sdk": "^1.8.0",
     "@perzian/protocol": "*",
     "@vscode/tree-sitter-wasm": "^0.3.1",
+    "web-push": "^3.6.7",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.5.13"
   }
 }

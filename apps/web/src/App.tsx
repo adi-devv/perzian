@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AGENTS, isUnseen, shownPrompt, shownStatus, type BranchList, type Command, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
+import { AGENTS, isUnseen, pendingUsageCard, shownPrompt, shownStatus, type BranchList, type Command, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
 import { isDemo, useBranches, useDaemon, useDoctor, type Link } from "./daemon.ts";
 import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, parseFolders, readiness, saveProject, withProject } from "./onboarding.tsx";
 import { PairScreen, PhoneHome, useNarrow } from "./phone.tsx";
@@ -90,8 +90,9 @@ export function App() {
 
   // Keyboard: ⌘1 / Esc Perzian · ↑/↓ move between tiles, Enter opens · 1-9 answer a decision · / focus the input · ? help
   useEffect(() => {
+    const card = pendingUsageCard(state);
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target instanceof Element ? e.target : null;
+      const el =e.target instanceof Element ? e.target : null;
       const typing = el?.closest("input, textarea, select");
       if ((e.metaKey || e.ctrlKey) && e.key === "1" && !modal) {
         e.preventDefault();
@@ -113,7 +114,7 @@ export function App() {
       }
       // An empty composer still lets 1-9 answer the card on screen (focus stays in it after sending); with text in it, digits type.
       const emptyComposer = el instanceof HTMLTextAreaElement && el.closest(".composer") && !el.value;
-      if (typing && !(emptyComposer && /^[1-9]$/.test(e.key) && answerable())) return;
+      if (typing && !(emptyComposer && /^[1-9]$/.test(e.key) && (answerable() || card))) return;
       if (e.metaKey || e.ctrlKey || e.altKey || modal) return;
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
         e.preventDefault();
@@ -135,6 +136,12 @@ export function App() {
         tiles[next].scrollIntoView({ block: "nearest" });
       } else if (/^[1-9]$/.test(e.key)) {
         const shown = answerable();
+        // The account usage card takes 1 (Pause) / 2 (Keep going) when no session's own call is on screen.
+        if (!shown && card && (e.key === "1" || e.key === "2")) {
+          e.preventDefault();
+          send({ type: "usage.answer", key: card.key, choice: e.key === "1" ? "pause" : "keep_going" });
+          return;
+        }
         const opt = shown?.options[Number(e.key) - 1];
         if (!shown || !opt) return;
         e.preventDefault();
@@ -148,7 +155,7 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [decisions, selected, help, adding, accounts, mainItems.length]);
+  }, [decisions, selected, help, adding, accounts, mainItems.length, state.usageCards]);
 
   // A phone that isn't paired yet, or any window under 600px: the attention queue, nothing else.
   if (link === "unpaired") return <PairScreen />;

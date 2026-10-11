@@ -31,7 +31,7 @@ import { UsageMeter } from "./usage.ts";
 import { SetupGate, readyWorktree } from "./setup.ts";
 import { MAX_FIX_ATTEMPTS, declaredBrief, declaredProofs, fixPrompt, runDeclaredChecks } from "./checks.ts";
 import { checkPlan, clearsInterrupted, type CheckResult, type CheckRun, type DeclaredCheck, type PerzianEvent } from "@perzian/protocol";
-import { hitFromReading, limitFromError, parseLimitText, pauseThreshold, readRateLimit, resumeTime, type LimitHit } from "./limits.ts";
+import { hitFromReading, limitFromError, parseLimitText, pauseThreshold, readRateLimit, resumeTime, type LimitHit, type RateLimitReading } from "./limits.ts";
 
 /** Sent to a session when its usage limit resets. */
 export const CONTINUE_PROMPT = "(Perzian: your usage limit has reset. Continue where you left off.)";
@@ -97,6 +97,16 @@ export interface SessionDeps {
   prLookup?: (cwd: string, branch?: string) => Promise<PrView | undefined>;
   /** Fetches the base branch from origin (tests swap out git's network). Resolves whether it worked. */
   baseFetch?: (cwd: string, base: string) => Promise<boolean>;
+  /** The account-level usage governor (usagecard.ts); without it, nearing a limit pauses nothing. */
+  usage?: UsageSignals;
+}
+
+/** What a session tells the account-level usage governor. */
+export interface UsageSignals {
+  /** A rate-limit reading past the pause threshold. */
+  near(reading: RateLimitReading, sessionId: string): void;
+  /** This session was refused at its limit and paused; the others share the account, so they stop too. */
+  refused(sessionId: string, hit: LimitHit): void;
 }
 
 // One agent session = one adapter process + one ACP connection. Can be dormant (restored from the log)
@@ -144,6 +154,8 @@ export class AgentSession {
   private limitHit?: LimitHit;
   private pauseAfterStep?: LimitHit;
   private stoppingForLimit = false;
+  /** The stop in progress is for a limit another session hit (not a warning): the pause isn't "early". */
+  private stopIsHard = false;
   private turnText = "";
   /** "Resume now" on an early pause: don't pause early again before this time. */
   private nearLimitOkUntil = 0;
@@ -460,6 +472,7 @@ export class AgentSession {
       this.limitHit = undefined;
       this.pauseAfterStep = undefined;
       this.stoppingForLimit = false;
+      this.stopIsHard = false;
       this.turnText = "";
     }
     if (!opts.checkFix) this.fixAttempts = 0;
@@ -597,7 +610,7 @@ export class AgentSession {
     const hit = this.limitHit || said?.resetAt !== undefined ? this.mergeHit(said) : undefined;
     const early = !hit && stopReason === "cancelled" && this.stoppingForLimit ? this.pauseAfterStep : undefined;
     if (hit || early) {
-      this.pause((hit ?? early)!, !hit);
+      this.pause((hit ?? early)!, !hit && !this.stopIsHard, !hit);
       return;
     }
     // Only derive an outcome when this turn actually touched files (not for a follow-up question).
@@ -897,18 +910,21 @@ export class AgentSession {
   }
 
   /** Stop at a usage limit: status "paused" until the limit resets (the resume queue picks it up). */
-  pause(hit: LimitHit, early = false): void {
+  pause(hit: LimitHit, early = false, fromOthers = false): void {
     const at = Date.now();
     const { resumeAt, estimated } = resumeTime(hit, at);
     const pause: PauseInfo = { reason: hit.reason, resumeAt, at, ...(estimated ? { estimated } : {}), ...(hit.window ? { window: hit.window } : {}), ...(early ? { early } : {}) };
     this.limitHit = undefined;
     this.pauseAfterStep = undefined;
     this.stoppingForLimit = false;
+    this.stopIsHard = false;
     this.info.status = "paused";
     this.info.pause = pause;
     this.info.updatedAt = at;
     this.notice(early ? "Paused near the usage limit, after the current step" : "Paused at the usage limit");
     this.store.emit({ type: "session.paused", sessionId: this.info.id, pause });
+    // Refused by the API (not stopped by us): the other sessions share this limit.
+    if (!early && !fromOthers && !hit.transient) this.deps.usage?.refused(this.info.id, { ...hit, resumeAt, ...(estimated ? { estimated: true } : {}) });
   }
 
   /** Leaves "paused" (to idle), without prompting. False when it wasn't paused. */
@@ -935,13 +951,28 @@ export class AgentSession {
   // turns are short and it should stay reachable.
   private onRateLimit(info: unknown): void {
     if (this.inflight === 0) return;
-    const r = readRateLimit(info, this.info.role === "worker" ? pauseThreshold() : 0);
+    const r = readRateLimit(info, pauseThreshold());
     if (!r) return;
     if (r.state === "rejected") this.limitHit ??= hitFromReading(r);
-    else if (r.state === "near" && r.resetAt !== undefined && Date.now() >= this.nearLimitOkUntil && !this.pauseAfterStep) {
-      this.pauseAfterStep = hitFromReading(r);
-      this.notice(`${this.pauseAfterStep.reason}: pausing after the current step`);
-    }
+    // Near: the account-level card decides (usagecard.ts); the lead raises it too but is never paused by it.
+    else if (r.state === "near" && r.resetAt !== undefined && Date.now() >= this.nearLimitOkUntil) this.deps.usage?.near(r, this.info.id);
+  }
+
+  /** Pause after the current step (the usage card said Pause). No-op unless working. */
+  pauseAfterCurrentStep(hit: LimitHit): void {
+    if (this.info.status !== "working" || this.pauseAfterStep) return;
+    this.pauseAfterStep = hit;
+    this.notice(`${hit.reason}: pausing after the current step`);
+    this.maybeStopForLimit();
+  }
+
+  /** Another session hit the shared limit: stop this turn now and pause with the same resume time. */
+  pauseForSharedLimit(hit: LimitHit): void {
+    if (this.info.status !== "working" || this.stoppingForLimit || !this.conn || !this.info.acpSessionId) return;
+    this.pauseAfterStep = hit;
+    this.stoppingForLimit = true;
+    this.stopIsHard = true;
+    void this.conn.cancel({ sessionId: this.info.acpSessionId }).catch(() => {});
   }
 
   // A step is a tool call. Once the one running finishes (and nothing else is open or waiting on the

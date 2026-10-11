@@ -9,9 +9,9 @@ const port = new URLSearchParams(location.search).get("port") ?? "4317";
 export const API_BASE = direct ? `http://127.0.0.1:${port}` : "";
 // The desktop app passes the daemon's token (?t=); file:// pages count only with it.
 const token = new URLSearchParams(location.search).get("t");
-// A phone opens the HTTPS tailnet address (*.ts.net). It carries a long-lived device token from pairing in
+// A phone opens the HTTPS tailnet address (*.ts.net) or the quick tunnel's (*.trycloudflare.com). It carries a long-lived device token from pairing in
 // localStorage, sent as ?t= (a WebSocket can't set headers). Without one it shows the pairing screen.
-export const isPhone = location.hostname.endsWith(".ts.net");
+export const isPhone = location.hostname.endsWith(".ts.net") || location.hostname.endsWith(".trycloudflare.com");
 const DEVICE_KEY = "perzian.device";
 let deviceToken: string | null = null;
 try {
@@ -115,6 +115,28 @@ export function useDaemon() {
     };
   }, []);
 
+  // Tell the daemon whether this window is being looked at, so pushes to the phone stay quiet meanwhile.
+  // It treats silence as "not looking"; the 10 s beat keeps a focused window counted.
+  useEffect(() => {
+    if (isDemo || isPhone || link !== "online") return;
+    const tell = () => {
+      const s = ws.current;
+      const cmd: Command = { type: "ui.presence", focused: document.hasFocus() && document.visibilityState === "visible" };
+      if (s?.readyState === WebSocket.OPEN) s.send(JSON.stringify(cmd));
+    };
+    tell();
+    const beat = setInterval(tell, 10_000);
+    window.addEventListener("focus", tell);
+    window.addEventListener("blur", tell);
+    document.addEventListener("visibilitychange", tell);
+    return () => {
+      clearInterval(beat);
+      window.removeEventListener("focus", tell);
+      window.removeEventListener("blur", tell);
+      document.removeEventListener("visibilitychange", tell);
+    };
+  }, [link]);
+
   const send = (cmd: Command) => {
     if (isDemo) return demoSend(cmd, stateRef.current, (e) => dispatch({ kind: "event", event: e }));
     if (ws.current?.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(cmd));
@@ -207,6 +229,17 @@ export function useBranches(project: string | null) {
     };
   }, [project]);
   return list;
+}
+
+/** Removes a leftover worktree (never forced, never its branch). Resolves to why it refused, or undefined when it's gone. */
+export async function removeWorktree(path: string): Promise<string | undefined> {
+  if (isDemo) return "Not available in the demo";
+  try {
+    const res = await fetch(api(`/api/worktrees/remove`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }) });
+    return res.ok ? undefined : (await res.text()) || "Couldn't remove it";
+  } catch {
+    return "Daemon not reachable";
+  }
 }
 
 export async function installAgent(agent: AgentKind): Promise<InstallResult> {

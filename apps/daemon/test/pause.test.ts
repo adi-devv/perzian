@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventStore } from "../src/store.ts";
-import { AgentSession, CONTINUE_PROMPT, type SessionDeps } from "../src/session.ts";
+import { AgentSession, CONTINUE_PROMPT, type SessionDeps, type UsageSignals } from "../src/session.ts";
+import { UsageGovernor } from "../src/usagecard.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tmp = mkdtempSync(join(tmpdir(), "perzian-pause-"));
@@ -35,12 +36,14 @@ afterEach(async () => {
   for (const st of stores.splice(0)) st.close();
 });
 
-function make(scenario: string, role: "main" | "worker" = "worker") {
+function make(scenario: string, role: "main" | "worker" = "worker", usage?: UsageSignals) {
   process.env.FAKE_SCENARIO = scenario;
   const dir = join(tmp, `case-${++n}`);
   mkdirSync(dir, { recursive: true });
   const store = new EventStore(join(dir, "home"), { compact: "never" });
-  const deps: SessionDeps = { store, daemonUrl: "http://127.0.0.1:1", decisions: new Map() };
+  // Nearing a limit is the account governor's call (usagecard.ts): here it always answers Pause.
+  store.emit({ type: "settings.usageCard", mode: "pause", at: Date.now() });
+  const deps: SessionDeps = { store, daemonUrl: "http://127.0.0.1:1", decisions: new Map(), usage: usage ?? new UsageGovernor({ store, sessions: () => sessions }) };
   const s = AgentSession.create({ project: dir, cwd: dir, title: "Worker", agent: "claude-code", role }, deps);
   sessions.push(s);
   stores.push(store);
@@ -76,6 +79,13 @@ describe("AgentSession at a usage limit", () => {
     const reply = items(store, s.info.id).filter((t) => t.kind === "agent").at(-1);
     assert.match(reply?.kind === "agent" ? reply.text : "", /Continue where you left off/, "the same adapter session got the message");
     assert.equal(after.acpSessionId, "fake-session");
+  });
+
+  test("a refused session tells the governor, with the resume time the others must share", async () => {
+    const seen: { id: string; resumeAt?: number }[] = [];
+    const { s, store } = make("limit", "worker", { near: () => {}, refused: (id, hit) => seen.push({ id, resumeAt: hit.resumeAt }) });
+    await s.prompt("Add the endpoint");
+    assert.deepEqual(seen, [{ id: s.info.id, resumeAt: store.state().sessions[s.info.id].pause!.resumeAt }]);
   });
 
   test("near the limit: the current step finishes, then it pauses early", async () => {

@@ -284,4 +284,31 @@ describe("leftoverWorktrees", () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  test("removeLeftoverWorktree removes a clean one, refuses a dirty one, never deletes the branch", async () => {
+    const home = mkdtempSync(join(tmpdir(), "perzian-rm-"));
+    try {
+      const repo = join(home, "repo");
+      mkdirSync(repo);
+      execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repo });
+      execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "i"], { cwd: repo });
+      const add = (name: string) => {
+        const p = join(home, "worktrees", "app", name);
+        execFileSync("git", ["worktree", "add", "-q", "-b", `perzian/${name}`, p], { cwd: repo });
+        return p;
+      };
+      const clean = add("clean-aaaaaa"), dirty = add("dirty-bbbbbb");
+      writeFileSync(join(dirty, "wip.txt"), "unsaved\n");
+      await assert.rejects(git.removeLeftoverWorktree(home, [], dirty), /uncommitted changes \(1 file\)/);
+      assert.ok(existsSync(join(dirty, "wip.txt")), "dirty worktree untouched");
+      await git.removeLeftoverWorktree(home, [], clean);
+      assert.equal(existsSync(clean), false);
+      assert.match(run(repo, "branch", "--list", "perzian/clean-aaaaaa"), /perzian\/clean-aaaaaa/, "branch kept");
+      // Only listed leftovers: a live session's worktree or any other path is refused.
+      await assert.rejects(git.removeLeftoverWorktree(home, [{ id: "1", cwd: dirty, worktree: true }], dirty), /Not a leftover/);
+      await assert.rejects(git.removeLeftoverWorktree(home, [], repo), /Not a leftover/);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });

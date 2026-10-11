@@ -10,6 +10,8 @@
 //   - the API is an allowlist (ping + a handful of commands in index.ts), not the whole loopback API.
 // The main listener never serves the phone path and the phone listener never serves the management API
 // (turn on/off, pairing codes, forget), so a stolen device token can't mint more devices.
+// "No setup" mode swaps the MagicDNS name for a Cloudflare quick tunnel's name (tunnel.ts): the same single-name
+// Host/Origin allowlist, the same tokens, nothing else changes.
 // Tailscale-* headers are not used for trust: other local processes can hit this port directly and can
 // forge them. The token is the only credential.
 
@@ -18,42 +20,82 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { PhonePairing, PhoneStatus } from "@perzian/protocol";
+import type { PhoneMode, PhonePairing, PhoneStatus } from "@perzian/protocol";
 import { run, serveOff, serveOn, tailscaleInfo, type Run } from "./tailscale.ts";
+import { findCloudflared, startTunnel, type Tunnel } from "./tunnel.ts";
+import { validateSubscription, type PushSubscriptionJSON } from "./push.ts";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
-/** Paired phones. Only SHA-256 hashes of their tokens are stored (<PERZIAN_HOME>/phones.json, 0600). */
+/** Paired phones. Only SHA-256 hashes of their tokens are stored (<PERZIAN_HOME>/phones.json, 0600), plus each
+ *  phone's Web Push subscription when it turned notifications on. A device's id is the start of its hash: it
+ *  can't be turned back into the token. Revoking a device deletes its subscription with it. */
 export class Devices {
-  private hashes = new Map<string, number>();
+  private devices = new Map<string, { createdAt: number; sub?: PushSubscriptionJSON }>();
   private listeners: Array<() => void> = [];
   constructor(private home: string) {
     try {
-      const j = JSON.parse(readFileSync(join(home, "phones.json"), "utf8")) as { devices?: Array<{ hash: string; createdAt: number }> };
-      for (const d of j.devices ?? []) if (typeof d.hash === "string") this.hashes.set(d.hash, d.createdAt);
+      const j = JSON.parse(readFileSync(join(home, "phones.json"), "utf8")) as { devices?: Array<{ hash: string; createdAt: number; sub?: unknown }> };
+      for (const d of j.devices ?? []) {
+        if (typeof d.hash !== "string") continue;
+        const sub = validateSubscription(d.sub);
+        this.devices.set(d.hash, { createdAt: d.createdAt, ...(sub ? { sub } : {}) });
+      }
     } catch {}
   }
   private save() {
     mkdirSync(this.home, { recursive: true });
     const file = join(this.home, "phones.json");
-    writeFileSync(file, JSON.stringify({ devices: [...this.hashes].map(([hash, createdAt]) => ({ hash, createdAt })) }), { mode: 0o600 });
+    writeFileSync(file, JSON.stringify({ devices: [...this.devices].map(([hash, d]) => ({ hash, ...d })) }), { mode: 0o600 });
     chmodSync(file, 0o600);
   }
   /** A new long-lived token; the caller hands it to the phone once and never sees it again. */
   add(): string {
     const token = randomBytes(32).toString("hex");
-    this.hashes.set(sha256(token), Date.now());
+    this.devices.set(sha256(token), { createdAt: Date.now() });
     this.save();
     return token;
   }
   verify(token: string | undefined | null): boolean {
-    return !!token && token.length <= 256 && this.hashes.has(sha256(token));
+    return !!token && token.length <= 256 && this.devices.has(sha256(token));
   }
   count(): number {
-    return this.hashes.size;
+    return this.devices.size;
+  }
+  /** The id of the device this token belongs to, or undefined when it isn't (or is no longer) paired. */
+  idOf(token: string | undefined | null): string | undefined {
+    return this.verify(token) ? sha256(token!).slice(0, 16) : undefined;
+  }
+  private hashOf(id: string): string | undefined {
+    return [...this.devices.keys()].find((h) => h.slice(0, 16) === id);
+  }
+  setSubscription(id: string, sub: PushSubscriptionJSON): boolean {
+    const h = this.hashOf(id);
+    if (!h) return false;
+    this.devices.get(h)!.sub = sub;
+    this.save();
+    return true;
+  }
+  dropSubscription(id: string) {
+    const h = this.hashOf(id);
+    if (!h || !this.devices.get(h)!.sub) return;
+    delete this.devices.get(h)!.sub;
+    this.save();
+  }
+  subscriptions(): Array<{ id: string; sub: PushSubscriptionJSON }> {
+    return [...this.devices].flatMap(([hash, d]) => (d.sub ? [{ id: hash.slice(0, 16), sub: d.sub }] : []));
+  }
+  /** Forget one phone: its token stops working and its subscription is deleted. */
+  revoke(id: string): boolean {
+    const h = this.hashOf(id);
+    if (!h) return false;
+    this.devices.delete(h);
+    this.save();
+    for (const l of this.listeners) l();
+    return true;
   }
   revokeAll() {
-    this.hashes.clear();
+    this.devices.clear();
     this.save();
     for (const l of this.listeners) l();
   }
@@ -163,6 +205,8 @@ export interface PhoneServerOptions extends PhoneAuth {
   webDir: string;
   /** An authenticated WebSocket from a phone. */
   onConnection: (ws: WebSocket) => void;
+  /** Web Push: the VAPID public key phones subscribe with. Absent = /api/push/* answers 404. */
+  push?: { publicKey: string };
 }
 
 export interface PhoneServer {
@@ -193,6 +237,25 @@ export function createPhoneServer(o: PhoneServerOptions): PhoneServer {
       if (path === "/ws" || path.startsWith("/api/")) {
         if (!o.devices.verify(deviceToken(req, url))) return void json(res, 401, { error: "unpaired" });
         if (path === "/api/ping") return void json(res, 200, { ok: true });
+        if (o.push && path === "/api/push/key" && req.method === "GET") return void json(res, 200, { publicKey: o.push.publicKey });
+        if (o.push && path === "/api/push/subscribe") {
+          const id = o.devices.idOf(deviceToken(req, url));
+          if (!id) return void json(res, 401, { error: "unpaired" });
+          if (req.method === "DELETE") {
+            o.devices.dropSubscription(id);
+            return void json(res, 200, { ok: true });
+          }
+          if (req.method !== "POST") return void json(res, 404, { error: "not found" });
+          let body = "";
+          for await (const chunk of req) if ((body += chunk).length > 4096) return void json(res, 413, { error: "too large" });
+          let sub: PushSubscriptionJSON | undefined;
+          try {
+            sub = validateSubscription(JSON.parse(body));
+          } catch {}
+          if (!sub) return void json(res, 400, { error: "bad subscription" });
+          o.devices.setSubscription(id, sub);
+          return void json(res, 200, { ok: true });
+        }
         return void json(res, 404, { error: "not found" });
       }
       if (req.method === "GET" || req.method === "HEAD") return serveStatic(o.webDir, path, req, res);
@@ -231,41 +294,72 @@ export interface PhoneAccessOptions {
   codes: PairingCodes;
   webDir: () => string | undefined;
   onConnection: (ws: WebSocket) => void;
+  push?: { publicKey: string };
   exec?: Run;
+  /** Tests inject these; defaults run the real `cloudflared`. */
+  findCloudflared?: typeof findCloudflared;
+  startTunnel?: typeof startTunnel;
 }
 
-/** The on/off switch: starts the phone listener and the tailscale proxy together, and stops both. */
+/** The on/off switch: starts the phone listener and a way in (tailscale proxy or Cloudflare quick tunnel) together, and stops both. */
 export class PhoneAccess {
   private server?: PhoneServer;
   private cli?: string;
+  private tunnel?: Tunnel;
   private url?: string;
+  private mode: PhoneMode = "tailscale";
   private lastError?: string;
-  constructor(private o: PhoneAccessOptions) {}
+  constructor(private o: PhoneAccessOptions) {
+    try {
+      if ((JSON.parse(readFileSync(this.flag(), "utf8")) as { mode?: string }).mode === "tunnel") this.mode = "tunnel";
+    } catch {}
+  }
 
   private flag = () => join(this.o.home, "phone.json");
+  private writeFlag(on: boolean) {
+    writeFileSync(this.flag(), JSON.stringify({ on, mode: this.mode }), { mode: 0o600 });
+  }
+  /** Phone access is on: the listener is up. */
+  isOn(): boolean {
+    return !!this.server;
+  }
 
   async status(): Promise<PhoneStatus> {
-    const t = await tailscaleInfo(this.o.exec ?? run);
-    const url = t.dnsName && t.state === "ready" ? `https://${t.dnsName}:${this.o.httpsPort}` : undefined;
-    return { on: !!this.server, tailscale: t.state, ...(url ? { url } : {}), phones: this.o.devices.count(), ...(this.lastError ? { error: this.lastError } : {}) };
+    const exec = this.o.exec ?? run;
+    const [t, cf] = await Promise.all([tailscaleInfo(exec), (this.o.findCloudflared ?? findCloudflared)(exec)]);
+    const url = this.server ? this.url : this.mode === "tailscale" && t.dnsName && t.state === "ready" ? `https://${t.dnsName}:${this.o.httpsPort}` : undefined;
+    return { on: !!this.server, mode: this.mode, cloudflared: !!cf, tailscale: t.state, ...(url ? { url } : {}), phones: this.o.devices.count(), ...(this.lastError ? { error: this.lastError } : {}) };
   }
 
   private starting?: Promise<PhoneStatus>;
   /** A double click shares one start. */
-  turnOn(): Promise<PhoneStatus> {
-    this.starting ??= this.start().finally(() => (this.starting = undefined));
+  turnOn(mode?: PhoneMode): Promise<PhoneStatus> {
+    this.starting ??= this.start(mode).finally(() => (this.starting = undefined));
     return this.starting;
   }
 
-  private async start(): Promise<PhoneStatus> {
+  private async start(mode?: PhoneMode): Promise<PhoneStatus> {
     if (this.server) return this.status();
+    if (mode) this.mode = mode;
     this.lastError = undefined;
     const exec = this.o.exec ?? run;
-    const t = await tailscaleInfo(exec);
-    if (t.state !== "ready" || !t.cli || !t.dnsName) return this.fail(t.state === "missing" ? "Tailscale isn't installed." : t.state === "no-https" ? "Turn on MagicDNS and HTTPS certificates for your tailnet." : "Tailscale isn't signed in.");
     const webDir = this.o.webDir();
+    let cli: string | undefined;
+    let dnsName: string | undefined;
+    let cloudflared: string | undefined;
+    if (this.mode === "tunnel") {
+      cloudflared = await (this.o.findCloudflared ?? findCloudflared)(exec);
+      if (!cloudflared) return this.fail("cloudflared isn't installed. Run: brew install cloudflared");
+    } else {
+      const t = await tailscaleInfo(exec);
+      if (t.state !== "ready" || !t.cli || !t.dnsName) return this.fail(t.state === "missing" ? "Tailscale isn't installed." : t.state === "no-https" ? "Turn on MagicDNS and HTTPS certificates for your tailnet." : "Tailscale isn't signed in.");
+      cli = t.cli;
+      dnsName = t.dnsName;
+    }
     if (!webDir) return this.fail("The web UI isn't built. Run: npm run build");
-    const server = createPhoneServer({ hosts: new Set([t.dnsName]), devices: this.o.devices, codes: this.o.codes, webDir, onConnection: this.o.onConnection });
+    // Tunnel mode: the allowlist starts empty (everything is refused) and gets the tunnel's name once it exists.
+    const hosts = new Set<string>(dnsName ? [dnsName] : []);
+    const server = createPhoneServer({ hosts, devices: this.o.devices, codes: this.o.codes, webDir, onConnection: this.o.onConnection, push: this.o.push });
     try {
       await new Promise<void>((ok, bad) => {
         server.http.once("error", bad);
@@ -274,16 +368,35 @@ export class PhoneAccess {
     } catch (e) {
       return this.fail(`Can't listen on 127.0.0.1:${this.o.port} (${(e as Error).message}).`);
     }
-    const s = await serveOn(t.cli, this.o.httpsPort, this.o.port, exec);
-    if (!s.ok) {
-      await server.close();
-      return this.fail(`tailscale serve failed: ${s.out.split("\n").filter(Boolean).slice(-2).join(" ") || "no output"}`);
+    if (cli && dnsName) {
+      const s = await serveOn(cli, this.o.httpsPort, this.o.port, exec);
+      if (!s.ok) {
+        await server.close();
+        return this.fail(`tailscale serve failed: ${s.out.split("\n").filter(Boolean).slice(-2).join(" ") || "no output"}`);
+      }
+      this.cli = cli;
+      this.url = `https://${dnsName}:${this.o.httpsPort}`;
+    } else {
+      try {
+        const tunnel: Tunnel = await (this.o.startTunnel ?? startTunnel)(cloudflared!, this.o.port, { onExit: () => void this.tunnelDied(tunnel) });
+        hosts.add(tunnel.host);
+        this.tunnel = tunnel;
+        this.url = tunnel.url;
+      } catch (e) {
+        await server.close();
+        return this.fail((e as Error).message);
+      }
     }
     this.server = server;
-    this.cli = t.cli;
-    this.url = `https://${t.dnsName}:${this.o.httpsPort}`;
-    writeFileSync(this.flag(), JSON.stringify({ on: true }), { mode: 0o600 });
+    this.writeFlag(true);
     return this.status();
+  }
+
+  /** cloudflared died on its own: the link is gone, so close the door and say so. */
+  private async tunnelDied(t: Tunnel) {
+    if (this.tunnel !== t) return;
+    await this.turnOff();
+    this.lastError = "The tunnel stopped. Turn phone access on again for a new link.";
   }
 
   private async fail(msg: string): Promise<PhoneStatus> {
@@ -295,13 +408,25 @@ export class PhoneAccess {
     this.lastError = undefined;
     const server = this.server;
     this.server = undefined;
-    writeFileSync(this.flag(), JSON.stringify({ on: false }), { mode: 0o600 });
+    const tunnel = this.tunnel;
+    this.tunnel = undefined;
+    tunnel?.stop();
+    this.writeFlag(false);
     if (this.cli) await serveOff(this.cli, this.o.httpsPort, this.o.exec ?? run);
+    this.cli = undefined;
+    this.url = undefined;
     await server?.close();
     return this.status();
   }
 
-  /** After a daemon restart, resume if it was on. Off by default: no flag file, nothing starts. */
+  /** Daemon exit: synchronous, so it works from process "exit". Takes the tunnel down; the on/off flag stays so a restart resumes. */
+  killTunnel() {
+    const t = this.tunnel;
+    this.tunnel = undefined;
+    t?.stop();
+  }
+
+  /** After a daemon restart, resume if it was on. Off by default: no flag file, nothing starts. A tunnel gets a new URL. */
   async restore(): Promise<void> {
     try {
       if ((JSON.parse(readFileSync(this.flag(), "utf8")) as { on?: boolean }).on) await this.turnOn();

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { DAEMON_PORT, PERMISSION_MODES, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
+import { DAEMON_PORT, PERMISSION_MODES, USAGE_CARD_MODES, type Command, type CreateSessionArgs, type ReportCall, type ServerMessage, type SessionInfo } from "@perzian/protocol";
 import { EventStore } from "./store.ts";
 import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps } from "./session.ts";
 import * as git from "./git.ts";
@@ -22,8 +22,11 @@ import { spawnBlocker } from "./observe.ts";
 import { ResumeQueue } from "./resume.ts";
 import { loadDesktopToken, trustedOrigin } from "./origin.ts";
 import { Devices, PairingCodes, PhoneAccess } from "./phone.ts";
+import { Presence, PushSender, itemForEvent, loadVapid } from "./push.ts";
 import { answerDecision } from "./decisions.ts";
 import { repoTree } from "./repotree.ts";
+import { startMode } from "./defaults.ts";
+import { UsageGovernor } from "./usagecard.ts";
 import { fileURLToPath } from "node:url";
 import type { AgentKind, ApiKeyProvider, BranchList, InstallResult } from "@perzian/protocol";
 
@@ -41,7 +44,9 @@ const sessions = new Map<string, AgentSession>();
 const decisions = new Map<string, PendingDecision>();
 const creds = new Credentials(home);
 await creds.load();
-const deps: SessionDeps = { store, daemonUrl, decisions, creds };
+// One account, one usage question: nearing the limit raises a single card; a refused session stops the others.
+const usage = new UsageGovernor({ store, sessions: () => sessions.values() });
+const deps: SessionDeps = { store, daemonUrl, decisions, creds, usage };
 
 
 let installing: Promise<InstallResult> | undefined;
@@ -65,6 +70,7 @@ function runInstaller(agent: AgentKind): Promise<InstallResult> {
   for (const info of Object.values(store.state().sessions)) {
     if (!info.archived) sessions.set(info.id, new AgentSession({ ...info }, deps));
   }
+  usage.attach(); // a usage card still open when the daemon stopped keeps its timeout
 }
 
 // The lead hears about the sessions it started when they finish, pause at a usage limit or resume
@@ -162,7 +168,7 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   const checks = allChecks(detectChecks(ws.cwd), declared.checks);
   const shipDefault = ws.worktree ? shipPreference(declared.ship, await hasGithubOrigin(project)) : undefined;
   const s = AgentSession.create(
-    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode ?? store.state().settings.defaultMode, ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, declaredSetup: setupCfg.steps, checksError: declared.error ?? setupCfg.error, ...(shipDefault ? { shipDefault } : {}), ...extra },
+    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: startMode(args.mode, store.state().settings), ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, declaredSetup: setupCfg.steps, checksError: declared.error ?? setupCfg.error, ...(shipDefault ? { shipDefault } : {}), ...extra },
     deps,
   );
   if ("notice" in ws && ws.notice) s.notice(ws.notice);
@@ -228,6 +234,9 @@ async function handleCommand(cmd: Command): Promise<void> {
     case "session.seen":
       store.emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { seenAt: Date.now() } });
       break;
+    case "ui.presence":
+      presence.report(!!cmd.focused);
+      break;
     case "sessions.import": {
       // Bring in recent Claude Code sessions from ~/.claude/projects; they resume via ACP loadSession.
       const known = [...sessions.values()].map((x) => x.info.acpSessionId).filter((v): v is string => !!v);
@@ -253,6 +262,15 @@ async function handleCommand(cmd: Command): Promise<void> {
     case "settings.setDefaultMode":
       if (!PERMISSION_MODES.includes(cmd.mode)) throw new Error(`Unknown mode: ${String(cmd.mode)}`);
       if (store.state().settings.defaultMode !== cmd.mode) store.emit({ type: "settings.defaultMode", mode: cmd.mode, at: Date.now() });
+      break;
+    case "settings.setUsageCard":
+      if (!USAGE_CARD_MODES.includes(cmd.mode)) throw new Error(`Unknown usage card mode: ${String(cmd.mode)}`);
+      if (store.state().settings.usageCard !== cmd.mode) store.emit({ type: "settings.usageCard", mode: cmd.mode, at: Date.now() });
+      break;
+    case "usage.answer":
+      if (cmd.choice !== "pause" && cmd.choice !== "keep_going") throw new Error(`Unknown choice: ${String(cmd.choice)}`);
+      if (cmd.dontAsk && store.state().settings.usageCard !== cmd.choice) store.emit({ type: "settings.usageCard", mode: cmd.choice, at: Date.now() });
+      usage.answer(cmd.key, cmd.choice);
       break;
     case "settings.addProject": {
       if (typeof cmd.path !== "string" || !cmd.path.trim()) throw new Error("Choose a folder");
@@ -404,7 +422,10 @@ const http = createServer(async (req, res) => {
     }
     if (url.pathname.startsWith("/api/phone")) {
       if (url.pathname === "/api/phone" && req.method === "GET") json(200, await phone.status());
-      else if (url.pathname === "/api/phone" && req.method === "POST") json(200, (JSON.parse(await readBody(req)) as { on?: boolean }).on ? await phone.turnOn() : await phone.turnOff());
+      else if (url.pathname === "/api/phone" && req.method === "POST") {
+        const b = JSON.parse(await readBody(req)) as { on?: boolean; mode?: string };
+        json(200, b.on ? await phone.turnOn(b.mode === "tunnel" ? "tunnel" : b.mode === "tailscale" ? "tailscale" : undefined) : await phone.turnOff());
+      }
       else if (url.pathname === "/api/phone/pair" && req.method === "POST") json(200, phone.pair());
       else if (url.pathname === "/api/phone/devices" && req.method === "DELETE") json(200, await phone.forgetAll());
       else json(404, { error: "not found" });
@@ -423,6 +444,13 @@ const http = createServer(async (req, res) => {
     }
     if (url.pathname === "/api/worktrees/leftover" && req.method === "GET") {
       json(200, git.leftoverWorktrees(home, [...sessions.values()].map((x) => x.info)));
+      return;
+    }
+    if (url.pathname === "/api/worktrees/remove" && req.method === "POST") {
+      const { path } = JSON.parse(await readBody(req)) as { path?: string };
+      if (typeof path !== "string" || !path) throw new Error("No worktree given");
+      await git.removeLeftoverWorktree(home, [...sessions.values()].map((x) => x.info), path);
+      json(200, { ok: true });
       return;
     }
     if (url.pathname === "/api/doctor") {
@@ -481,16 +509,25 @@ wss.on("connection", (ws) => attach(ws, false));
 // Phone access (phone.ts): off unless the developer turned it on. Its own listener, always token-gated.
 const here = fileURLToPath(new URL(".", import.meta.url));
 const phoneWebDir = () => [process.env.PERZIAN_WEB_DIR, join(here, "../../web/dist"), join(here, "../web")].find((d) => d && existsSync(join(d, "index.html")));
+const phoneDevices = new Devices(home);
+const vapid = loadVapid(home);
 const phone = new PhoneAccess({
   home,
   port: Number(process.env.PERZIAN_PHONE_PORT ?? port + 2),
   httpsPort: Number(process.env.PERZIAN_PHONE_HTTPS ?? 8443),
-  devices: new Devices(home),
+  devices: phoneDevices,
   codes: new PairingCodes(),
   webDir: phoneWebDir,
   onConnection: (ws) => attach(ws, true),
+  push: { publicKey: vapid.publicKey },
 });
 void phone.restore();
+
+// Web Push (push.ts): a session that needs you, failed or is done, coalesced over 5 s, title only. Quiet while
+// the Mac UI is focused and active, and while Phone access is off.
+const presence = new Presence();
+const pusher = new PushSender({ devices: phoneDevices, vapid, enabled: () => phone.isOn(), uiActive: () => presence.active() });
+store.subscribe((e) => pusher.notify(itemForEvent(e, store.state().sessions)));
 
 // A taken port is almost always another daemon; say so and exit non-zero instead of a stack trace.
 const listenFailed = (e: NodeJS.ErrnoException) => {
@@ -502,6 +539,8 @@ wss.on("error", listenFailed); // ws re-emits the server's errors; unhandled, th
 http.listen(port, "127.0.0.1", () => console.log(`perzian daemon on ${daemonUrl} (home ${home})`));
 
 const shutdown = () => {
+  phone.killTunnel();
+  pusher.dispose();
   keepAwake.stop();
   resumeQueue.dispose();
   for (const s of sessions.values()) s.dispose();
@@ -509,3 +548,4 @@ const shutdown = () => {
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+process.on("exit", () => phone.killTunnel()); // however we leave, cloudflared doesn't outlive us

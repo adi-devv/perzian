@@ -154,6 +154,12 @@ kbd { font-size: 10px; color: var(--fg-3); padding: 0 3px; }
 .t-ans.stack .btn { flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; justify-content: flex-start; }
 .t-ans .trade { font-size: 11px; font-weight: 400; color: var(--fg-3); white-space: normal; }
 .t-ans .btn.primary .trade { color: color-mix(in srgb, var(--bg) 70%, var(--fg)); }
+/* The account usage card: amber, like anything that needs you. */
+.usage-card { margin: 0 12px 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; border: 1px solid color-mix(in srgb, var(--needs) 55%, var(--line)); border-radius: var(--r-sm); box-shadow: inset 3px 0 0 var(--needs); background: color-mix(in srgb, var(--needs) 5%, var(--raised)); }
+.uc-head { font-size: 13px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.uc-warn { font-size: 12px; color: var(--needs); }
+.uc-ask { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-2); cursor: pointer; }
+.uc-note { font-size: 11px; color: var(--fg-3); }
 .t-more { margin: 2px 0 0; font-size: 11px; color: var(--fg-3); }
 .done-toggle { width: 100%; justify-content: space-between; color: var(--fg-2); }
 
@@ -626,6 +632,9 @@ code.chip { font-size: 11px; }
 .qr.dim { opacity: 0.15; }
 .pair-code { font: 500 18px var(--mono); letter-spacing: 0.12em; }
 .pair-url { font-size: 11px; overflow-wrap: anywhere; }
+.mode-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.mode-pick .btn[aria-pressed="true"] { border-color: var(--fg-2); color: var(--fg); }
+.notify { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* ── motion: show what changed, never slow anyone down ──
    120–200ms (240 max for panels), ease-out in / ease-in out, opacity + transform (height only to collapse).

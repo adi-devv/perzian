@@ -2,7 +2,7 @@
 // phone sees, and the phone's own layout (attention queue, decision cards, compact tiles; nothing else).
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
-import type { PhonePairing, PhoneStatus } from "@perzian/protocol";
+import type { PhoneMode, PhonePairing, PhoneStatus } from "@perzian/protocol";
 import { api, isDemo, isPhone, pairPhone } from "./daemon.ts";
 
 /** True below 600px: the phone layout. */
@@ -51,6 +51,7 @@ function PhoneSheet({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [pick, setPick] = useState<PhoneMode | null>(null);
 
   const run = async (f: () => Promise<void>) => {
     setBusy(true);
@@ -68,23 +69,42 @@ function PhoneSheet({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     refresh();
   }, []);
-  // A code is made when the sheet opens with access on, and never shown stale.
+  // A code is made when the sheet opens with access on, and never shown stale. A tunnel's URL changes on every
+  // run, so a new URL means a new QR.
   useEffect(() => {
-    if (status?.on && !pairing) run(newCode);
-  }, [status?.on]);
+    if (status?.on) run(newCode);
+  }, [status?.on, status?.url]);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
 
   const left = pairing ? Math.max(0, Math.round((pairing.expiresAt - now) / 1000)) : 0;
-  const setup = status && !status.on ? SETUP[status.tailscale] : undefined;
+  const mode = pick ?? status?.mode ?? "tailscale";
+  const tunnel = mode === "tunnel";
+  const setup = status && !status.on && !tunnel ? SETUP[status.tailscale] : undefined;
 
   return (
     <div className="modal" onClick={onClose}>
       <div className="sheet phone-sheet" role="dialog" aria-label="Open on phone" onClick={(e) => e.stopPropagation()}>
         <h2>Open on phone</h2>
-        {!status && <p className="quiet">Checking Tailscale…</p>}
+        {!status && <p className="quiet">Checking…</p>}
+        {status && !status.on && (
+          <div className="mode-pick" role="group" aria-label="How your phone connects">
+            <button className="btn" aria-pressed={!tunnel} onClick={() => setPick("tailscale")}>
+              Tailscale
+            </button>
+            <button className="btn" aria-pressed={tunnel} onClick={() => setPick("tunnel")}>
+              No setup (Cloudflare quick tunnel)
+            </button>
+          </div>
+        )}
+        {status && !status.on && tunnel && !status.cloudflared && (
+          <>
+            <p className="onboard-sub">Needs the free cloudflared tool on this Mac. Run:</p>
+            <code className="pair-code">brew install cloudflared</code>
+          </>
+        )}
         {setup && (
           <>
             <p className="onboard-sub">{setup.title}</p>
@@ -95,13 +115,18 @@ function PhoneSheet({ onClose }: { onClose: () => void }) {
             </ol>
           </>
         )}
-        {status && !status.on && !setup && <p className="onboard-sub">Serves Perzian to your own Tailscale network only. Each phone pairs once with a code from this screen. Off until you turn it on.</p>}
+        {status && !status.on && !setup && !(tunnel && !status.cloudflared) && (
+          <p className="onboard-sub">
+            {tunnel ? "Opens a temporary https link on the internet, protected by a one-time code and a key per phone. Each phone pairs once." : "Serves Perzian to your own Tailscale network only. Each phone pairs once with a code from this screen."} Off until you turn it on.
+          </p>
+        )}
         {status?.on && pairing && (
           <div className="pair">
             <Qr text={`${pairing.url}/#pair=${pairing.code}`} dim={left === 0} />
             <code className="pair-code">{pairing.code}</code>
             <p className="quiet">{left > 0 ? `Scan with your phone's camera. One use, expires in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}.` : "Code expired."}</p>
             <p className="quiet pair-url">{pairing.url}</p>
+            {status.mode === "tunnel" && <p className="quiet pair-url">The link changes each time you turn this on; phones already paired just need the new one. Quick tunnels have no uptime guarantee.</p>}
           </div>
         )}
         {(err || status?.error) && <p className="phone-err">{err ?? status?.error}</p>}
@@ -118,13 +143,13 @@ function PhoneSheet({ onClose }: { onClose: () => void }) {
                 Turn off
               </button>
             </>
-          ) : setup ? (
+          ) : setup || (tunnel && status && !status.cloudflared) ? (
             <button className="btn" disabled={busy} onClick={refresh}>
               Check again
             </button>
           ) : (
             status && (
-              <button className="btn primary" disabled={busy} onClick={() => run(async () => setStatus(await call<PhoneStatus>("POST", "/api/phone", { on: true })))}>
+              <button className="btn primary" disabled={busy} onClick={() => run(async () => setStatus(await call<PhoneStatus>("POST", "/api/phone", { on: true, mode })))}>
                 Turn on phone access
               </button>
             )

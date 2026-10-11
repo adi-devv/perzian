@@ -16,23 +16,12 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 4. **Try the Mac app** (`npm run app`) and **publish v0.0.1** as a GitHub Release (`npm run dist`, upload the zip, link it).
 
 ## Features
-1. **Phone access, phase 2 (phase 1 is built, see FEATURES.md).** Try phase 1 on a real phone first (`Open on phone` in the sidebar).
-   - Web Push: the daemon sends it itself (VAPID, straight to Apple/Google push, no servers of ours) when a session needs you, finishes or fails.
-   - Same Wi-Fi without Tailscale is a view-only fallback (no HTTPS, so no push).
-   - **"No setup" mode:** bundle a Cloudflare quick tunnel so neither device installs anything; HTTPS, so push works; $0 to us;
-     the pairing token is the only gate and quick tunnels have no uptime guarantee. About 1-2 days.
-   - Later, if people want zero setup with guarantees: our own Cloudflare Durable Objects relay with end-to-end encryption,
-     about $5-30/month per 1k active users, possibly paid. Firebase rejected (data at Google, per-event cost).
+1. **Phone access, try phases 1 and 2 on a real phone** (`Open on phone` in the sidebar): Tailscale and the Cloudflare quick tunnel, then Web Push on an iPhone (Home Screen app) and Android.
+   Confirm a real push arrives and tapping opens the session. The account usage card pushes too (while unanswered).
+   Same Wi-Fi without Tailscale is a view-only fallback (no HTTPS, so no push), only if people ask.
 3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
 5. **Observation UI, leftovers (the rest is drawn: chips and facts on tiles and the session header, outside-project tag on cards, nested subagent calls, default-mode picker, persisted projects).**
-   Leftover worktrees (Accounts) are list-and-copy-command only; a Remove button needs a safe daemon removal.
-   Not done: `createSession`'s default-mode fallback in `apps/daemon/src/index.ts` has no test (it is a script); Codex gets no `additionalDirectories`.
-- **Usage card at 95%, one per account (not per session):** "Usage 95% · resets 10:15 pm · [Pause sessions] [Keep going]".
-  - Keep going: run to the real limit, then auto-pause and auto-resume at reset (already built).
-  - No answer: pause.
-  - If extra usage is on, the card warns that it costs money.
-  - Add a "don't ask again" option.
-  - When one session hits the limit, pause every session together, since they share one account limit.
+   Not done: Codex gets no `additionalDirectories`. The usage card is unit-tested only: try it against a real account near its limit; the phone inbox doesn't show it yet.
 
 ## Brand
 - **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).
@@ -61,3 +50,5 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 ## Later
 - Codex end-to-end test (needs an OpenAI account), notarized builds + auto-update ($99 Apple account),
   Linux/Windows builds, team/cloud layer.
+- Phone relay, if people want zero setup with guarantees: our own Cloudflare Durable Objects relay with end-to-end
+  encryption, about $5-30/month per 1k active users, possibly paid. Firebase rejected (data at Google, per-event cost).

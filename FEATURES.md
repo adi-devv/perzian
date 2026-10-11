@@ -39,7 +39,7 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ "Open PR" leads when the repo has a GitHub origin, otherwise "Merge into <base>" does; `"ship": "pr" | "merge"` in `perzian.json` overrides.
 - ✅ "Merge into <base>" from the session detail; merges only what the agent changed (never `.env`/keys), asks first (and warns when required checks fail), removes the worktree.
 - ✅ Merge conflicts are listed with "Ask the agent to resolve"; a dirty checkout is refused with one plain line.
-- ✅ Accounts shows "Connected as <user>" for the project's origin host (read-only `gh auth status`, cached) or a copyable `gh auth login`; never blocks local use. Accounts also lists leftover worktrees (path, branch, age) with a copyable remove command; New session has an "Also edit" field for extra folders.
+- ✅ Accounts shows "Connected as <user>" for the project's origin host (read-only `gh auth status`, cached) or a copyable `gh auth login`; never blocks local use. Accounts also lists leftover worktrees (path, branch, age) with a Remove button (a plain worktree remove: refuses with uncommitted changes, never deletes the branch); New session has an "Also edit" field for extra folders.
 - ✅ New session has a base picker (default: the repo's default branch; the lead passes `base`). The worktree is cut from a fresh `origin/<base>`; offline it falls back to the local branch with a note on the session.
 - ✅ "Base moved · N behind" in the session header with a one-click Update that asks the agent to merge or rebase (the agent handles conflicts). A session based on another session's branch shows "on <parent title>".
 - ✅ After Open PR the tile shows "PR · checks ✓", "PR · 2 failing" (red) or "Merged"; the detail lists failing checks with "Ask agent to fix CI". Polled via `gh` at most once a minute; unverified against a real PR yet.
@@ -49,6 +49,7 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ Per-session usage and a running total spent across all sessions.
 - ⚠️ Cost figures not yet checked against a real paid run.
 - ✅ Usage limits: a worker near its limit finishes its step and pauses ("Paused · resumes 17:40"); the pause survives a daemon restart (seen for real at 98% of the 5-hour window).
+- ✅ One account-level usage card ("Usage 95% · resets 10:15 pm", Pause sessions / Keep going; keys 1 and 2) per window instead of per-session early pauses. No answer in 2 minutes pauses; "Don't ask again" is a saved setting; a warning shows when extra (paid) usage is on. When any session is refused at the hard limit, the other working Claude sessions pause too (shared account limit).
 - ⚠️ It then resumes itself at reset, also after a restart; "Resume now" in the session detail (not yet seen at a real reset).
 
 ## Desktop app
@@ -64,7 +65,9 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ⚠️ The phone pairs once, keeps a device token in localStorage (stored hashed on the Mac); "Forget all phones" revokes every token and cuts live connections.
 - ⚠️ Under 600px the UI is just the attention queue, answerable decision cards and compact session tiles; installable as a PWA. A phone can answer, stop and resume, nothing else.
 - ✅ Phone inbox: the first screen lists everything that needs you across sessions (asks, permission cards, failed sessions, merge conflicts), most urgent then oldest, answerable in place; answered cards collapse out; "Nothing needs you" with crew counts below. Tap or swipe a card left to open a compact session view (back gesture returns). Offline shows "Reconnecting…" and disables answers; the daemon refuses an answer to an already-resolved card.
-- Not yet tried with a real phone and tailnet (unit-tested over real sockets only).
+- ⚠️ Web Push: a phone that taps "Turn on notifications" (iOS: from the Home Screen app, with an "Add to Home Screen first" hint otherwise) gets a notification when a session needs you, fails or finishes. Bursts within 5 s are one notification; it says only a status word and the session title, and tapping opens that session. Skipped while Phone access is off or the Mac UI is focused; revoking a phone deletes its subscription.
+- ⚠️ "No setup" mode: if `cloudflared` is installed, pair over a Cloudflare quick tunnel instead of Tailscale (nothing to sign in to, HTTPS so push works). Missing shows `brew install cloudflared`; we never download it. The link changes each time you turn it on (new QR), it stops when phone access or the app stops, and it has no uptime guarantee.
+- Not yet tried with a real phone, tailnet or tunnel, and no real push delivered (unit-tested over real sockets and fakes only).
 
 ## Site/demo
 - ✅ Site at perzian.dev (`apps/site`) and a live demo at perzian.dev/demo.
