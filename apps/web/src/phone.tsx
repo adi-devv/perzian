@@ -2,7 +2,7 @@
 // phone sees, and the phone's own layout (attention queue, decision cards, compact tiles; nothing else).
 import { useEffect, useMemo, useState } from "react";
 import QRCode from "qrcode";
-import { byAttention, type PhonePairing, type PhoneStatus, type State } from "@perzian/protocol";
+import { byAttention, shownStatus, type PhonePairing, type PhoneStatus, type State } from "@perzian/protocol";
 import { api, isDemo, isPhone, pairPhone, type Link } from "./daemon.ts";
 import { DecisionCard, StatusGlyph, ago, statusText, useTick } from "./bits.tsx";
 import type { Command } from "@perzian/protocol";
@@ -233,7 +233,7 @@ export function PhoneHome({ state, send, link }: { state: State; send: (c: Comma
           {workers.map((s) => {
             const files = (state.changes[s.id] ?? []).length;
             return (
-              <article key={s.id} className={`tile s-${s.status}`}>
+              <article key={s.id} className={`tile s-${shownStatus(s)}`}>
                 <StatusGlyph s={s} />
                 <div className="tile-main">
                   <span className="tile-title">{s.title}</span>

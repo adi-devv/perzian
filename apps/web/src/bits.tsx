@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AGENTS, MODE_LABEL, type Command, type Decision, type FileChange, type PermissionMode, type SessionInfo, type SessionStatus, type State, type TranscriptItem } from "@perzian/protocol";
+import { AGENTS, MODE_LABEL, shownStatus, type Command, type Decision, type FileChange, type PermissionMode, type SessionInfo, type SessionStatus, type State, type TranscriptItem } from "@perzian/protocol";
 import { isFailureNotice } from "./onboarding.tsx";
 
 type Send = (c: Command) => void;
@@ -33,6 +33,7 @@ export function pauseTitle(s: SessionInfo): string | undefined {
 
 // The status as words, with worktree setup folded in: "Setting up…" while it runs, "Setup failed" when it stops the session.
 export function statusLabel(s: SessionInfo): string {
+  if (s.interrupted) return "Interrupted";
   if (s.status === "working" && s.setup?.state === "running") return "Setting up…";
   if (s.status === "failed" && s.setup?.state === "failed") return "Setup failed";
   return STATUS_LABEL[s.status];
@@ -94,6 +95,7 @@ export function churn(files: FileChange[]) {
 // One small mark per state: blue pulsing dot (working, or its step ring), amber dot (needs you), red dot (failed),
 // green check (done), hollow grey ring (paused or asleep). Dots and checks only; the tile carries the rest.
 export function StatusGlyph({ s }: { s: SessionInfo }) {
+  if (s.interrupted) return <span key="interrupted" className="dot" />;
   if (s.status === "working" && s.progress) return <Ring step={s.progress.step} of={s.progress.of} size={14} />;
   if (s.status === "done")
     return (
@@ -153,6 +155,19 @@ export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decis
         ))}
       </div>
     </article>
+  );
+}
+
+/** A closed decision card, as one line: what was asked and what was chosen ("not answered" when it closed unanswered). */
+export function DecisionLine({ item }: { item: Extract<TranscriptItem, { kind: "decision" }> }) {
+  const answer = item.answer ?? (item.restarted ? "Not answered · the daemon restarted" : "Not answered");
+  // A permission's title is the tool ("Terminal"); what it asked about is the command or path.
+  const asked = item.source === "permission" && item.detail ? item.detail : item.question;
+  return (
+    <div className={`dline ${item.answer === null ? "none" : ""}`} title={[item.question, item.detail, `→ ${answer}`].filter(Boolean).join("\n")}>
+      <span className="dline-q">{asked}</span>
+      <span className="dline-a">→ {answer}</span>
+    </div>
   );
 }
 

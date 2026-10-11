@@ -28,7 +28,7 @@ import { ToolObserver, isWriteCall, outsideOf, parentToolCallId, touchedPaths } 
 import { UsageMeter } from "./usage.ts";
 import { SetupGate, readyWorktree } from "./setup.ts";
 import { MAX_FIX_ATTEMPTS, declaredBrief, declaredProofs, fixPrompt, runDeclaredChecks } from "./checks.ts";
-import { checkPlan, type CheckResult, type CheckRun, type DeclaredCheck } from "@perzian/protocol";
+import { checkPlan, clearsInterrupted, type CheckResult, type CheckRun, type DeclaredCheck, type PerzianEvent } from "@perzian/protocol";
 import { hitFromReading, limitFromError, parseLimitText, pauseThreshold, readRateLimit, resumeTime, type LimitHit } from "./limits.ts";
 
 /** Sent to a session when its usage limit resets. */
@@ -193,14 +193,20 @@ export class AgentSession {
 
   private update(patch: Partial<SessionInfo>): void {
     Object.assign(this.info, patch);
-    this.store.emit({ type: "session.updated", sessionId: this.info.id, patch });
+    this.emitInfo({ type: "session.updated", sessionId: this.info.id, patch });
   }
 
   setStatus(status: SessionStatus): void {
     if (this.info.status === status) return;
     this.info.status = status;
     this.info.updatedAt = Date.now();
-    this.store.emit({ type: "session.status", sessionId: this.info.id, status, at: this.info.updatedAt });
+    this.emitInfo({ type: "session.status", sessionId: this.info.id, status, at: this.info.updatedAt });
+  }
+
+  // Keeps `info` in step with the fold, which drops `interrupted` once the session runs again.
+  private emitInfo(e: PerzianEvent): void {
+    this.store.emit(e);
+    if (clearsInterrupted(e)) delete this.info.interrupted;
   }
 
   // ACP errors are often a bare "Internal error"; the cause is in `data` or the agent's stderr.
@@ -941,6 +947,9 @@ export class AgentSession {
         resolve: (optionId) => {
           this.deps.decisions.delete(d.id);
           this.store.emit({ type: "decision.resolved", decisionId: d.id, sessionId: this.info.id, optionId });
+          // What was chosen stays in the transcript as one line.
+          const answer = optionId === null ? null : (d.options.find((o) => o.id === optionId)?.label ?? optionId);
+          this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "decision", decisionId: d.id, source: d.source, question: d.question, ...(d.detail ? { detail: d.detail } : {}), answer, at: Date.now() } });
           const stillWaiting = [...this.deps.decisions.values()].some((p) => p.decision.sessionId === this.info.id);
           if (!stillWaiting && !this.dropping && this.info.status === "needs_you") this.setStatus(prev === "idle" ? "idle" : "working");
           resolve(optionId);

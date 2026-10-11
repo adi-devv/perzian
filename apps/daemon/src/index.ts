@@ -9,7 +9,8 @@ import { AgentSession, prepareWorkspace, type PendingDecision, type SessionDeps 
 import * as git from "./git.ts";
 import { listClaudeSessions, toEvents } from "./importer.ts";
 import { mergeProofs } from "./proof.ts";
-import { assertPromptable, interruptedShip, isShipHow, ship } from "./ship.ts";
+import { assertPromptable, isShipHow, ship } from "./ship.ts";
+import { interruptions } from "./boot.ts";
 import { doctor, doctorHeaders, installCommand, resetDoctorCache } from "./doctor.ts";
 import { Credentials, PROVIDERS } from "./credentials.ts";
 import { exec } from "node:child_process";
@@ -54,38 +55,11 @@ function runInstaller(agent: AgentKind): Promise<InstallResult> {
 }
 
 // Restore sessions from the log as dormant; anything that was mid-flight (the daemon was stopped or
-// crashed during a turn) is now idle, with no open decisions and no tool calls left spinning.
-const OPEN_TOOL = (status: string) => status !== "completed" && status !== "failed" && status !== "cancelled";
+// crashed during a turn, a decision, a ship or a setup) is closed out and marked interrupted (boot.ts).
 {
-  const state = store.state();
-  for (const d of Object.values(state.decisions)) store.emit({ type: "decision.resolved", decisionId: d.id, sessionId: d.sessionId, optionId: null });
-  for (const info of Object.values(state.sessions)) {
-    if (info.archived) continue;
-    const s = new AgentSession({ ...info, live: false }, deps);
-    sessions.set(info.id, s);
-    if (info.live) store.emit({ type: "session.updated", sessionId: info.id, patch: { live: false } });
-    const at = Date.now();
-    for (const t of state.transcripts[info.id] ?? []) {
-      if (t.kind === "tool" && OPEN_TOOL(t.status)) store.emit({ type: "session.transcript", sessionId: info.id, item: { ...t, status: "cancelled", at } });
-    }
-    const run = info.checkRun;
-    if (run && (run.state === "running" || run.state === "fixing")) {
-      const results = run.results.map((r) => (r.state === "running" ? { ...r, state: "pending" as const } : r));
-      s.info.checkRun = { ...run, state: "cancelled", results, at };
-      store.emit({ type: "session.updated", sessionId: info.id, patch: { checkRun: s.info.checkRun } });
-    }
-    if (info.status === "working" || info.status === "needs_you") {
-      s.notice("Interrupted: the daemon restarted during this turn");
-      s.setStatus("idle");
-    }
-    // A worktree setup the restart cut short: offer Retry / Start anyway rather than spin forever.
-    if (info.setup?.state === "running") {
-      const setup = { ...info.setup, state: "failed" as const, error: { command: info.setup.current ?? "setup", tail: "Interrupted: the daemon restarted during setup." }, at };
-      delete setup.current;
-      store.emit({ type: "session.updated", sessionId: info.id, patch: { setup } });
-      s.info.setup = setup;
-    }
-    if (info.ship?.state === "shipping") s.setShip(interruptedShip(info.ship));
+  for (const e of interruptions(store.state())) store.emit(e);
+  for (const info of Object.values(store.state().sessions)) {
+    if (!info.archived) sessions.set(info.id, new AgentSession({ ...info }, deps));
   }
 }
 

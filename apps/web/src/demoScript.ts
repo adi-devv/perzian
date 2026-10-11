@@ -50,6 +50,9 @@ export function demoSend(cmd: Command, s: State, emit: Emit): void {
     const d = s.decisions[cmd.decisionId];
     if (!d) return;
     emit({ type: "decision.resolved", decisionId: d.id, sessionId: d.sessionId, optionId: cmd.optionId });
+    // Same line the daemon leaves in the transcript.
+    const answer = cmd.optionId === null ? null : (d.options.find((o) => o.id === cmd.optionId)?.label ?? cmd.optionId);
+    emit({ type: "session.transcript", sessionId: d.sessionId, item: { kind: "decision", decisionId: d.id, source: d.source, question: d.question, ...(d.detail ? { detail: d.detail } : {}), answer, at } });
     emit({ type: "session.status", sessionId: d.sessionId, status: "working", at });
     const next = waiting.get(d.id);
     waiting.delete(d.id);

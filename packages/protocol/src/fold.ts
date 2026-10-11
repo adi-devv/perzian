@@ -22,8 +22,24 @@ function patchSession(s: State, id: string, patch: Partial<SessionInfo>): State 
   return { ...s, sessions: { ...s.sessions, [id]: { ...cur, ...patch } } };
 }
 
+/** Events after which a session is no longer interrupted: it runs again, or the ship or setup the restart cut short is retried. */
+export function clearsInterrupted(e: PerzianEvent): boolean {
+  if (e.type === "session.status") return e.status === "working";
+  if (e.type === "session.updated") return e.patch.ship?.state === "shipping" || e.patch.setup?.state === "running" || e.patch.setup?.state === "skipped";
+  return false;
+}
+
 // Pure fold used by both the daemon (to rebuild on boot) and the UI.
 export function reduce(s: State, e: PerzianEvent): State {
+  const next = step(s, e);
+  if (!clearsInterrupted(e) || !("sessionId" in e)) return next;
+  const cur = next.sessions[e.sessionId];
+  if (!cur?.interrupted) return next;
+  const { interrupted: _, ...rest } = cur;
+  return { ...next, sessions: { ...next.sessions, [e.sessionId]: rest } };
+}
+
+function step(s: State, e: PerzianEvent): State {
   switch (e.type) {
     case "session.created":
       return { ...s, sessions: { ...s.sessions, [e.session.id]: e.session } };

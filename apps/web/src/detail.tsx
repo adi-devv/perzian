@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AGENTS, checkPlan, type Command, type FileChange, type Outcome, type SessionInfo, type State, type Subagent, type TranscriptItem } from "@perzian/protocol";
+import { AGENTS, checkPlan, shownPrompt, shownStatus, type Command, type FileChange, type Outcome, type SessionInfo, type State, type Subagent, type TranscriptItem } from "@perzian/protocol";
 import type { ThemedToken } from "shiki/core";
 import { fetchText } from "./daemon.ts";
 import { FailureNotice } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import { Slot, useExiting } from "./motion.tsx";
-import { Composer, DecisionCard, gitChip, ModePicker, ModelPicker, StatusGlyph, Usage, ago, churn, retryTarget, statusText } from "./bits.tsx";
+import { Composer, DecisionCard, DecisionLine, gitChip, ModePicker, ModelPicker, StatusGlyph, Usage, ago, churn, retryTarget, statusText } from "./bits.tsx";
 
 type Send = (c: Command) => void;
 type Tab = "changes" | "map" | "checks" | "transcript";
@@ -76,7 +76,7 @@ export function SessionDetail({ s, state, send, onBack, onOpen, leadNew }: { s: 
             ← Perzian
             {leadNew > 0 && <span className="badge" role="status" aria-label={`${leadNew} new from Perzian`}>{leadNew}</span>}
           </button>
-          <span className={`stpill s-${s.status}`}>
+          <span className={`stpill s-${shownStatus(s)}`}>
             <StatusGlyph s={s} />
             <span key={statusText(s)} className="status-text">{statusText(s)}</span>
           </span>
@@ -450,13 +450,15 @@ function TranscriptTab({ items, state, subagents }: { items: TranscriptItem[]; s
         const at = new Date(b.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
         switch (b.kind) {
           case "user":
-            return <li key={i} className={`tr-item tr-user ${b.system ? "sys" : ""}`} title={at}><div className="bub">{b.text}</div></li>;
+            return <li key={i} className={`tr-item tr-user ${b.system ? "sys" : ""}`} title={at}><div className="bub">{shownPrompt(b.text)}</div></li>;
           case "agent":
             return <li key={i} className="tr-item tr-agent" title={at}>{b.text}</li>;
           case "spawn":
             return <li key={i} className="tr-item tr-note">↳ started {state.sessions[b.childId]?.title ?? b.title}</li>;
           case "notice":
             return <li key={i} className="tr-item tr-note" title={at}>{b.text}</li>;
+          case "decision":
+            return <li key={i} className="tr-item" title={at}><DecisionLine item={b} /></li>;
           default:
             return null;
         }

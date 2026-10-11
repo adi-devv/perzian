@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AGENTS, isUnseen, type Command, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
+import { AGENTS, isUnseen, shownPrompt, shownStatus, type Command, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
 import { isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
 import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, readiness, saveProject, withProject } from "./onboarding.tsx";
 import { PairScreen, PhoneHome, useNarrow } from "./phone.tsx";
-import { Composer, LEAD_PLACEHOLDER, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
+import { Composer, DecisionLine, LEAD_PLACEHOLDER, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
 import { Crew } from "./crew.tsx";
 import { SessionDetail } from "./detail.tsx";
 
@@ -105,7 +105,10 @@ export function App() {
         }
         return;
       }
-      if (typing || e.metaKey || e.ctrlKey || e.altKey || modal) return;
+      // An empty composer still lets 1-9 answer the card on screen (focus stays in it after sending); with text in it, digits type.
+      const emptyComposer = el instanceof HTMLTextAreaElement && el.closest(".composer") && !el.value;
+      if (typing && !(emptyComposer && /^[1-9]$/.test(e.key) && answerable())) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || modal) return;
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
         e.preventDefault();
         setHelp((v) => !v);
@@ -125,12 +128,17 @@ export function App() {
         tiles[next].focus();
         tiles[next].scrollIntoView({ block: "nearest" });
       } else if (/^[1-9]$/.test(e.key)) {
-        // In a session: its own oldest call. Otherwise the call on the topmost tile that is asking.
-        const owner = selected ?? document.querySelector<HTMLElement>("[data-tile]:has(.t-ask)")?.dataset.tile;
-        const shown = decisions.find((d) => d.sessionId === owner);
+        const shown = answerable();
         const opt = shown?.options[Number(e.key) - 1];
-        if (shown && opt) send({ type: "decision.answer", decisionId: shown.id, optionId: opt.id });
+        if (!shown || !opt) return;
+        e.preventDefault();
+        send({ type: "decision.answer", decisionId: shown.id, optionId: opt.id });
       }
+    };
+    // In a session: its own oldest call. Otherwise the call on the topmost tile that is asking.
+    const answerable = () => {
+      const owner = selected ?? document.querySelector<HTMLElement>("[data-tile]:has(.t-ask)")?.dataset.tile;
+      return decisions.find((d) => d.sessionId === owner);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -312,7 +320,7 @@ function ThreadItems({ items, state, onOpen, retry }: { items: TranscriptItem[];
         switch (b.kind) {
           case "user":
             // Daemon updates to the lead ("sessions finished") are plumbing: the session's own line above already shows it.
-            return b.system ? null : <div key={i} className="msg user">{b.text}</div>;
+            return b.system ? null : <div key={i} className="msg user">{shownPrompt(b.text)}</div>;
           case "agent":
             return <div key={i} className="msg agent">{b.text}</div>;
           case "notice":
@@ -326,6 +334,8 @@ function ThreadItems({ items, state, onOpen, retry }: { items: TranscriptItem[];
             const child = state.sessions[b.childId];
             return child ? <LiveCard key={i} s={child} state={state} onOpen={() => onOpen(child.id)} /> : null;
           }
+          case "decision":
+            return <DecisionLine key={i} item={b} />;
           default:
             return null;
         }
@@ -360,14 +370,15 @@ function Paused({ s, send }: { s: SessionInfo; send: Send }) {
 // proof live in its detail view one click away.
 function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: () => void }) {
   // The glyph (dot, check, ring) already says working and done; words stay where a dot is ambiguous: needs you, failed, paused, setup.
-  const word = !(s.status === "done" || s.status === "idle" || (s.status === "working" && s.setup?.state !== "running"));
+  const status = shownStatus(s);
+  const word = !(status === "done" || status === "idle" || (status === "working" && s.setup?.state !== "running"));
   // A session another session started: same rail and elbow as the crew column, indented.
   const nested = !!s.parentId && s.parentId !== "main" && state.sessions[s.parentId]?.role !== "main";
   const files = state.changes[s.id] ?? [];
   const { add, del } = churn(files);
   const detail = [s.branch, AGENTS[s.agent].label, files.length ? `${files.length} files +${add} −${del}` : ""].filter(Boolean).join(" · ");
   return (
-    <button className={`live s-${s.status}${nested ? " nested" : ""}`} onClick={onOpen} title={detail}>
+    <button className={`live s-${status}${nested ? " nested" : ""}`} onClick={onOpen} title={detail}>
       <span className="live-arrow" aria-hidden>↳</span>
       <StatusGlyph s={s} />
       <span className="live-title">{s.title}</span>
