@@ -62,7 +62,9 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ⚠️ The phone pairs once, keeps a device token in localStorage (stored hashed on the Mac); "Forget all phones" revokes every token and cuts live connections.
 - ⚠️ Under 600px the UI is just the attention queue, answerable decision cards and compact session tiles; installable as a PWA. A phone can answer, stop and resume, nothing else.
 - ✅ Phone inbox: the first screen lists everything that needs you across sessions (asks, permission cards, failed sessions, merge conflicts), most urgent then oldest, answerable in place; answered cards collapse out; "Nothing needs you" with crew counts below. Tap or swipe a card left to open a compact session view (back gesture returns). Offline shows "Reconnecting…" and disables answers; the daemon refuses an answer to an already-resolved card.
-- Not yet tried with a real phone and tailnet (unit-tested over real sockets only).
+- ⚠️ Web Push: a phone that taps "Turn on notifications" (iOS: from the Home Screen app, with an "Add to Home Screen first" hint otherwise) gets a notification when a session needs you, fails or finishes. Bursts within 5 s are one notification; it says only a status word and the session title, and tapping opens that session. Skipped while Phone access is off or the Mac UI is focused; revoking a phone deletes its subscription.
+- ⚠️ "No setup" mode: if `cloudflared` is installed, pair over a Cloudflare quick tunnel instead of Tailscale (nothing to sign in to, HTTPS so push works). Missing shows `brew install cloudflared`; we never download it. The link changes each time you turn it on (new QR), it stops when phone access or the app stops, and it has no uptime guarantee.
+- Not yet tried with a real phone, tailnet or tunnel, and no real push delivered (unit-tested over real sockets and fakes only).
 
 ## Site/demo
 - ✅ Site at perzian.dev (`apps/site`) and a live demo at perzian.dev/demo.

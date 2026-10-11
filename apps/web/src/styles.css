@@ -630,6 +630,9 @@ code.chip { font-size: 11px; }
 .qr.dim { opacity: 0.15; }
 .pair-code { font: 500 18px var(--mono); letter-spacing: 0.12em; }
 .pair-url { font-size: 11px; overflow-wrap: anywhere; }
+.mode-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.mode-pick .btn[aria-pressed="true"] { border-color: var(--fg-2); color: var(--fg); }
+.notify { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
 /* ── motion: show what changed, never slow anyone down ──
    120–200ms (240 max for panels), ease-out in / ease-in out, opacity + transform (height only to collapse).
