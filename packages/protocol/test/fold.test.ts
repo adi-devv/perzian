@@ -137,9 +137,27 @@ test("fold does not mutate emptyState or prior states", () => {
   assert.equal(s2.sessions.a.status, "done");
 });
 
-test("byAttention: needs_you > failed > done > working > idle, then most recently updated", () => {
+test("session.paused sets status and the pause; session.resumed clears both", () => {
+  const pause = { reason: "You've hit your session limit · resets 5:40pm (Asia/Calcutta)", resumeAt: 1000, window: "five_hour" as const, at: 10 };
+  let s = fold([created(session("a", { status: "working" })), { type: "session.paused", sessionId: "a", pause }]);
+  assert.equal(s.sessions.a.status, "paused");
+  assert.deepEqual(s.sessions.a.pause, pause);
+  assert.equal(s.sessions.a.updatedAt, 10);
+  s = reduce(s, { type: "session.resumed", sessionId: "a", at: 20, reason: "reset" });
+  assert.equal(s.sessions.a.status, "idle");
+  assert.equal("pause" in s.sessions.a, false, "no leftover key, so it serializes away");
+  assert.equal(s.sessions.a.updatedAt, 20);
+  // A late resumed for a session that already moved on doesn't change its status.
+  s = reduce(s, { type: "session.status", sessionId: "a", status: "working", at: 30 });
+  s = reduce(s, { type: "session.resumed", sessionId: "a", at: 40, reason: "now" });
+  assert.equal(s.sessions.a.status, "working");
+  assert.equal(reduce(s, { type: "session.resumed", sessionId: "missing", at: 1, reason: "now" }), s);
+});
+
+test("byAttention: needs_you > failed > done > working > paused > idle, then most recently updated", () => {
   const mk = (id: string, status: SessionStatus, updatedAt: number) => session(id, { status, updatedAt });
   const list = [
+    mk("paused", "paused", 60),
     mk("idle", "idle", 50),
     mk("working", "working", 50),
     mk("done", "done", 50),
@@ -149,7 +167,7 @@ test("byAttention: needs_you > failed > done > working > idle, then most recentl
   ];
   assert.deepEqual(
     list.sort(byAttention).map((s) => s.id),
-    ["needs-new", "needs-old", "failed", "done", "working", "idle"],
+    ["needs-new", "needs-old", "failed", "done", "working", "paused", "idle"],
   );
 });
 

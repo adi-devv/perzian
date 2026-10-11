@@ -15,6 +15,7 @@ import { Credentials, PROVIDERS } from "./credentials.ts";
 import { exec } from "node:child_process";
 import { detectChecks } from "./checks.ts";
 import { LeadNotifier, type ChildReport } from "./notify.ts";
+import { ResumeQueue } from "./resume.ts";
 import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
 
 const port = Number(process.env.PERZIAN_PORT ?? DAEMON_PORT);
@@ -72,18 +73,27 @@ const OPEN_TOOL = (status: string) => status !== "completed" && status !== "fail
   }
 }
 
-// The lead hears about the sessions it started when they finish (see notify.ts).
+// The lead hears about the sessions it started when they finish, pause at a usage limit or resume
+// (see notify.ts). A paused lead counts as busy: updates wait until it resumes.
 const notifier = new LeadNotifier({
   busy: (leadId) => {
     const st = sessions.get(leadId)?.info.status;
-    return st === "working" || st === "needs_you";
+    return st === "working" || st === "needs_you" || st === "paused";
   },
   report: (childId): ChildReport | undefined => {
     const state = store.state();
     const info = state.sessions[childId];
     if (!info) return undefined;
     const o = state.outcomes[childId];
-    return { id: info.id, title: info.title, status: info.status, outcome: o && { status: o.status, intent: o.intent, proof: o.proof, derived: o.derived }, changedFiles: (state.changes[childId] ?? []).length };
+    const p = info.pause;
+    return {
+      id: info.id,
+      title: info.title,
+      status: info.status,
+      outcome: o && { status: o.status, intent: o.intent, proof: o.proof, derived: o.derived },
+      changedFiles: (state.changes[childId] ?? []).length,
+      ...(p ? { pause: { resumeAt: p.resumeAt, window: p.window, estimated: p.estimated, early: p.early } } : {}),
+    };
   },
   deliver: (leadId, text) => {
     const lead = sessions.get(leadId);
@@ -92,6 +102,15 @@ const notifier = new LeadNotifier({
   notice: (leadId, text) => sessions.get(leadId)?.notice(text),
 });
 store.subscribe((e) => {
+  if (e.type === "session.paused" || e.type === "session.resumed") {
+    const info = store.state().sessions[e.sessionId];
+    if (info?.role === "main" && e.type === "session.resumed") setImmediate(() => notifier.leadIdle(info.id));
+    if (!info?.parentId) return;
+    if (e.type === "session.paused") setImmediate(() => notifier.childPaused(info.parentId!, info.id));
+    // Resumed by the reset or "Resume now"; a developer's own message to the child isn't news for the lead.
+    else if (e.reason === "reset" || e.reason === "now") setImmediate(() => notifier.childResumed(info.parentId!, info.id));
+    return;
+  }
   if (e.type !== "session.status") return;
   const info = store.state().sessions[e.sessionId];
   if (!info) return;
@@ -99,6 +118,21 @@ store.subscribe((e) => {
   if (info.parentId && (e.status === "done" || e.status === "failed")) setImmediate(() => notifier.childSettled(info.parentId!, info.id));
   if (info.role === "main" && e.status !== "working" && e.status !== "needs_you") setImmediate(() => notifier.leadIdle(info.id));
 });
+
+// Sessions paused at a usage limit resume by themselves when it resets: same session, same worktree, a
+// short "continue" message. The queue is rebuilt from the log, so a restart doesn't lose it.
+const resumeQueue = new ResumeQueue({
+  resume: (id) => {
+    const s = sessions.get(id);
+    if (!s || s.info.archived) return;
+    void s.resume("reset").catch((e) => console.error(`[${id}]`, e));
+  },
+});
+resumeQueue.attach(store);
+{
+  const waiting = resumeQueue.pending();
+  if (waiting.length) console.log(`[resume] ${waiting.length} paused session(s); next at ${new Date(waiting[0].at).toLocaleString()}`);
+}
 
 const expand = (p: string) => resolve(p.replace(/^~(?=$|\/)/, homedir()));
 
@@ -157,6 +191,10 @@ async function handleCommand(cmd: Command): Promise<void> {
     case "session.cancel":
       await s?.cancel();
       break;
+    case "session.resume":
+      if (!s) throw new Error("Unknown session");
+      void s.resume("now").catch((e) => console.error(`[${s.info.id}]`, e));
+      break;
     case "session.setModel":
       await s?.applyModel(cmd.model);
       break;
@@ -209,6 +247,7 @@ function brief(info: SessionInfo) {
     project: info.project,
     branch: info.branch,
     status: info.status,
+    ...(info.pause ? { pausedUntil: new Date(info.pause.resumeAt).toISOString(), pauseReason: info.pause.reason } : {}),
     progress: info.progress,
     checks: info.checks,
     changedFiles: (state.changes[info.id] ?? []).map((f) => `${f.kind[0].toUpperCase()} ${f.path} +${f.additions}/-${f.deletions}`),
@@ -343,6 +382,7 @@ wss.on("connection", (ws) => {
 http.listen(port, "127.0.0.1", () => console.log(`perzian daemon on ${daemonUrl} (home ${home})`));
 
 const shutdown = () => {
+  resumeQueue.dispose();
   for (const s of sessions.values()) s.dispose();
   process.exit(0);
 };
