@@ -9,9 +9,12 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    Fix: Settings → Pages → Custom domain → `www.perzian.dev` → Save, wait for HTTPS, then switch back to `perzian.dev` if preferred.
 
 ## Features
-0. **Ready worktrees (do first).** Before the agent's first message: copy `.env*` and other local-only files from the
-   checkout, run the install for the lockfile (npm/pnpm/yarn/bun, uv…), show "Setting up…", Retry on failure.
-   Later: per-repo custom setup steps. Without this, first test runs fail in fresh worktrees.
+0. **Ready worktrees.** Built: before the agent's first message a new worktree gets the checkout's gitignored `.env*`
+   files (any depth, not node_modules/.git/nested repos) plus `.npmrc`/`.yarnrc(.yml)`/`.dev.vars`, then the lockfile's
+   install (npm ci → npm install, pnpm/yarn frozen, bun, uv sync, poetry, requirements.txt only into an existing
+   `.venv`/`venv`; a tool not on PATH is skipped and noted). The session shows "Setting up…"; on failure the error tail
+   with Retry / Start anyway. State lives on `SessionInfo.setup`, so it replays. Unit-tested on temp repos with fake
+   tools; not yet run from the app on a real project. Later: per-repo custom setup steps.
 0b. **Declared checks, always run.** A per-repo `perzian.json` lists custom checks (e.g. a team test CLI) next to the
    auto-detected ones. The daemon runs them itself when an agent says it's done, records ✓/✕ with real exit codes,
    sends failures back to the agent to fix, and allows them without a permission card. Site card: "Your checks run every time."

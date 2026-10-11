@@ -69,6 +69,13 @@ const OPEN_TOOL = (status: string) => status !== "completed" && status !== "fail
       s.notice("Interrupted: the daemon restarted during this turn");
       s.setStatus("idle");
     }
+    // A worktree setup the restart cut short: offer Retry / Start anyway rather than spin forever.
+    if (info.setup?.state === "running") {
+      const setup = { ...info.setup, state: "failed" as const, error: { command: info.setup.current ?? "setup", tail: "Interrupted: the daemon restarted during setup." }, at };
+      delete setup.current;
+      store.emit({ type: "session.updated", sessionId: info.id, patch: { setup } });
+      s.info.setup = setup;
+    }
   }
 }
 
@@ -115,6 +122,8 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   );
   notifier.childPrompted(s.info.id, !!extra.parentId);
   sessions.set(s.info.id, s);
+  // A fresh worktree gets the checkout's local files and its dependencies before the first prompt goes out.
+  if (ws.worktree) void s.runSetup();
   if (extra.parentId) {
     store.emit({ type: "session.transcript", sessionId: extra.parentId, item: { kind: "spawn", childId: s.info.id, title, at: Date.now() } });
   }
@@ -187,6 +196,13 @@ async function handleCommand(cmd: Command): Promise<void> {
       s.setShip(result);
       break;
     }
+    case "session.setup":
+      if (!s) throw new Error("Unknown session");
+      // The held first prompt came from the lead when it spawned this session: report the result to it.
+      if (s.info.parentId && s.info.setup?.state === "failed") notifier.childPrompted(s.info.id, true);
+      if (cmd.action === "retry") void s.retrySetup();
+      else s.skipSetup();
+      break;
     case "session.archive":
       s?.dropDecisions();
       s?.archive();

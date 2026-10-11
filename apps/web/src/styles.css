@@ -244,6 +244,17 @@ em.a { color: var(--add); font-style: normal; font-family: var(--mono); font-siz
 .failure-line .btn { flex: none; }
 .failure-fix { margin: 0; padding-left: 17px; font-size: 12px; color: var(--fg-3); }
 
+/* worktree setup: calm while it runs; red only when it failed */
+.setup { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); }
+.setup-line { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 13px; }
+.setup-line b { font-weight: 500; flex: none; }
+.setup-line .btn { flex: none; }
+.setup-facts { flex: 1; min-width: 0; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.setup-facts code { font-size: 11px; }
+.setup-tail { margin: 0; max-height: 160px; overflow: auto; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 7px; padding: 8px 10px; font: 11px/1.5 var(--mono); color: var(--fg-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.setup-done { font-size: 12px; }
+.setup-note { display: block; }
+
 /* keyboard help */
 .keys { width: min(320px, 100%); background: var(--raised); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.3); }
 .keys h2 { margin: 0 0 10px; font-size: 13px; font-weight: 600; }

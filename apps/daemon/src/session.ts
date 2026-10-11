@@ -24,6 +24,7 @@ import { adapterEntry, agentEnv } from "./agents.ts";
 import type { Credentials } from "./credentials.ts";
 import { permissionPolicy } from "./permissions.ts";
 import { UsageMeter } from "./usage.ts";
+import { SetupGate, readyWorktree } from "./setup.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const reportMcpEntry = join(here, "../../../packages/report-mcp/src/index.ts");
@@ -68,6 +69,8 @@ export interface SessionDeps {
   decisions: Map<string, PendingDecision>;
   /** API keys chosen over a subscription login; absent in tests. */
   creds?: Credentials;
+  /** Readies a fresh worktree (tests swap this out). */
+  setup?: typeof readyWorktree;
 }
 
 // One agent session = one adapter process + one ACP connection. Can be dormant (restored from the log)
@@ -91,6 +94,9 @@ export class AgentSession {
   private lastChanges?: string;
   private disposing = false;
   private turnBaseline?: string;
+  // Prompts wait here while a fresh worktree is being set up (see runSetup).
+  private gate = new SetupGate();
+  private settingUp = false;
 
   constructor(public info: SessionInfo, private deps: SessionDeps) {
     // A restored session starts from what the log already has, so reattaching doesn't re-emit it.
@@ -358,9 +364,12 @@ export class AgentSession {
     return (family && (opts.find((o) => o.value === family) ?? opts.find((o) => o.value.includes(family)))?.value) || model;
   }
 
-  /** `system`: sent by the daemon, not typed by the developer (marked in the transcript). */
-  async prompt(text: string, opts: { system?: boolean } = {}): Promise<void> {
-    this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "user", text, at: Date.now(), ...(opts.system ? { system: true as const } : {}) } });
+  /**
+   * `system`: sent by the daemon, not typed by the developer (marked in the transcript). `resend`: the text
+   * is already in the transcript (the first prompt, held back by a setup that didn't finish).
+   */
+  async prompt(text: string, opts: { system?: boolean; resend?: boolean } = {}): Promise<void> {
+    if (!opts.resend) this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "user", text, at: Date.now(), ...(opts.system ? { system: true as const } : {}) } });
     // A prompt sent while a turn is running is queued by the agent; the session stays "working" until
     // the last one returns.
     const first = this.inflight++ === 0;
@@ -370,6 +379,11 @@ export class AgentSession {
     }
     this.setStatus("working");
     try {
+      if (!(await this.setupDone())) {
+        // Cancelled while the worktree was still being set up.
+        if (this.inflight === 1) this.setStatus("idle");
+        return;
+      }
       await this.ensureStarted();
       if (!this.conn || !this.info.acpSessionId) throw new Error("session not started");
       if (first) this.turnBaseline = this.info.baseSha ? JSON.stringify(await git.changes(this.info.cwd, this.info.baseSha).catch(() => [])) : undefined;
@@ -391,6 +405,65 @@ export class AgentSession {
     } finally {
       this.inflight--;
     }
+  }
+
+  // True once the worktree is ready (or the developer chose to start anyway); false if the prompt was
+  // cancelled while waiting.
+  private async setupDone(): Promise<boolean> {
+    const st = this.info.setup?.state;
+    if (!st || st === "ok" || st === "skipped") return true;
+    if (st === "failed") this.setStatus("failed"); // still blocked: the failure stays in front of the developer
+    return this.gate.wait();
+  }
+
+  /**
+   * Readies a fresh worktree before the agent's first message: copies local-only files from the checkout
+   * and installs dependencies (setup.ts). Prompts wait for it; on failure the session shows failed until
+   * the developer picks Retry or Start anyway.
+   */
+  runSetup(): Promise<void> {
+    if (this.settingUp) return Promise.resolve();
+    this.settingUp = true;
+    this.update({ setup: { state: "running", copied: [], install: [], at: Date.now() } });
+    if (this.gate.waiting) this.setStatus("working");
+    const run = this.deps.setup ?? readyWorktree;
+    return run(this.info.project, this.info.cwd, { onUpdate: (setup) => this.info.setup?.state === "running" && this.update({ setup }) })
+      .catch((e): NonNullable<SessionInfo["setup"]> => ({ state: "failed", copied: [], install: [], error: { command: "setup", tail: String((e as Error).message ?? e) }, at: Date.now() }))
+      .then((setup) => {
+        this.settingUp = false;
+        if (this.info.setup?.state === "skipped") return; // the developer started anyway meanwhile
+        this.update({ setup });
+        if (setup.state === "ok") this.gate.open();
+        else if (this.gate.waiting) this.setStatus("failed");
+      });
+  }
+
+  /** After a failed setup: run it again. A first prompt nothing is holding any more is sent once it's ready. */
+  retrySetup(): Promise<void> {
+    if (this.settingUp || this.info.setup?.state !== "failed") return Promise.resolve();
+    const held = this.heldPrompt();
+    const done = this.runSetup();
+    if (held !== undefined) void this.prompt(held, { resend: true });
+    return done;
+  }
+
+  /** After a failed or slow setup: start the agent without it. */
+  skipSetup(): void {
+    const setup = this.info.setup;
+    if (setup?.state !== "failed" && setup?.state !== "running") return;
+    const held = this.heldPrompt();
+    this.update({ setup: { ...setup, state: "skipped", at: Date.now() } });
+    if (this.gate.waiting) this.setStatus("working");
+    this.gate.open();
+    if (held !== undefined) void this.prompt(held, { resend: true });
+  }
+
+  // The first prompt, when no pending prompt holds it and the agent never started: the daemon restarted
+  // during setup, or the prompt was cancelled while waiting.
+  private heldPrompt(): string | undefined {
+    if (this.gate.waiting || this.inflight || this.info.acpSessionId) return undefined;
+    const first = this.store.state().transcripts[this.info.id]?.find((t) => t.kind === "user");
+    return first?.kind === "user" ? first.text : undefined;
   }
 
   // What the agent receives: instructions on the first turn, plus for workers the detected checks; a
@@ -470,6 +543,7 @@ export class AgentSession {
   }
 
   async cancel(): Promise<void> {
+    this.gate.cancel(); // prompts still waiting on setup
     this.dropDecisions();
     // Everything still running belongs to the turn being cancelled; a late "completed" from the agent
     // won't reopen it (terminal tool states are sticky, see tool_call_update).

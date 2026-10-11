@@ -15,7 +15,7 @@ import { fetchText, isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts"
 import { Accounts, DaemonOffline, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, saveProject, withProject } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import type { ThemedToken } from "shiki/core";
-import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, Usage, ago, churn, cost, useTick } from "./bits.tsx";
+import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, statusLabel, Usage, ago, churn, cost, useTick } from "./bits.tsx";
 
 type Send = (c: Command) => void;
 
@@ -187,7 +187,7 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
           <section key={project} className="side-group">
             <h3 className="eyebrow">{project.split("/").slice(-1)[0]}</h3>
             {list.map((s) => (
-              <button key={s.id} className={`row s-${s.status} ${selected === s.id ? "active" : ""} ${s.live === false ? "dormant" : ""}`} onClick={() => onSelect(selected === s.id ? null : s.id)} title={`${STATUS_LABEL[s.status]} · ${s.branch ?? s.project}`}>
+              <button key={s.id} className={`row s-${s.status} ${selected === s.id ? "active" : ""} ${s.live === false ? "dormant" : ""}`} onClick={() => onSelect(selected === s.id ? null : s.id)} title={`${statusLabel(s)} · ${s.branch ?? s.project}`}>
                 <StatusGlyph s={s} />
                 <span className="row-title">{s.title}</span>
                 {isUnseen(s) && <span className="unseen" aria-label="New result" />}
@@ -381,13 +381,14 @@ function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: 
       <div className="live-top">
         <StatusGlyph s={s} />
         <span className="live-title">{s.title}</span>
-        <span className="live-status">{STATUS_LABEL[s.status]}{pending > 1 ? ` · ${pending}` : ""}</span>
+        <span className="live-status">{statusLabel(s)}{pending > 1 ? ` · ${pending}` : ""}</span>
         <span className="age">{ago(s.updatedAt)}</span>
       </div>
       <div className="live-meta">
         {s.branch && <code>{s.branch}</code>}
         <span className="agent-badge">{AGENTS[s.agent].label}</span>
         {s.usage?.costUsd !== undefined && <span className="agent-badge">{cost(s.usage.costUsd)}</span>}
+        {s.status === "working" && s.setup?.state === "running" && s.setup.current && <span className="live-phase">{s.setup.current}</span>}
         {s.progress && s.status === "working" && (
           <span className="live-phase">
             {s.progress.phase} · {s.progress.step}/{s.progress.of}
@@ -502,6 +503,49 @@ function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send
   );
 }
 
+/* ───────────── Ready worktrees: local files + install before the first prompt ───────────── */
+
+function SetupBar({ s, send }: { s: SessionInfo; send: Send }) {
+  const st = s.setup;
+  if (!st) return null;
+  const files = st.copied.length ? `copied ${st.copied.length} local file${st.copied.length === 1 ? "" : "s"}` : "";
+  const facts = [files, ...st.install].filter(Boolean).join(" · ");
+  const detail = [...st.copied, ...(st.notes ?? [])].join("\n") || undefined;
+  const act = (action: "retry" | "skip") => send({ type: "session.setup", sessionId: s.id, action });
+  if (st.state === "running")
+    return (
+      <section className="setup">
+        <div className="setup-line">
+          <span className="dot s-working" />
+          <b>Setting up…</b>
+          <span className="setup-facts" title={detail}>{st.current ? <code>{st.current}</code> : (facts || "copying local files")}</span>
+          <button type="button" className="btn ghost small" onClick={() => act("skip")} title="Send the first message now, without waiting">Start anyway</button>
+        </div>
+      </section>
+    );
+  if (st.state === "failed")
+    return (
+      <section className="setup" role="alert">
+        <div className="setup-line">
+          <span className="dot s-failed" />
+          <b>Setup failed</b>
+          <span className="setup-facts"><code>{st.error?.command}</code></span>
+          <button type="button" className="btn small" onClick={() => act("retry")}>Retry</button>
+          <button type="button" className="btn ghost small" onClick={() => act("skip")}>Start anyway</button>
+        </div>
+        {st.error?.tail && <pre className="setup-tail">{st.error.tail}</pre>}
+      </section>
+    );
+  if (!facts && !st.notes?.length) return null;
+  return (
+    <p className="quiet setup-done" title={detail}>
+      {st.state === "skipped" ? "Started without finishing setup" : "Worktree ready"}
+      {facts && ` · ${facts}`}
+      {st.notes?.map((n) => <span key={n} className="setup-note">{n}</span>)}
+    </p>
+  );
+}
+
 /* ───────────── Drawer: deep dive into one session ───────────── */
 
 function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; state: State; send: Send; onClose: () => void; onFile: (path: string) => void; onOpen: (id: string) => void }) {
@@ -523,7 +567,7 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
         <div className="drawer-title">
           <h2>{s.title}</h2>
           <p>
-            <span className="status-text">{STATUS_LABEL[s.status]}</span>
+            <span className="status-text">{statusLabel(s)}</span>
             {s.progress && s.status === "working" && <> · {s.progress.phase} {s.progress.step}/{s.progress.of}</>}
             {s.live === false && <> · asleep</>}
           </p>
@@ -551,6 +595,7 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
       </div>
 
       <div className="drawer-scroll">
+        <SetupBar s={s} send={send} />
         {retry && failure?.kind === "notice" && <FailureNotice text={failure.text} onRetry={() => send({ type: "session.prompt", sessionId: s.id, prompt: retry.prompt })} />}
         {decisions.map((d) => (
           <DecisionCard key={d.id} d={d} session={s} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: d.id, optionId })} />

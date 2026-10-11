@@ -40,7 +40,9 @@ coding agent. Adapters: `@agentclientprotocol/claude-agent-acp` (Claude Code), `
 Per session the daemon:
 
 1. Optionally creates a worktree: branch `perzian/<slug>-<id6>` at `$PERZIAN_HOME/worktrees/<repo>/<slug>-<id6>`,
-   and records `baseSha` (HEAD at start).
+   and records `baseSha` (HEAD at start). Then readies it (`setup.ts`): copies the checkout's gitignored `.env*` and
+   local config files, runs the lockfile's install, and records progress in `SessionInfo.setup`. Prompts wait for
+   it; a failure holds them until the developer picks Retry or Start anyway (`session.setup`).
 2. Spawns the adapter, opens an ACP `ClientSideConnection`, `initialize`.
 3. `session/new` with `cwd` and `mcpServers: [report-mcp]` — or `session/load` with the saved `acpSessionId`
    when the agent supports `loadSession`, so sessions resume after a daemon restart.

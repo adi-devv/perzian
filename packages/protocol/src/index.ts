@@ -34,6 +34,8 @@ export interface SessionInfo {
   baseBranch?: string;
   /** Where the session's work went: merged back, opened as a PR, or why it couldn't. */
   ship?: ShipState;
+  /** Readying a fresh worktree (local files copied, dependencies installed) before the agent's first message. */
+  setup?: SetupState;
   createdAt: number;
   updatedAt: number;
 }
@@ -47,6 +49,22 @@ export interface ShipState {
   /** Files that conflicted when merging. */
   files?: string[];
   detail?: string;
+  at: number;
+}
+
+export interface SetupState {
+  /** running: copying/installing; ok: ready; failed: the install failed (Retry or Start anyway); skipped: the developer started anyway. */
+  state: "running" | "ok" | "failed" | "skipped";
+  /** Local-only files copied from the checkout (e.g. ".env", "apps/web/.env.local"). */
+  copied: string[];
+  /** Install commands, in order (e.g. "npm ci"). */
+  install: string[];
+  /** The command running now, while running. */
+  current?: string;
+  /** What was left out and why (e.g. "pnpm not on PATH: skipped pnpm install --frozen-lockfile"). */
+  notes?: string[];
+  /** On failure: the failing command and the last lines of its output. */
+  error?: { command: string; tail: string };
   at: number;
 }
 
@@ -177,6 +195,8 @@ export type Command =
   | { type: "session.seen"; sessionId: string }
   | { type: "session.archive"; sessionId: string }
   | { type: "session.ship"; sessionId: string; how: "merge" | "pr" }
+  // After a failed worktree setup: run it again, or start the agent without it.
+  | { type: "session.setup"; sessionId: string; action: "retry" | "skip" }
   | { type: "main.start"; model?: string; agent?: AgentKind; prompt?: string }
   | { type: "sessions.import"; sinceDays?: number; limit?: number }
   | { type: "decision.answer"; decisionId: string; optionId: string | null };

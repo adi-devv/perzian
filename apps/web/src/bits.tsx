@@ -3,6 +3,13 @@ import type { Decision, FileChange, Outcome, SessionInfo, SessionStatus } from "
 
 export const STATUS_LABEL: Record<SessionStatus, string> = { needs_you: "Needs you", working: "Working", failed: "Failed", done: "Done", idle: "Idle" };
 
+// The status as words, with worktree setup folded in: "Setting up…" while it runs, "Setup failed" when it stops the session.
+export function statusLabel(s: SessionInfo): string {
+  if (s.status === "working" && s.setup?.state === "running") return "Setting up…";
+  if (s.status === "failed" && s.setup?.state === "failed") return "Setup failed";
+  return STATUS_LABEL[s.status];
+}
+
 export function ago(ts: number): string {
   const m = Math.round((Date.now() - ts) / 60000);
   return m < 1 ? "now" : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
