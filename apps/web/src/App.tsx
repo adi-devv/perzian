@@ -51,7 +51,8 @@ export function App() {
     return () => clearTimeout(t);
   }, [error]);
   const workers = useMemo(() => all.filter((s) => s.role === "worker").sort(byAttention), [state.sessions]);
-  const decisions = useMemo(() => Object.values(state.decisions).sort((a, b) => a.createdAt - b.createdAt), [state.decisions]);
+  // Oldest call first; in the demo the visitor's own run should be the card they see.
+  const decisions = useMemo(() => Object.values(state.decisions).sort((a, b) => (isDemo ? b.createdAt - a.createdAt : a.createdAt - b.createdAt)), [state.decisions]);
 
   const open = (id: string | null) => {
     setSelected(id);

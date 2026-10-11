@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "react";
 import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type Command, type CredentialStatus, type DoctorReport, type InstallResult, type PerzianEvent, type ServerMessage, type State } from "@perzian/protocol";
 import { demoEvents } from "./demo.ts";
+import { demoSend } from "./demoScript.ts";
 
 // In the desktop app (file://) talk to the daemon directly; in dev go through the Vite proxy.
 const direct = location.protocol === "file:";
@@ -65,34 +66,6 @@ export function useDaemon() {
   };
 
   return { state, send, link, connected: link === "online", error, clearError: () => setError(null) };
-}
-
-// Minimal local behavior so the demo feels alive.
-function demoSend(cmd: Command, s: State, emit: (e: PerzianEvent) => void) {
-  const at = Date.now();
-  if (cmd.type === "decision.answer") {
-    const d = s.decisions[cmd.decisionId];
-    if (!d) return;
-    emit({ type: "decision.resolved", decisionId: d.id, sessionId: d.sessionId, optionId: cmd.optionId });
-    emit({ type: "session.status", sessionId: d.sessionId, status: "working", at });
-  } else if (cmd.type === "session.seen") {
-    emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { seenAt: at } });
-  } else if (cmd.type === "session.prompt" || (cmd.type === "main.start" && cmd.prompt)) {
-    const id = cmd.type === "session.prompt" ? cmd.sessionId : "main";
-    const text = cmd.type === "session.prompt" ? cmd.prompt : cmd.prompt!;
-    emit({ type: "session.transcript", sessionId: id, item: { kind: "user", text, at } });
-    emit({ type: "session.status", sessionId: id, status: "working", at });
-    setTimeout(() => {
-      emit({ type: "session.transcript", sessionId: id, item: { kind: "agent", text: "Demo mode: start the daemon to run real agents.", at: Date.now() } });
-      emit({ type: "session.status", sessionId: id, status: "done", at: Date.now() });
-    }, 700);
-  } else if (cmd.type === "session.setModel") {
-    emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { model: cmd.model } });
-  } else if (cmd.type === "session.setMode") {
-    emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { mode: cmd.mode } });
-  } else if (cmd.type === "session.archive") {
-    emit({ type: "session.updated", sessionId: cmd.sessionId, patch: { archived: true } });
-  }
 }
 
 // First-run checks. Agent probes are cached on the daemon; `recheck` bypasses that.
