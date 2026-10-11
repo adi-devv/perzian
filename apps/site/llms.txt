@@ -1,0 +1,23 @@
+# Perzian
+
+> Perzian is an open-source, visual-first agentic development environment (ADE) for macOS. You talk to one main agent, Perzian, which dispatches coding agents (Claude Code first, Codex next) across your repos and git worktrees, verifies their work with real checks, and comes back only when it needs your decision. License: AGPL-3.0.
+
+- Live tiles show every session's state at a glance: needs you, failed, working, done.
+- Small decisions (allow a command, pick an option) are answered on the tile.
+- Finished work comes with proof (checks run, diffs, outcome) and a one-click merge or PR.
+- Agents are wrapped over the Agent Client Protocol (ACP); Perzian never runs its own agent loop.
+
+## Get started
+- [README and install](https://github.com/adi-devv/perzian#readme): `git clone https://github.com/adi-devv/perzian && cd perzian && npm install && npm run app`
+- [Live demo](https://perzian.dev/demo/)
+- [Releases](https://github.com/adi-devv/perzian/releases)
+
+## Docs
+- [Vision](https://github.com/adi-devv/perzian/blob/main/docs/VISION.md): why Perzian exists
+- [Architecture](https://github.com/adi-devv/perzian/blob/main/docs/ARCHITECTURE.md): daemon, ACP sessions, worktrees, events
+- [Features](https://github.com/adi-devv/perzian/blob/main/FEATURES.md): what's built
+- [Roadmap](https://github.com/adi-devv/perzian/blob/main/docs/ROADMAP.md)
+
+## Optional
+- [Contributing / CLA](https://github.com/adi-devv/perzian/blob/main/CLA.md)
+- [License (AGPL-3.0)](https://github.com/adi-devv/perzian/blob/main/LICENSE)
