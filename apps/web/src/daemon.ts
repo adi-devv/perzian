@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from "react";
-import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type Command, type CredentialStatus, type DoctorReport, type InstallResult, type PerzianEvent, type ServerMessage, type State } from "@perzian/protocol";
+import { emptyState, fold, reduce, type AgentKind, type ApiKeyProvider, type Command, type CredentialStatus, type DoctorReport, type InstallResult, type PerzianEvent, type RepoTree, type ServerMessage, type State } from "@perzian/protocol";
 import { demoEvents } from "./demo.ts";
 import { demoAutoplay, demoSend } from "./demoScript.ts";
 
@@ -190,7 +190,18 @@ export async function fetchText(kind: "diff" | "file", session: string, path: st
   return text;
 }
 
-const DEMO_DIFF = `diff --git a/src/auth/session.ts b/src/auth/session.ts
+/** The session folder's file tree for the Map; null in demo mode or when it can't be read (the Map then draws only changed files). */
+export async function fetchTree(session: string): Promise<RepoTree | null> {
+  if (isDemo) return null;
+  try {
+    const res = await fetch(api(`/api/tree?session=${encodeURIComponent(session)}`));
+    return res.ok ? ((await res.json()) as RepoTree) : null;
+  } catch {
+    return null;
+  }
+}
+
+const DEMO_DIFF =`diff --git a/src/auth/session.ts b/src/auth/session.ts
 --- a/src/auth/session.ts
 +++ b/src/auth/session.ts
 @@ -1,6 +1,14 @@

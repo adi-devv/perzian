@@ -26,6 +26,7 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 ## Proof and checks
 - ✅ Outcome cards with observed proof: the daemon records the tests, builds, typechecks and lints the agent really ran, with real exit codes.
 - ✅ Change map by symbol (tree-sitter plus `git diff`), a read-only diff/file viewer, activity and a grouped transcript in the session detail view.
+- ⚠️ Map: a squarified treemap of the repo's real files (git, sized by bytes), shaded by how much this project's sessions changed each region; each active session is a dot on the file it last edited (click opens it), hover shows path and who touched it, click a folder to zoom (breadcrumb back). Small files fold into "+N" cells and drawing is capped, so big repos stay smooth.
 - ⚠️ Declared checks: `perzian.json` lists your own checks; the daemon runs them when an agent says it's done, sends failures back (2 rounds), and allows them without a card.
 - ✅ "Run checks" in the session detail reruns the declared and detected checks (running, then ✓/✕).
 

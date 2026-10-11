@@ -24,7 +24,7 @@ import { existsSync } from "node:fs";
 import { adapterEntry, agentEnv } from "./agents.ts";
 import type { Credentials } from "./credentials.ts";
 import { permissionPolicy } from "./permissions.ts";
-import { ToolObserver, isWriteCall, outsideOf, parentToolCallId, touchedPaths } from "./observe.ts";
+import { ToolObserver, isWriteCall, outsideOf, parentToolCallId, pathInside, touchedPaths } from "./observe.ts";
 import { UsageMeter } from "./usage.ts";
 import { SetupGate, readyWorktree } from "./setup.ts";
 import { MAX_FIX_ATTEMPTS, declaredBrief, declaredProofs, fixPrompt, runDeclaredChecks } from "./checks.ts";
@@ -101,7 +101,7 @@ export class AgentSession {
   private conn?: acp.ClientSideConnection;
   private starting?: Promise<void>;
   private agentText = "";
-  private tools = new Map<string, { title: string; kind?: string; status: string; own: boolean; hidden: boolean; parent?: string }>();
+  private tools = new Map<string, { title: string; kind?: string; status: string; own: boolean; hidden: boolean; parent?: string; path?: string }>();
   // Observed facts (see observe.ts): outside paths, subagents, background processes; and the repo's state.
   private observer: ToolObserver;
   private startBranch?: string; // the branch the base was cut from; the base is recomputed against it
@@ -564,7 +564,7 @@ export class AgentSession {
     for (const [toolCallId, t] of this.tools) {
       if (t.hidden || isTerminal(t.status)) continue;
       t.status = status;
-      this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "tool", toolCallId, title: t.title, status, toolKind: t.kind, ...(t.parent ? { parentToolCallId: t.parent } : {}), at: Date.now() } });
+      this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "tool", toolCallId, title: t.title, status, toolKind: t.kind, ...(t.parent ? { parentToolCallId: t.parent } : {}), ...(t.path ? { path: t.path } : {}), at: Date.now() } });
     }
   }
 
@@ -1015,13 +1015,14 @@ export class AgentSession {
             // Our own report tools and Claude's ToolSearch (deferred-tool loading) are plumbing, not work.
             const hidden = own || INTERNAL_TOOLS.has(name);
             const parent = parentToolCallId(update);
-            this.tools.set(update.toolCallId, { title: update.title, kind: update.kind, status: update.status ?? "pending", own, hidden, ...(parent ? { parent } : {}) });
+            const path = pathInside(update, this.info.cwd);
+            this.tools.set(update.toolCallId, { title: update.title, kind: update.kind, status: update.status ?? "pending", own, hidden, ...(parent ? { parent } : {}), ...(path ? { path } : {}) });
             if (hidden) break;
             this.observeTool(update);
             this.store.emit({
               type: "session.transcript",
               sessionId: id,
-              item: { kind: "tool", toolCallId: update.toolCallId, title: update.title, status: update.status ?? "pending", toolKind: update.kind, ...(parent ? { parentToolCallId: parent } : {}), at },
+              item: { kind: "tool", toolCallId: update.toolCallId, title: update.title, status: update.status ?? "pending", toolKind: update.kind, ...(parent ? { parentToolCallId: parent } : {}), ...(path ? { path } : {}), at },
             });
             break;
           }
@@ -1032,6 +1033,8 @@ export class AgentSession {
             if (known && isTerminal(known.status)) break;
             if (update.title && known && !known.hidden) known.title = update.title;
             if (update.status && known) known.status = update.status;
+            const path = pathInside(update, this.info.cwd) ?? known?.path;
+            if (path && known) known.path = path;
             // Deferred: the stop goes out after this update is handled.
             if (update.status && isTerminal(update.status) && this.pauseAfterStep) queueMicrotask(() => this.maybeStopForLimit());
             if (known?.hidden) break;
@@ -1050,6 +1053,7 @@ export class AgentSession {
                   status: update.status ?? known?.status ?? "in_progress",
                   toolKind: update.kind ?? known?.kind,
                   ...((parentToolCallId(update) ?? known?.parent) ? { parentToolCallId: parentToolCallId(update) ?? known?.parent } : {}),
+                  ...(path ? { path } : {}),
                   at,
                 },
               });

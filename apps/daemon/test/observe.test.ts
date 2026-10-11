@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ToolObserver, isBackground, outsideOf, portOf, spawnBlocker, spawnDepth, touchedPaths } from "../src/observe.ts";
+import { ToolObserver, isBackground, outsideOf, pathInside, portOf, spawnBlocker, spawnDepth, touchedPaths } from "../src/observe.ts";
 
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), "pz-observe-")));
 const cwd = join(tmp, "proj");
@@ -124,5 +124,18 @@ describe("spawn depth", () => {
   });
   test("a parent cycle can't loop forever", () => {
     assert.equal(spawnDepth("a", (id) => ({ parentId: id === "a" ? "b" : "a" })), 2);
+  });
+});
+
+describe("pathInside (the Map's session dot)", () => {
+  test("first location inside the folder, relative with / separators", () => {
+    assert.equal(pathInside({ locations: [{ path: join(cwd, "src", "a.ts") }] }, cwd), "src/a.ts");
+    assert.equal(pathInside({ rawInput: { file_path: "lib/b.ts" } }, cwd), "lib/b.ts");
+  });
+  test("skips paths outside, and the folder itself", () => {
+    assert.equal(pathInside({ locations: [{ path: join(elsewhere, "x.ts") }, { path: join(cwd, "y.ts") }] }, cwd), "y.ts");
+    assert.equal(pathInside({ locations: [{ path: cwd }] }, cwd), undefined);
+    assert.equal(pathInside({ locations: [{ path: join(extra, "z.ts") }] }, cwd), undefined);
+    assert.equal(pathInside({}, cwd), undefined);
   });
 });

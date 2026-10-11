@@ -5,6 +5,7 @@ import { fetchText } from "./daemon.ts";
 import { FailureNotice } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import { Slot, useExiting } from "./motion.tsx";
+import { RepoMap } from "./repomap.tsx";
 import { Composer, DecisionCard, gitChip, ModePicker, ModelPicker, StatusGlyph, Usage, ago, churn, retryTarget, statusText } from "./bits.tsx";
 
 type Send = (c: Command) => void;
@@ -128,7 +129,7 @@ export function SessionDetail({ s, state, send, onBack, onOpen, leadNew }: { s: 
 
       <div className="d-body" ref={body} onScroll={() => { const el = body.current; if (el && tab === "transcript") stuck.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60; }}>
         {tab === "changes" && <ChangesTab s={s} files={files} outcome={outcome} state={state} send={send} file={file} onFile={setFile} closed={closed} />}
-        {tab === "map" && <MapTab s={s} state={state} files={files} onFile={(p) => { setFile(p); pick("changes"); }} />}
+        {tab === "map" && <MapTab s={s} state={state} onFile={(p) => { setFile(p); pick("changes"); }} onOpen={onOpen} />}
         {tab === "checks" && <ChecksTab s={s} outcome={outcome} send={send} fix={fix} />}
         {tab === "transcript" && <TranscriptTab items={transcript} state={state} subagents={s.subagents ?? []} />}
       </div>
@@ -340,51 +341,13 @@ function ProofList({ rows, compact }: { rows: Row[]; compact?: boolean }) {
   );
 }
 
-/* ───────────── Map: the real directory structure; regions grow with churn, chips are the touched files ───────────── */
+/* ───────────── Map: a treemap of the repo's real files, shaded by churn, sessions as dots (repomap.tsx) ───────────── */
 
-function MapTab({ s, state, files, onFile }: { s: SessionInfo; state: State; files: FileChange[]; onFile: (p: string) => void }) {
-  const regions = new Map<string, FileChange[]>();
-  for (const f of files) regions.set(dir(f.path), [...(regions.get(dir(f.path)) ?? []), f]);
-  const max = Math.max(1, ...[...regions.values()].map((l) => churn(l).add + churn(l).del));
-  // Another running session touching the same file is a merge conflict waiting to happen.
-  const others = Object.values(state.sessions).filter((o) => o.id !== s.id && o.role === "worker" && !o.archived && (o.status === "working" || o.status === "needs_you"));
-  const clash = (p: string) => others.filter((o) => (state.changes[o.id] ?? []).some((f) => f.path === p));
+function MapTab({ s, state, onFile, onOpen }: { s: SessionInfo; state: State; onFile: (p: string) => void; onOpen: (id: string) => void }) {
   const tools = (state.transcripts[s.id] ?? []).filter((t) => t.kind === "tool");
   return (
     <div className="map-tab">
-      {files.length === 0 ? (
-        <p className="empty">{s.status === "working" ? "No files yet. The map fills in as the agent edits." : "No files changed."}</p>
-      ) : (
-        <div className="map-grid">
-          {[...regions.entries()].map(([d, list]) => {
-            const c = churn(list);
-            return (
-              <div key={d} className="region" style={{ flexGrow: 1 + Math.round(((c.add + c.del) / max) * 3) }}>
-                <div className="r-h">
-                  <span title={d}>{d === "." ? "./" : `${d}/`}</span>
-                  <i>
-                    {list.length} · <em className="a">+{c.add}</em> <em className="d">−{c.del}</em>
-                  </i>
-                </div>
-                <div className="rchips">
-                  {list.map((f) => {
-                    const others = clash(f.path);
-                    return (
-                      <div key={f.path} className="fwrap">
-                        <button className={`btn fchip c-${f.kind}`} onClick={() => onFile(f.path)} title={`${f.path}  +${f.additions} −${f.deletions}`}>
-                          <span className="cn">{name(f.path)}</span>
-                          <span className="pm"><em className="a">+{f.additions}</em> <em className="d">−{f.deletions}</em></span>
-                        </button>
-                        {others.length > 0 && <span className="warn" title={others.map((o) => o.title).join(", ")}>⚠ also in {others[0].title}{others.length > 1 ? ` +${others.length - 1}` : ""}</span>}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <RepoMap s={s} state={state} onFile={onFile} onOpen={onOpen} />
       <h3 className="h3 act-h">Activity</h3>
       <div className="activity">
         {tools.map((t) => t.kind === "tool" && <span key={t.toolCallId} className={`act k-${t.toolKind ?? "other"} st-${t.status}`} title={`${t.toolKind ?? "tool"}: ${t.title}`} />)}

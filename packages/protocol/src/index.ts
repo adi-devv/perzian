@@ -220,6 +220,17 @@ export interface FileChange {
   symbols?: SymbolChange[];
 }
 
+/** The repo's files as a tree, for the Map: real git structure (tracked plus untracked, not ignored).
+ *  `size` is bytes; a folder's `size` and `files` are sums over everything under it. Served by GET /api/tree. */
+export interface RepoTree {
+  name: string;
+  size: number;
+  /** Files under a folder; absent on a file. */
+  files?: number;
+  /** Absent on a file. */
+  children?: RepoTree[];
+}
+
 /** A declaration that changed between base and the working tree. `name` is qualified for members ("Class.method"). */
 export interface SymbolChange {
   name: string;
@@ -266,7 +277,8 @@ export type TranscriptItem =
   | { kind: "user"; text: string; at: number; system?: true }
   | { kind: "agent"; text: string; at: number }
   // parentToolCallId: the Claude subagent (Task/Agent call, see SessionInfo.subagents) this call ran inside.
-  | { kind: "tool"; toolCallId: string; title: string; status: string; toolKind?: string; parentToolCallId?: string; at: number }
+  // path: the file it targets, relative to the session's folder (set only inside it); places the session's dot on the Map.
+  | { kind: "tool"; toolCallId: string; title: string; status: string; toolKind?: string; parentToolCallId?: string; path?: string; at: number }
   | { kind: "spawn"; childId: string; title: string; at: number }
   | { kind: "notice"; text: string; at: number };
 
