@@ -12,6 +12,9 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 0. **Ready worktrees (do first).** Before the agent's first message: copy `.env*` and other local-only files from the
    checkout, run the install for the lockfile (npm/pnpm/yarn/bun, uv…), show "Setting up…", Retry on failure.
    Later: per-repo custom setup steps. Without this, first test runs fail in fresh worktrees.
+0b. **Declared checks, always run.** A per-repo `perzian.json` lists custom checks (e.g. a team test CLI) next to the
+   auto-detected ones. The daemon runs them itself when an agent says it's done, records ✓/✕ with real exit codes,
+   sends failures back to the agent to fix, and allows them without a permission card. Site card: "Your checks run every time."
 1. **Ship it: try it for real.** Built: "Merge into <base>" / "Open PR" in the session drawer, conflicts listed with
    "Ask the agent to resolve", worktree removed after a merge. Unit-tested on temp repos; not yet run from the app on a real project.
 2. **Crew summary.** Ask the lead "what's going on?" and get a short digest of what's done, blocked and needs you,
