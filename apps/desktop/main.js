@@ -248,6 +248,7 @@ function onDaemonChange(state, event, prev) {
   if (focused()) return; // the window already shows it
   if (event.type === "decision.requested") {
     const d = event.decision;
+    app.dock?.bounce("informational"); // once per new question, only while the window isn't in front
     const title = state.sessions[d.sessionId]?.title ?? "Perzian";
     notify(`decision:${d.id}`, title, d.detail ? `${d.question}\n${d.detail}` : d.question);
   } else if (event.type === "session.status" && (event.status === "done" || event.status === "failed")) {

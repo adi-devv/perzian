@@ -34,7 +34,7 @@ export function Welcome({ state, send, recent, onUseProject, onStart }: { state:
       <div className="splash" role="dialog" aria-label="Welcome to Perzian" onClick={(e) => e.stopPropagation()}>
         <header className="splash-top">
           <span className="mark big" aria-hidden />
-          <div>
+          <div className="splash-id">
             <h2>
               Perzian <span className="splash-ver">{__PERZIAN_VERSION__}</span>
             </h2>
@@ -45,15 +45,21 @@ export function Welcome({ state, send, recent, onUseProject, onStart }: { state:
         <div className="splash-cols">
           <section className="splash-col" aria-label="Quick setup">
             <h3>Quick setup</h3>
-            <div className="sp-row">
-              <span className="sp-k">Default mode</span>
-              <ModePicker value={state.settings.defaultMode} onChange={(mode) => send({ type: "settings.setDefaultMode", mode })} title={`New sessions start in ${MODE_LABEL[state.settings.defaultMode]}`} />
-            </div>
-            <div className="sp-agents">
+            <div className="sp-list">
+              <div className="sp-row">
+                <span className="sp-k">Default mode</span>
+                <ModePicker value={state.settings.defaultMode} onChange={(mode) => send({ type: "settings.setDefaultMode", mode })} title={`New sessions start in ${MODE_LABEL[state.settings.defaultMode]}`} />
+              </div>
               {doctor.report?.agents.map((a) => <AgentLine key={a.kind} a={a} />)}
-              {!doctor.report && <span className="sp-quiet">{doctor.failed ? "Setup check failed" : "Checking…"}</span>}
+              {!doctor.report && (
+                <div className="sp-row">
+                  <span className="sp-k">Agents</span>
+                  <span className="sp-v muted">{doctor.failed ? "Setup check failed" : "Checking…"}</span>
+                </div>
+              )}
+              <GithubRow gh={doctor.report?.github} login={gh} />
             </div>
-            <GithubBlock gh={doctor.report?.github} login={gh} />
+            <GithubNote gh={doctor.report?.github} login={gh} />
           </section>
 
           <section className="splash-col" aria-label="Projects and links">
@@ -67,12 +73,13 @@ export function Welcome({ state, send, recent, onUseProject, onStart }: { state:
                 ))}
               </div>
             ) : (
-              <p className="sp-quiet">None yet. Perzian asks when it needs one.</p>
+              <p className="sp-quiet">None yet</p>
             )}
+            <h3 className="sp-gap">Links</h3>
             <nav className="splash-links" aria-label="Links">
               {LINKS.map(([label, href]) => (
-                <a key={label} href={href} target="_blank" rel="noreferrer" className="text-link">
-                  {label}
+                <a key={label} href={href} target="_blank" rel="noreferrer">
+                  {label} <span aria-hidden>↗</span>
                 </a>
               ))}
             </nav>
@@ -82,6 +89,7 @@ export function Welcome({ state, send, recent, onUseProject, onStart }: { state:
         <footer className="splash-foot">
           <label className="sp-check">
             <input type="checkbox" checked={state.settings.splash} onChange={(e) => send({ type: "settings.setSplash", show: e.target.checked })} />
+            <span className="sp-box" aria-hidden />
             Show on startup
           </label>
           <button className="btn primary" autoFocus onClick={onStart}>
@@ -93,39 +101,77 @@ export function Welcome({ state, send, recent, onUseProject, onStart }: { state:
   );
 }
 
-function AgentLine({ a }: { a: AgentCheck }) {
-  const [how, setHow] = useState(false);
-  const status = !a.installed ? "not found" : a.signedIn === false ? "not signed in" : a.signedIn ? "✓ signed in" : "installed";
+function Status({ tone, children }: { tone: "ok" | "off"; children: React.ReactNode }) {
   return (
-    <div className="sp-agent">
-      <div className="sp-row">
-        <span className="sp-k">{a.label}</span>
-        <span className="sp-v">
-          {status}
-          {!a.installed && (
-            <>
-              {" · "}
-              <button className="text-link" onClick={() => setHow(!how)}>how to install</button>
-            </>
-          )}
-        </span>
-      </div>
-      {!a.installed && how && <CopyCmd cmd={a.installCommand} />}
-      {a.installed && a.signedIn === false && <CopyCmd cmd={a.signInCommand} />}
-    </div>
+    <span className="sp-v muted">
+      <i className={`dot sp-dot ${tone}`} aria-hidden />
+      {children}
+    </span>
   );
 }
 
-function GithubBlock({ gh, login }: { gh?: GitHubCheck; login: ReturnType<typeof useGithubLogin> }) {
+function CopyText({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="text-link"
+      onClick={() => {
+        navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1400);
+        }, () => {});
+      }}
+    >
+      {copied ? "Copied" : label}
+    </button>
+  );
+}
+
+function AgentLine({ a }: { a: AgentCheck }) {
+  const [how, setHow] = useState(false);
+  let value: React.ReactNode;
+  if (!a.installed) {
+    value = (
+      <>
+        <Status tone="off">Not found</Status>
+        <button className="text-link" onClick={() => setHow(!how)}>How to install</button>
+      </>
+    );
+  } else if (a.signedIn === false) {
+    value = (
+      <>
+        <Status tone="off">Not signed in</Status>
+        <CopyText text={a.signInCommand} label={`Copy \`${a.signInCommand}\``} />
+      </>
+    );
+  } else if (a.signedIn) value = <Status tone="ok">Signed in</Status>;
+  else value = <Status tone="ok">Installed</Status>;
+  return (
+    <>
+      <div className="sp-row">
+        <span className="sp-k">{a.label}</span>
+        <span className="sp-vs">{value}</span>
+      </div>
+      {!a.installed && how && (
+        <div className="sp-extra">
+          <CopyCmd cmd={a.installCommand} />
+        </div>
+      )}
+    </>
+  );
+}
+
+function GithubRow({ gh, login }: { gh?: GitHubCheck; login: ReturnType<typeof useGithubLogin> }) {
   const { login: l } = login;
-  let body: React.ReactNode;
-  if (!gh) body = <span className="sp-quiet">Checking…</span>;
-  else if (gh.signedIn) body = <span className="sp-v">Connected{gh.user ? ` as ${gh.user}` : ""}</span>;
-  else if (!gh.ghInstalled) body = gh.installCommand ? <CopyCmd cmd={gh.installCommand} /> : <a className="text-link" href={gh.installUrl} target="_blank" rel="noreferrer">Install GitHub CLI</a>;
+  let value: React.ReactNode;
+  if (!gh) value = <span className="sp-v muted">Checking…</span>;
+  else if (gh.signedIn) value = <Status tone="ok">{gh.user ?? "Connected"}</Status>;
+  else if (!gh.ghInstalled) value = gh.installCommand ? <CopyText text={gh.installCommand} label="Copy install command" /> : <a className="text-link" href={gh.installUrl} target="_blank" rel="noreferrer">Install GitHub CLI</a>;
   else if (l.state === "waiting" && l.code) {
-    body = (
-      <div className="sp-code">
-        <code className="code-big">{l.code}</code>
+    value = (
+      <>
+        <code className="sp-code">{l.code}</code>
         <button
           className="btn small"
           onClick={() => {
@@ -133,29 +179,30 @@ function GithubBlock({ gh, login }: { gh?: GitHubCheck; login: ReturnType<typeof
             window.open(l.url ?? "https://github.com/login/device", "_blank", "noreferrer");
           }}
         >
-          Copy code &amp; open GitHub
+          Copy code &amp; open
         </button>
-        <span className="sp-quiet">Waiting for you to finish in the browser…</span>
-      </div>
+      </>
     );
   } else {
-    body = (
-      <div className="sp-code">
-        <button className="btn small" disabled={l.state === "waiting"} onClick={login.start}>
-          {l.state === "waiting" ? "Starting…" : "Connect GitHub"}
-        </button>
-        {l.state === "failed" && <span className="sp-quiet">{l.error ?? "Didn't finish"} · try again</span>}
-      </div>
+    value = (
+      <button className="btn small" disabled={l.state === "waiting"} onClick={login.start}>
+        {l.state === "waiting" ? "Starting…" : "Connect"}
+      </button>
     );
   }
   return (
-    <div className="sp-gh">
-      <div className="sp-row">
-        <span className="sp-k">GitHub <span className="sp-opt">optional</span></span>
-        {gh && !gh.signedIn && !gh.ghInstalled ? <span className="sp-v">gh not installed</span> : null}
-      </div>
-      {body}
-      {!gh?.signedIn && <p className="sp-quiet">Needed for PRs and CI status. You can skip this.</p>}
+    <div className="sp-row">
+      <span className="sp-k">
+        GitHub <span className="sp-opt">optional</span>
+      </span>
+      <span className="sp-vs">{value}</span>
     </div>
   );
+}
+
+function GithubNote({ gh, login }: { gh?: GitHubCheck; login: ReturnType<typeof useGithubLogin> }) {
+  const { login: l } = login;
+  if (!gh || gh.signedIn) return null;
+  const msg = l.state === "waiting" && l.code ? "Waiting for you to finish in the browser…" : l.state === "failed" ? `${l.error ?? "Didn't finish"}. Try again.` : "Needed for PRs and CI status. You can skip this.";
+  return <p className="sp-quiet">{msg}</p>;
 }

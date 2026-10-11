@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { isUnseen, needsYou, pendingUsageCard, shownStatus, type Command, type Decision, type SessionInfo, type SessionStatus, type State, type UsageCard } from "@perzian/protocol";
 import { explainFailure, isFailureNotice } from "./onboarding.tsx";
 import { PhoneButton } from "./phone.tsx";
@@ -196,6 +196,7 @@ function Tile({ s, state, send, selected, onOpen, kids = [], selectedId }: { s: 
       role="button"
       tabIndex={0}
       data-tile={s.id}
+      data-attn={needsYou(s) ? "needs" : s.status === "failed" ? "failed" : undefined}
       data-flip={s.id}
       aria-current={selected ? "true" : undefined}
       title={`${s.title} · ${statusText(s)}${s.branch ? ` · ${s.branch}` : ""}${stacked ? ` · on ${stacked.title}` : ""}`}
@@ -260,21 +261,53 @@ function UsageCardView({ card, send }: { card: UsageCard; send: Send }) {
   );
 }
 
-function Summary({ workers }: { workers: SessionInfo[] }) {
-  // Interrupted sessions count as needing you (needsYou), not under the status they were left in.
-  const n = (st: SessionStatus) => workers.filter((w) => !w.interrupted && w.status === st).length;
-  const needs = workers.filter(needsYou).length, failed = n("failed"), working = n("working"), paused = n("paused"), done = n("done");
-  const parts: React.ReactNode[] = [];
-  if (needs) parts.push(<span key="n" className="n-needs">{needs} need{needs === 1 ? "s" : ""} you</span>);
-  if (failed) parts.push(<span key="f" className="n-failed">{failed} failed</span>);
-  if (working) parts.push(<span key="w">{working} working</span>);
-  if (paused) parts.push(<span key="p">{paused} paused</span>);
-  if (!parts.length) parts.push(<span key="q">{workers.length ? `All quiet · ${done} done` : "No sessions yet"}</span>);
-  return (
-    <div className="summary" role="status" aria-live="polite">
-      {parts.flatMap((p, i) => (i ? [<span key={`s${i}`} className="sep">·</span>, p] : [p]))}
-    </div>
-  );
+type Attn = "needs" | "failed";
+
+/** Needs-you / failed tiles scrolled out of the crew list leave a small pill at that edge; click scrolls the tile in. */
+function OffscreenPills({ list, sig }: { list: React.RefObject<HTMLDivElement | null>; sig: string }) {
+  const [hidden, setHidden] = useState<{ up: Map<string, Attn>; down: Map<string, Attn> }>({ up: new Map(), down: new Map() });
+  useEffect(() => {
+    const root = list.current;
+    if (!root || typeof IntersectionObserver === "undefined") return;
+    const tiles = [...root.querySelectorAll<HTMLElement>("[data-attn]")];
+    const seen = new Map<HTMLElement, boolean>();
+    const apply = () => {
+      const up = new Map<string, Attn>(), down = new Map<string, Attn>();
+      const top = root.getBoundingClientRect().top;
+      for (const [el, vis] of seen) {
+        if (vis) continue;
+        (el.getBoundingClientRect().top < top ? up : down).set(el.dataset.tile!, el.dataset.attn as Attn);
+      }
+      setHidden({ up, down });
+    };
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) seen.set(e.target as HTMLElement, e.isIntersecting);
+      apply();
+    }, { root, threshold: 0.6 });
+    tiles.forEach((t) => io.observe(t));
+    return () => io.disconnect();
+  }, [list, sig]);
+  const pill = (dir: "up" | "down") => {
+    const m = hidden[dir];
+    if (!m.size) return null;
+    const ids = [...m.keys()];
+    const needs = ids.filter((id) => m.get(id) === "needs");
+    const kind: Attn = needs.length ? "needs" : "failed";
+    const pick = kind === "needs" ? needs : ids.filter((id) => m.get(id) === "failed");
+    return (
+      <button
+        key={dir}
+        className={`off-pill ${dir} ${kind}`}
+        onClick={() => {
+          const el = list.current?.querySelector<HTMLElement>(`[data-tile="${CSS.escape(dir === "up" ? pick[pick.length - 1]! : pick[0]!)}"]`);
+          el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        }}
+      >
+        {dir === "up" ? "↑" : "↓"} {pick.length} {kind === "needs" ? "needs you" : "failed"}
+      </button>
+    );
+  };
+  return <>{pill("up")}{pill("down")}</>;
 }
 
 const DONE_FOLD = 3;
@@ -311,9 +344,10 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
           {!connected && <span className="conn off" role="status" aria-label="Daemon offline" title="Daemon offline" />}
         </span>
       </div>
-      <Summary workers={workers} />
       {pendingUsageCard(state) && <UsageCardView key={pendingUsageCard(state)!.key} card={pendingUsageCard(state)!} send={send} />}
 
+      <div className="crew-scroll">
+      <OffscreenPills list={scroll} sig={workers.map((w) => `${w.id}${needsYou(w) ? "n" : w.status === "failed" ? "f" : ""}`).join() + order.join()} />
       <div className="crew-list" ref={scroll}>
         {[...groups.entries()].map(([project, list]) => {
           // A session started by another session lives inside its parent's card (all descendants, flat) when both are in this project.
@@ -357,6 +391,7 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
             </section>
           );
         })}
+      </div>
       </div>
 
       <div className="crew-foot">
