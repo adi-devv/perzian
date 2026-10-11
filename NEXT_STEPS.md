@@ -8,7 +8,8 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    moment, extra click or wall of text, then fix in small batches.
 2. **UI direction: crew + center is built; finish it.** Left: the crew (one live tile per session, grouped by project, urgency-sorted, answerable in place).
    Center: Perzian's chat, or one session's detail (Changes, Map, Checks, Transcript). Leftovers:
-   - The Map is a simple directory-region view (regions grow with churn), not a treemap with agents as dots yet.
+   - The Map (treemap with session dots) lives only in a session's detail; there's no project-wide center view to put it in yet.
+     Not tried with a real running agent (tool `path` placement) or on a 10k-file repo in the browser (unit-tested only).
    - Decision inbox on the phone, and the old alternatives (subway-map timeline), are still open.
 3. **Small eval set.** About 5 scripted tasks run against a real agent, scored on finished, checks passed, and an honest outcome.
 4. **Try the Mac app** (`npm run app`) and **publish v0.0.1** as a GitHub Release (`npm run dist`, upload the zip, link it).

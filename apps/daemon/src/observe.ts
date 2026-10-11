@@ -2,7 +2,7 @@
 // can show it. This module turns ACP tool calls into observed facts on SessionInfo (outside paths,
 // subagents, background processes) and holds the pure helpers behind them. Repo facts (worktrees,
 // commits, branch) live in git.ts and session.ts.
-import { isAbsolute, sep } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 import type { BackgroundProc, SessionInfo, Subagent } from "@perzian/protocol";
 import { realish } from "./git.ts";
 
@@ -47,6 +47,19 @@ export function touchedPaths(u: Pick<ToolUpdateLike, "locations" | "rawInput">, 
   for (const l of u.locations ?? []) if (str(l?.path)) found.push(str(l.path)!);
   if (isObj(u.rawInput)) for (const k of PATH_KEYS) if (str(u.rawInput[k])) found.push(str(u.rawInput[k])!);
   return [...new Set(found.map((p) => (isAbsolute(p) ? p : `${cwd}${sep}${p}`)))];
+}
+
+/** The first file a tool call targets inside `cwd`, relative with "/" separators (for the Map's session dot); undefined when none. */
+export function pathInside(u: Pick<ToolUpdateLike, "locations" | "rawInput">, cwd: string): string | undefined {
+  const inside = (p: string, root: string) => {
+    const r = relative(root, p);
+    return r && !r.startsWith("..") && !isAbsolute(r) ? r.split(sep).join("/") : undefined;
+  };
+  for (const p of touchedPaths(u, cwd)) {
+    const r = inside(p, cwd) ?? inside(realish(p), realish(cwd));
+    if (r) return r;
+  }
+  return undefined;
 }
 
 /** The paths outside every root, resolved through symlinks and `..` (so a link inside the folder pointing out counts as out). */

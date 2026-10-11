@@ -19,6 +19,7 @@ import { spawnBlocker } from "./observe.ts";
 import { ResumeQueue } from "./resume.ts";
 import { loadDesktopToken, trustedOrigin } from "./origin.ts";
 import { Devices, PairingCodes, PhoneAccess } from "./phone.ts";
+import { repoTree } from "./repotree.ts";
 import { fileURLToPath } from "node:url";
 import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
 
@@ -422,6 +423,12 @@ const http = createServer(async (req, res) => {
     if (url.pathname === "/api/doctor") {
       const report = await doctor(home, { project: url.searchParams.get("project") ?? undefined, fresh: url.searchParams.has("fresh"), creds });
       res.writeHead(200, doctorHeaders(origin, token)).end(JSON.stringify(report));
+      return;
+    }
+    if (url.pathname === "/api/tree" && req.method === "GET") {
+      const s = sessions.get(url.searchParams.get("session") ?? "");
+      if (!s) throw new Error("unknown session");
+      json(200, await repoTree(s.info.cwd));
       return;
     }
     if (url.pathname === "/api/diff" || url.pathname === "/api/file") {

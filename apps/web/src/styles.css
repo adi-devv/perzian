@@ -226,13 +226,43 @@ code.meta.branch { max-width: 280px; overflow: hidden; text-overflow: ellipsis; 
 .pane { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
 .pane .row-btns { flex-wrap: wrap; }
 
-.map-grid { display: flex; flex-wrap: wrap; gap: 10px; align-items: stretch; }
-.region { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--raised); }
-.r-h { display: flex; justify-content: space-between; gap: 10px; font: 12px var(--mono); color: var(--fg-2); }
-.r-h span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.r-h i { font-style: normal; font-size: 11px; color: var(--fg-3); white-space: nowrap; }
-.rchips { display: flex; flex-wrap: wrap; gap: 6px; }
-.fwrap { display: flex; flex-direction: column; gap: 3px; min-width: 0; max-width: 100%; }
+/* Map: a treemap of the repo. Neutral cells; churn shades them toward the foreground (grey, no hue); session dots
+   carry the status color. Folders show a label strip; children sit inside. */
+.repomap { display: flex; flex-direction: column; gap: 8px; }
+.tm-crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0; font: 12px var(--mono); color: var(--fg-3); }
+.tm-crumbs .sp { flex: 1; }
+.tm-crumbs .crumb { border: 0; background: transparent; padding: 2px 4px; font: inherit; color: var(--fg-2); border-radius: 4px; cursor: pointer; }
+.tm-crumbs .crumb:hover:not(:disabled) { color: var(--fg); background: var(--hover); }
+.tm-crumbs .crumb.here { color: var(--fg); cursor: default; }
+.tm-crumbs .crumb-sep { color: var(--fg-3); }
+.tm-count { font-size: 11px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.tm { position: relative; width: 100%; overflow: hidden; border-radius: var(--r-md); background: var(--bg); border: 1px solid var(--line); contain: strict; }
+.tm-layer { position: absolute; inset: 0; }
+.tm-cell { position: absolute; overflow: hidden; border-radius: 3px; box-shadow: inset 0 0 0 1px var(--bg);
+  background: color-mix(in srgb, var(--fg) calc(var(--heat, 0) * 30%), var(--raised)); }
+.tm-cell.open { background: color-mix(in srgb, var(--fg) calc(var(--heat, 0) * 8%), var(--surface)); }
+.tm-cell.k-rest { background: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in srgb, var(--fg) 5%, transparent) 3px 4px), color-mix(in srgb, var(--fg) calc(var(--heat, 0) * 30%), var(--surface)); }
+.tm-cell.go { cursor: pointer; }
+.tm-cell.go:hover { box-shadow: inset 0 0 0 1px var(--btn-line-hi); }
+.tm-cell:focus-visible { outline: 1px solid var(--fg-2); outline-offset: -1px; }
+.tm-label { position: absolute; left: 5px; right: 4px; top: 1px; font: 10.5px/15px var(--mono); color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+.tm-cell.hot > .tm-label { color: var(--fg-2); }
+.tm-cell.hot:not(.open) > .tm-label { color: var(--fg); }
+.tm-dot { position: absolute; z-index: 2; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; padding: 0; border: 0; box-shadow: 0 0 0 2px var(--bg); cursor: pointer; }
+.tm-dot.hollow { box-shadow: inset 0 0 0 1.5px var(--c, var(--idle)), 0 0 0 2px var(--bg); }
+.tm-dot.self { width: 11px; height: 11px; margin: -5.5px 0 0 -5.5px; box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--fg-2); cursor: default; }
+.tm-tip { position: absolute; z-index: 3; width: max-content; max-width: 260px; display: flex; flex-direction: column; gap: 3px; padding: 7px 9px; border-radius: var(--r-sm); background: var(--raised); border: 1px solid var(--line); box-shadow: 0 6px 20px rgb(0 0 0 / 0.18); font-size: 11.5px; pointer-events: none; }
+.tm-tip code { font-size: 11.5px; color: var(--fg); overflow-wrap: anywhere; }
+.tm-tip .quiet { font-size: 11px; }
+.tm-who { display: flex; flex-direction: column; gap: 2px; color: var(--fg-2); }
+.tm-who > span { display: inline-flex; align-items: center; gap: 4px; }
+.tm-who .dot { width: 6px; height: 6px; margin: 0; }
+.tm-clash { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.tm-clash li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (prefers-reduced-motion: no-preference) {
+  .tm-layer { animation: fade-in 0.18s ease-out; }
+  .tm-dot { transition: left 0.45s ease, top 0.45s ease; }
+}
 .btn.fchip { gap: 8px; padding: 4px 8px; font-size: 12px; max-width: 100%; }
 .fchip .cn { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fchip.c-deleted .cn { text-decoration: line-through; color: var(--fg-3); }
