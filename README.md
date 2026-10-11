@@ -34,6 +34,11 @@ npm test           # unit tests
 
 Claude Code sessions need the usual Claude Code authentication on your machine.
 
+Perzian runs the agent CLIs you already have: `claude` (Claude Code) and `codex` (Codex CLI), found on your PATH,
+or set `CLAUDE_CODE_EXECUTABLE` / `CODEX_PATH`. In a source checkout it falls back to the binaries npm installed.
+`npm run dist` builds the slim macOS app (~325 MB), which needs those CLIs installed;
+`npm run dist:full` builds a self-contained app (~900 MB) that bundles them.
+
 ## How it works
 
 ```

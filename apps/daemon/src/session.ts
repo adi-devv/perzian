@@ -1,6 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable, Writable } from "node:stream";
@@ -20,8 +19,8 @@ import * as git from "./git.ts";
 import { symbolChanges } from "./symbols.ts";
 import { ProofTracker, mergeProofs } from "./proof.ts";
 import { existsSync } from "node:fs";
+import { adapterEntry, agentEnv } from "./agents.ts";
 
-const require = createRequire(import.meta.url);
 const here = dirname(fileURLToPath(import.meta.url));
 const reportMcpEntry = join(here, "../../../packages/report-mcp/src/index.ts");
 const tsxCli = join(here, "../../../node_modules/tsx/dist/cli.mjs");
@@ -30,10 +29,6 @@ const bundledReportMcp = join(here, "report-mcp.mjs");
 const reportMcpArgs = (): string[] =>
   process.env.PERZIAN_REPORT_MCP ? [process.env.PERZIAN_REPORT_MCP] : existsSync(bundledReportMcp) ? [bundledReportMcp] : [tsxCli, reportMcpEntry];
 
-const ADAPTERS: Record<AgentKind, string> = {
-  "claude-code": "@agentclientprotocol/claude-agent-acp/dist/index.js",
-  codex: "@agentclientprotocol/codex-acp/dist/index.js",
-};
 
 // Our permission modes -> candidate mode ids, first one the agent offers wins.
 const MODE_IDS: Record<PermissionMode, string[]> = {
@@ -159,9 +154,12 @@ export class AgentSession {
   }
 
   private async start(): Promise<void> {
-    const env: NodeJS.ProcessEnv = { ...process.env };
+    // The user's installed agent CLI when there is one, else the binary bundled with the adapter.
+    const agent = agentEnv(this.info.agent);
+    console.log(`[${this.info.id.slice(0, 6)}] ${this.info.agent} executable (${agent.resolved.source}): ${agent.resolved.path}`);
+    const env: NodeJS.ProcessEnv = { ...process.env, ...agent.env };
     if (this.info.agent === "claude-code" && this.info.model) env.ANTHROPIC_MODEL = this.info.model;
-    const proc = spawn(process.execPath, [require.resolve(ADAPTERS[this.info.agent])], { cwd: this.info.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+    const proc = spawn(process.execPath, [adapterEntry(this.info.agent)], { cwd: this.info.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     this.proc = proc;
     let stderr = "";
     proc.stderr!.on("data", (d) => (stderr = (stderr + d).slice(-4000)));

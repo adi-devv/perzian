@@ -7,7 +7,10 @@
 //                                 @vscode/tree-sitter-wasm (loads .wasm files next to itself),
 //                                 copied with their full dependency closure
 //   dist/web/                     apps/web/dist (the UI)
-// Usage: node scripts/build-bundle.mjs [--skip-web]
+// Slim (default): leaves out the native agent CLIs (claude ~240 MB, codex ~330 MB, the adapters'
+// platform packages); the daemon then runs the developer's installed `claude` / `codex` (see
+// apps/daemon/src/agents.ts). --full: bundles them too, a self-contained build.
+// Usage: node scripts/build-bundle.mjs [--skip-web] [--full]
 import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -18,11 +21,18 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const out = join(root, "dist");
 const daemonOut = join(out, "daemon");
 const skipWeb = process.argv.includes("--skip-web");
+const full = process.argv.includes("--full");
 
 // Packages resolved at runtime via require.resolve / spawned as files; never inlined.
 const RUNTIME_PACKAGES = ["@agentclientprotocol/claude-agent-acp", "@agentclientprotocol/codex-acp", "@vscode/tree-sitter-wasm"];
 // Optional native accelerators that `ws` try/catch-requires; absent is fine.
 const OPTIONAL_NATIVE = ["bufferutil", "utf-8-validate"];
+// Platform packages carrying the agent CLIs' native binaries (optional deps of the SDK / @openai/codex).
+// Skipped in slim builds; the adapters are pointed at the installed CLI instead.
+const AGENT_BINARIES = /^@anthropic-ai\/claude-agent-sdk-(darwin|linux|win32)-|^@openai\/codex-(darwin|linux|win32)-/;
+const skipped = new Set();
+// Never read at runtime: source maps, type declarations, docs (licenses are kept).
+const DEV_ONLY_FILE = /\.(map|d\.[cm]?ts)$|(^|[\\/])(?!LICENSE)[^\\/]*\.md$/i;
 
 const t0 = Date.now();
 rmSync(daemonOut, { recursive: true, force: true });
@@ -78,7 +88,7 @@ await Promise.all([
   build({ ...common, entryPoints: [join(root, "packages/report-mcp/src/index.ts")], outfile: join(daemonOut, "report-mcp.mjs") }),
 ]);
 // Marks the folder as ESM for any tool that looks (the .mjs extension already does).
-writeFileSync(join(daemonOut, "package.json"), JSON.stringify({ name: "perzian-daemon-bundle", private: true, type: "module" }, null, 2) + "\n");
+writeFileSync(join(daemonOut, "package.json"), JSON.stringify({ name: "perzian-daemon-bundle", private: true, type: "module", perzianBundle: full ? "full" : "slim" }, null, 2) + "\n");
 
 // ---------- runtime packages + dependency closure ----------
 
@@ -106,6 +116,10 @@ function duBytes(p) {
 // Mirrors the package's path relative to the repo root (node_modules/x or node_modules/a/node_modules/x)
 // so nested, non-hoisted versions resolve exactly as they do in the repo.
 function copyPkg(name, from, optional = false) {
+  if (!full && AGENT_BINARIES.test(name)) {
+    if (findPkg(name, from)) skipped.add(name);
+    return;
+  }
   const dir = findPkg(name, from);
   if (!dir) {
     if (optional) return;
@@ -120,7 +134,7 @@ function copyPkg(name, from, optional = false) {
     recursive: true,
     dereference: true,
     // Nested node_modules are copied on demand by the recursion below, only if actually depended on.
-    filter: (src) => !relative(dir, src).split(sep).includes("node_modules"),
+    filter: (src) => !relative(dir, src).split(sep).includes("node_modules") && !DEV_ONLY_FILE.test(src),
   });
   bytes += duBytes(dest);
   const pkg = readPkg(dir);
@@ -143,6 +157,6 @@ cpSync(webDist, join(out, "web"), { recursive: true });
 
 const mb = (n) => `${(n / 1024 / 1024).toFixed(1)} MB`;
 console.log(
-  `[build-bundle] daemon.mjs ${mb(statSync(join(daemonOut, "daemon.mjs")).size)}, report-mcp.mjs ${mb(statSync(join(daemonOut, "report-mcp.mjs")).size)}, ` +
+  `[build-bundle] ${full ? "full" : `slim (left out ${[...skipped].join(", ") || "nothing"})`}: daemon.mjs ${mb(statSync(join(daemonOut, "daemon.mjs")).size)}, report-mcp.mjs ${mb(statSync(join(daemonOut, "report-mcp.mjs")).size)}, ` +
     `${copied.size} runtime packages ${mb(bytes)}, web ${mb(duBytes(join(out, "web")))} in ${((Date.now() - t0) / 1000).toFixed(1)}s -> ${relative(root, out)}${sep}`,
 );

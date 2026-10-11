@@ -1,9 +1,12 @@
 // Packages Perzian as an unsigned (ad-hoc signed) macOS arm64 app:
-//   release/Perzian-darwin-arm64/Perzian.app and release/Perzian-<version>-mac-arm64.zip
+//   slim (default, `npm run dist`): release/Perzian-darwin-arm64/Perzian.app and
+//     release/Perzian-<version>-mac-arm64.zip; runs the installed `claude` / `codex` CLIs
+//   --full (`npm run dist:full`): release/full/..., Perzian-<version>-mac-arm64-full.zip; also bundles
+//     the native agent CLIs, so it runs with nothing installed (~4x larger)
 // Steps: bundle daemon/report-mcp/web (scripts/build-bundle.mjs), render the icon to .icns,
 // stage the Electron shell, run @electron/packager offline from the local Electron zip cache,
 // ad-hoc sign, zip with ditto.
-// Usage: node scripts/build-app.mjs [--skip-bundle] [--no-zip]
+// Usage: node scripts/build-app.mjs [--full] [--skip-bundle] [--no-zip]
 import { packager } from "@electron/packager";
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -15,9 +18,10 @@ import { iconRGBA } from "../apps/desktop/icon-pixels.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = join(root, "dist");
-const release = join(root, "release");
-const desktop = join(root, "apps/desktop");
 const args = new Set(process.argv.slice(2));
+const full = args.has("--full");
+const release = join(root, "release", ...(full ? ["full"] : []));
+const desktop = join(root, "apps/desktop");
 const ARCH = "arm64";
 const NAME = "Perzian";
 
@@ -27,11 +31,13 @@ const step = (msg) => console.log(`[build-app] ${msg} (+${((Date.now() - t0) / 1
 
 // ---------- 1. bundle ----------
 
-if (!args.has("--skip-bundle")) execFileSync(process.execPath, [join(root, "scripts/build-bundle.mjs")], { stdio: "inherit" });
+if (!args.has("--skip-bundle")) execFileSync(process.execPath, [join(root, "scripts/build-bundle.mjs"), ...(full ? ["--full"] : [])], { stdio: "inherit" });
 for (const p of ["daemon/daemon.mjs", "daemon/report-mcp.mjs", "web/index.html"]) {
   if (!existsSync(join(dist, p))) throw new Error(`dist/${p} missing; run scripts/build-bundle.mjs`);
 }
-step("bundle ready");
+const bundleMode = JSON.parse(readFileSync(join(dist, "daemon/package.json"), "utf8")).perzianBundle ?? "full";
+if (bundleMode !== (full ? "full" : "slim")) throw new Error(`dist/ holds a ${bundleMode} bundle; rebuild it without --skip-bundle`);
+step(`${bundleMode} bundle ready`);
 
 // ---------- 2. icon (.icns from icon-pixels.js) ----------
 
@@ -150,7 +156,7 @@ const du = (p) => Number(execFileSync("du", ["-sk", p]).toString().split("\t")[0
 const mb = (n) => `${(n / 1024 / 1024).toFixed(0)} MB`;
 let zipPath;
 if (!args.has("--no-zip")) {
-  zipPath = join(release, `${NAME}-${version}-mac-${ARCH}.zip`);
+  zipPath = join(release, `${NAME}-${version}-mac-${ARCH}${full ? "-full" : ""}.zip`);
   rmSync(zipPath, { force: true });
   execFileSync("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", appPath, zipPath]);
   step(`zipped ${relative(root, zipPath)}`);
