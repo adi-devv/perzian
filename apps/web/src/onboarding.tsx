@@ -20,8 +20,6 @@ export function saveProject(p: string) {
 /** The lead agent works from its own folder; tell it which repo the task is about. */
 export const withProject = (prompt: string, path: string) => `${prompt}\n\nProject folder: ${path}`;
 
-export const EXAMPLES = ["Fix the failing test", "Add a /health endpoint with a test", "Explain this repo's architecture in 5 bullets"];
-
 /* ───────────── First run ───────────── */
 
 type Mark = "ok" | "todo" | "bad" | "wait" | "unknown";
@@ -95,7 +93,8 @@ export function readiness(report: DoctorReport | null, project: string): { ready
   return { ready: !blocker, blocker };
 }
 
-export function Onboarding({ doctor, project, setProject, onStart }: { doctor: Doctor; project: string; setProject: (p: string) => void; onStart: (prompt: string) => void }) {
+/** First run shows the folder and whatever is actually broken, each with one fix. Nothing when all is well. */
+export function Onboarding({ doctor, project, setProject }: { doctor: Doctor; project: string; setProject: (p: string) => void }) {
   const { report, loading, failed, recheck } = doctor;
   const creds = useCredentials(true);
   const claude = report?.agents.find((a) => a.kind === "claude-code");
@@ -105,132 +104,76 @@ export function Onboarding({ doctor, project, setProject, onStart }: { doctor: D
       {loading ? "Checking…" : "Check again"}
     </button>
   );
-
-  // 1 · installed
-  let installMark: Mark = "wait";
-  let installMeta: string | undefined = "Checking…";
-  let installFix: React.ReactNode = null;
-  if (failed && !report) {
-    installMark = "bad";
-    installMeta = undefined;
-    installFix = (
-      <div className="step-fix">
-        <p>Couldn't run the checks. Restart the daemon so it picks up the latest code, then check again.</p>
-        {again}
-      </div>
-    );
-  } else if (claude?.installed) {
-    installMark = "ok";
-    installMeta = [claude.version && `v${claude.version}`, claude.source === "bundled" && "bundled"].filter(Boolean).join(" · ");
-  } else if (claude) {
-    installMark = "bad";
-    installMeta = "Not found";
-    installFix = <InstallFix agent={claude} onDone={recheck} again={again} />;
-  }
-
-  // 2 · signed in
   const sign = signInStep(claude, again, creds, recheck);
-
-  // 3 · project
-  let projMark: Mark = "todo";
-  let projMeta: string | undefined;
-  if (project.trim()) {
-    if (!proj) projMark = "wait";
-    else if (proj.exists && (proj.noCommits || proj.detached)) {
-      projMark = "bad";
-      projMeta = proj.noCommits ? "git repo · no commits yet" : "git repo · detached HEAD";
-    } else if (proj.exists) {
-      projMark = "ok";
-      projMeta = proj.gitRoot ? "git repo" : "not a git repo";
-    } else {
-      projMark = "bad";
-      projMeta = "Folder not found";
-    }
-  }
-
-  const { ready, blocker } = readiness(report, project);
-  const codex = report?.agents.find((a) => a.kind === "codex");
 
   return (
     <div className="onboard">
       <div className="welcome-mark" aria-hidden />
-      <h2>Set up your first session</h2>
-      <p className="onboard-sub">Three checks, then hand Perzian a task. It splits the work into coding sessions and brings back results with proof.</p>
+      <input
+        id="onboard-project"
+        className="step-input"
+        value={project}
+        onChange={(e) => setProject(e.target.value)}
+        placeholder="Project folder, e.g. ~/code/app"
+        spellCheck={false}
+        autoComplete="off"
+        autoFocus={!project}
+        aria-label="Project folder"
+      />
+      {proj && !proj.exists && <p className="step-note bad">Folder not found</p>}
 
-      <ol className="steps">
-        <Step mark={installMark} label="Claude Code installed" meta={installMeta}>
-          {installFix}
-        </Step>
-        <Step mark={sign.mark} label="Signed in" meta={sign.meta}>
-          {sign.fix}
-        </Step>
-        <Step mark={projMark} label="Pick a project folder" meta={projMeta}>
-          <input
-            id="onboard-project"
-            className="step-input"
-            value={project}
-            onChange={(e) => setProject(e.target.value)}
-            placeholder="~/code/app"
-            spellCheck={false}
-            autoComplete="off"
-            aria-label="Project folder"
-          />
-          {proj && !proj.exists && <p className="step-note">Nothing at {proj.path}. Paste the full path to a folder on this machine.</p>}
-          {proj?.exists && !proj.gitRoot && <p className="step-note">Works, but without git Perzian can't isolate sessions in worktrees or map changes.</p>}
+      {(failed && !report) || (claude && !claude.installed) || sign.fix || proj?.noCommits || proj?.detached ? (
+        <ol className="steps">
+          {failed && !report && (
+            <Step mark="todo" label="Setup check failed">
+              <div className="step-fix">{again}</div>
+            </Step>
+          )}
+          {claude && !claude.installed && (
+            <Step mark="todo" label="Claude Code not installed">
+              <InstallFix agent={claude} onDone={recheck} again={again} />
+            </Step>
+          )}
+          {sign.fix && (
+            <Step mark="todo" label="Not signed in">
+              {sign.fix}
+            </Step>
+          )}
           {proj?.noCommits && (
-            <div className="step-fix">
-              <p>Sessions branch from your latest commit, and this repo has none yet. Make a first commit, then check again.</p>
-              <CopyCmd cmd={`cd ${shellQuote(proj.path)} && git add -A && git commit -m "Initial commit"`} />
-              {again}
-            </div>
+            <Step mark="todo" label="No commits yet">
+              <div className="step-fix">
+                <CopyCmd cmd={`cd ${shellQuote(proj.path)} && git add -A && git commit -m "Initial commit"`} />
+                {again}
+              </div>
+            </Step>
           )}
           {proj?.detached && (
-            <div className="step-fix">
-              <p>Your checkout isn't on a branch, so finished work has nowhere to merge. Switch back to the branch you were on (or the one you work on), then check again.</p>
-              <CopyCmd cmd={`cd ${shellQuote(proj.path)} && git switch -`} />
-              {again}
-            </div>
+            <Step mark="todo" label="Not on a branch">
+              <div className="step-fix">
+                <CopyCmd cmd={`cd ${shellQuote(proj.path)} && git switch -`} />
+                {again}
+              </div>
+            </Step>
           )}
-        </Step>
-      </ol>
-
-      <div className="examples" aria-label="Example tasks">
-        <span className="eyebrow">Try one</span>
-        {EXAMPLES.map((ex) => (
-          <button key={ex} type="button" className="example" disabled={!ready} onClick={() => onStart(ex)}>
-            <span>{ex}</span>
-            <span className="example-go" aria-hidden>→</span>
-          </button>
-        ))}
-        <p className="hint">{ready ? "Or describe your own task below." : blocker}</p>
-      </div>
-
-      {report && (
-        <p className="onboard-foot">
-          {codex?.installed ? `Codex ${codex.version ?? ""} available` : "Codex not installed"} · git {report.git.installed ? (report.git.version ?? "ok") : "missing"} · home <code>{report.home}</code>
-        </p>
-      )}
+        </ol>
+      ) : null}
     </div>
   );
 }
 
-function signInStep(claude: AgentCheck | undefined, again: React.ReactNode, creds: Creds, recheck: () => void): { mark: Mark; meta?: string; fix?: React.ReactNode } {
-  if (!claude) return { mark: "wait" };
-  if (!claude.installed) return { mark: "todo" };
+function signInStep(claude: AgentCheck | undefined, again: React.ReactNode, creds: Creds, recheck: () => void): { fix?: React.ReactNode } {
+  if (!claude?.installed || claude.signedIn !== false) return {};
   const key = creds.list?.find((c) => c.provider === "anthropic");
-  if (key?.set) return { mark: "ok", meta: `API key ···${key.last4}`, fix: <ApiKeyField provider="anthropic" status={key} creds={creds} onChange={recheck} /> };
-  if (claude.signedIn === true) return { mark: "ok", meta: claude.authMethod };
-  if (claude.signedIn === null) return { mark: "unknown", meta: "Couldn't tell. Claude Code will ask if needed." };
+  if (key?.set) return {};
   return {
-    mark: "bad",
-    meta: "Not signed in",
     fix: (
       <div className="step-fix">
-        <p>With your Claude plan: sign in once in a terminal, then check again.</p>
         <CopyCmd cmd={claude.signInCommand} />
         {again}
-        <p className="or">Or use an Anthropic API key, billed per token to your API account.</p>
-        <ApiKeyField provider="anthropic" status={key} creds={creds} onChange={recheck} />
+        <details className="opts">
+          <summary className="btn small">Use an API key</summary>
+          <ApiKeyField provider="anthropic" status={key} creds={creds} onChange={recheck} />
+        </details>
       </div>
     ),
   };
@@ -260,9 +203,12 @@ function InstallFix({ agent, onDone, again }: { agent: AgentCheck; onDone: () =>
         </button>
         {again}
       </div>
-      {state === "failed" && <pre className="install-out">{output || "The installer failed."}</pre>}
-      <p className="step-note">Runs the official installer. Or run it yourself:</p>
-      <CopyCmd cmd={agent.installCommand} />
+      {state === "failed" && (
+        <>
+          <pre className="install-out">{output || "The installer failed."}</pre>
+          <CopyCmd cmd={agent.installCommand} />
+        </>
+      )}
     </div>
   );
 }
@@ -327,7 +273,7 @@ export function Accounts({ onClose }: { onClose: () => void }) {
     <div className="modal" onClick={onClose}>
       <div className="accounts" role="dialog" aria-label="Accounts and API keys" onClick={(e) => e.stopPropagation()}>
         <h2>Accounts</h2>
-        <p className="onboard-sub">Agents use your subscription sign-in. Add an API key to use it instead. Keys stay on this machine (in the Keychain on macOS) and only go to that agent.</p>
+        <p className="onboard-sub">Keys stay on this machine, in the Keychain on macOS.</p>
         {(doctor.report?.agents ?? []).map((a) => {
           const provider = AGENT_KEY[a.kind];
           const status = creds.list?.find((c) => c.provider === provider);

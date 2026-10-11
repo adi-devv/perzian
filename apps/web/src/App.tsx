@@ -129,7 +129,8 @@ export function App() {
         link={link}
         onStart={startLead}
         blocked={gate.ready ? undefined : gate.blocker}
-        firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} onStart={startLead} /> : null}
+        focus={firstRun && !!project.trim()}
+        firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} /> : null}
       />
 
       {sel && <Drawer key={sel.id} s={sel} state={state} send={send} onClose={() => setSelected(null)} onFile={(path) => setViewing({ session: sel.id, path })} onOpen={open} />}
@@ -266,7 +267,7 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
 
 /* ───────────── Thread: the main agent conversation, made of cards ───────────── */
 
-function Thread({ state, main, send, onOpen, decisions, link, onStart, blocked, firstRun }: { state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; link: Link; onStart: (prompt: string) => void; blocked?: string; firstRun: React.ReactNode }) {
+function Thread({ state, main, send, onOpen, decisions, link, onStart, blocked, focus, firstRun }: { state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode }) {
   const items = main ? (state.transcripts[main.id] ?? []) : [];
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
@@ -310,7 +311,8 @@ function Thread({ state, main, send, onOpen, decisions, link, onStart, blocked, 
         )}
         <Composer
           id="main-composer"
-          placeholder={main ? "Ask Perzian, or tell it what to build…" : firstRun ? "Or describe your own task…" : "What are we working on? Perzian will split it into sessions."}
+          placeholder={main ? "Ask Perzian, or tell it what to build…" : "What should it do? e.g. Fix the failing test"}
+          focus={focus}
           busy={main?.status === "working"}
           blocked={main ? undefined : blocked}
           onSubmit={(text) => (main ? send({ type: "session.prompt", sessionId: main.id, prompt: text }) : onStart(text))}
@@ -349,14 +351,6 @@ function Welcome() {
   return (
     <div className="welcome">
       <div className="welcome-mark" aria-hidden />
-      <h2>One agent to run the crew.</h2>
-      <p>Describe the work. Perzian starts coding sessions in your repos, watches them, and only brings you decisions and results.</p>
-      <ul>
-        <li><span className="dot s-needs_you" /> Amber means it needs you</li>
-        <li><span className="dot s-working" /> A slow pulse means it's working</li>
-        <li><span className="dot s-done" /> A still dot is done, with proof</li>
-        <li><span className="dot s-failed" /> Red failed; open it to see why</li>
-      </ul>
     </div>
   );
 }
@@ -469,7 +463,7 @@ function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: 
 }
 
 /** `blocked`: why sending isn't possible yet; typing still works and the text is kept. */
-function Composer({ id, placeholder, busy, blocked, onSubmit, onStop }: { id: string; placeholder: string; busy?: boolean; blocked?: string; onSubmit: (t: string) => void; onStop?: () => void }) {
+function Composer({ id, placeholder, focus, busy, blocked, onSubmit, onStop }: { id: string; placeholder: string; focus?: boolean; busy?: boolean; blocked?: string; onSubmit: (t: string) => void; onStop?: () => void }) {
   const [text, setText] = useState("");
   const submit = () => {
     if (!text.trim() || blocked) return;
@@ -481,6 +475,7 @@ function Composer({ id, placeholder, busy, blocked, onSubmit, onStop }: { id: st
       <textarea
         id={id}
         rows={1}
+        autoFocus={focus}
         value={text}
         placeholder={placeholder}
         onChange={(e) => setText(e.target.value)}
@@ -492,7 +487,7 @@ function Composer({ id, placeholder, busy, blocked, onSubmit, onStop }: { id: st
         }}
       />
       {busy && onStop ? (
-        <button type="button" className="btn ghost" onClick={onStop}>Stop</button>
+        <button type="button" className="btn" onClick={onStop}>Stop</button>
       ) : (
         <button className="btn primary" disabled={!text.trim() || !!blocked} title={blocked}>Send</button>
       )}
@@ -922,6 +917,11 @@ function NewSession({ onClose, onCreate, pending, error }: { onClose: () => void
   const [model, setModel] = useState("");
   const [mode, setMode] = useState<PermissionMode>("ask");
   const [worktree, setWorktree] = useState(true);
+  // Everything but folder and task has a default; the options open themselves when an error needs one.
+  const [opts, setOpts] = useState(false);
+  useEffect(() => {
+    if (error && /worktree|git repo|CLI not found/i.test(error)) setOpts(true);
+  }, [error]);
   return (
     <div className="modal" onClick={onClose}>
       <form
@@ -933,51 +933,61 @@ function NewSession({ onClose, onCreate, pending, error }: { onClose: () => void
           onCreate({ type: "session.create", project, prompt, title: title || undefined, agent, model: model || undefined, mode, worktree });
         }}
       >
-        <h2>New session</h2>
-        <label>
-          Project folder
-          <input id="ns-project" required value={project} onChange={(e) => setProject(e.target.value)} placeholder="~/code/app" autoFocus={!project} />
-        </label>
-        <label>
-          Task
-          <textarea id="ns-prompt" required rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What should the agent do?" autoFocus={!!project} />
-        </label>
-        <label>
-          Title
-          <input id="ns-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Short name for the tile (optional)" />
-        </label>
-        <div className="sheet-row">
-          <label>
-            Agent
-            <select id="ns-agent" value={agent} onChange={(e) => { setAgent(e.target.value as AgentKind); setModel(""); }}>
-              {(Object.keys(AGENTS) as AgentKind[]).map((a) => <option key={a} value={a}>{AGENTS[a].label}{AGENTS[a].experimental ? " (experimental)" : ""}</option>)}
-            </select>
-          </label>
-          <label>
-            Model
-            <select id="ns-model" value={model} onChange={(e) => setModel(e.target.value)}>
-              {AGENTS[agent].models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-            </select>
-          </label>
-          <label>
-            Permissions
-            <select id="ns-mode" value={mode} onChange={(e) => setMode(e.target.value as PermissionMode)}>
-              {(Object.keys(MODE_LABEL) as PermissionMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
-            </select>
-          </label>
-        </div>
-        <label className="check">
-          <input id="ns-worktree" type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} />
-          Run in its own git worktree <span className="quiet">(safe for parallel work)</span>
-        </label>
+        <input id="ns-project" required value={project} onChange={(e) => setProject(e.target.value)} placeholder="Project folder, e.g. ~/code/app" aria-label="Project folder" autoFocus={!project} />
+        <textarea
+          id="ns-prompt"
+          required
+          rows={4}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+          placeholder="What should it do?"
+          aria-label="Task"
+          autoFocus={!!project}
+        />
+        <details className="opts" open={opts} onToggle={(e) => setOpts(e.currentTarget.open)}>
+          <summary className="btn small">Options</summary>
+          <div className="opts-body">
+            <input id="ns-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Name" aria-label="Name" />
+            <div className="sheet-row">
+              <label>
+                Agent
+                <select id="ns-agent" value={agent} onChange={(e) => { setAgent(e.target.value as AgentKind); setModel(""); }}>
+                  {(Object.keys(AGENTS) as AgentKind[]).map((a) => <option key={a} value={a}>{AGENTS[a].label}{AGENTS[a].experimental ? " (experimental)" : ""}</option>)}
+                </select>
+              </label>
+              <label>
+                Model
+                <select id="ns-model" value={model} onChange={(e) => setModel(e.target.value)}>
+                  {AGENTS[agent].models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                </select>
+              </label>
+              <label>
+                Permissions
+                <select id="ns-mode" value={mode} onChange={(e) => setMode(e.target.value as PermissionMode)}>
+                  {(Object.keys(MODE_LABEL) as PermissionMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+                </select>
+              </label>
+            </div>
+            <label className="check">
+              <input id="ns-worktree" type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} />
+              Own git worktree
+            </label>
+          </div>
+        </details>
         {error && (
           <p className="sheet-error" role="alert">
             {friendlyError(error).what} {friendlyError(error).fix}
           </p>
         )}
         <div className="sheet-actions">
-          <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={pending}>{pending ? "Starting…" : "Start session"}</button>
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn primary" disabled={pending}>{pending ? "Starting…" : "Start"}</button>
         </div>
       </form>
     </div>
