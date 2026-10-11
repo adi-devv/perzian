@@ -31,6 +31,12 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    Still to draw: a leftover-worktrees list (`GET /api/worktrees/leftover`) and an Extra folders field on New session (`extraDirs`).
    Not done: background processes are marked ended only from the agent's own exit/kill report, not by detecting a `kill <pid>` command;
    `createSession`'s default-mode fallback in `apps/daemon/src/index.ts` has no test (it is a script); Codex gets no `additionalDirectories`.
+- **Usage card at 95%, one per account (not per session):** "Usage 95% · resets 10:15 pm · [Pause sessions] [Keep going]".
+  - Keep going: run to the real limit, then auto-pause and auto-resume at reset (already built).
+  - No answer: pause.
+  - If extra usage is on, the card warns that it costs money.
+  - Add a "don't ask again" option.
+  - When one session hits the limit, pause every session together, since they share one account limit.
 
 ## Brand
 - **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).
