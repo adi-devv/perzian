@@ -459,10 +459,12 @@ export function friendlyError(msg: string): { what: string; fix: string } {
 /* ───────────── Keyboard help ───────────── */
 
 const SHORTCUTS: [string, string][] = [
-  ["N", "New session"],
-  ["/", "Talk to Perzian"],
+  ["⌘1", "Lead chat"],
+  ["/", "Focus the message box"],
+  ["↑ ↓", "Move between sessions"],
+  ["Enter", "Open the focused session"],
   ["1–9", "Answer the first decision card"],
-  ["Esc", "Close panel or dialog"],
+  ["Esc", "Close dialog, or back to the lead chat"],
   ["?", "Show these shortcuts"],
 ];
 

@@ -1,40 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  AGENTS,
-  MODE_LABEL,
-  byAttention,
-  checkPlan,
-  crewMatch,
-  crewStatus,
-  isUnseen,
-  type AgentKind,
-  type CheckRun,
-  type Command,
-  type CrewKey,
-  type PermissionMode,
-  type SessionInfo,
-  type State,
-  type TranscriptItem,
-} from "@perzian/protocol";
-import { fetchText, isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
+import { AGENTS, isUnseen, type Command, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
+import { isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
 import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, readiness, saveProject, withProject } from "./onboarding.tsx";
-import { PairScreen, PhoneButton, PhoneHome, useNarrow } from "./phone.tsx";
-import { tokenize } from "./highlight.ts";
-import type { ThemedToken } from "shiki/core";
-import { Count, Slot, useExiting, useFlip, useLinger } from "./motion.tsx";
-import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, StatusGlyph, Usage, ago, churn, cost, pauseTitle, resumeTime, statusText, useTick } from "./bits.tsx";
+import { PairScreen, PhoneHome, useNarrow } from "./phone.tsx";
+import { Count, Slot, useExiting } from "./motion.tsx";
+import { Composer, DecisionCard, ModePicker, ModelPicker, Ring, StatusGlyph, churn, pauseTitle, retryTarget, statusText, useTick } from "./bits.tsx";
+import { Crew } from "./crew.tsx";
+import { SessionDetail } from "./detail.tsx";
 
 type Send = (c: Command) => void;
 
 export function App() {
   const { state, send, link, connected, error, clearError } = useDaemon();
+  // Which session fills the center column; null is the lead chat.
   const [selected, setSelected] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [viewing, setViewing] = useState<{ session: string; path: string } | null>(null);
+  // Lead messages that arrived while a session was open count from here (the lead transcript length when you left it).
+  const [leadSeen, setLeadSeen] = useState<number | null>(null);
   const [help, setHelp] = useState(false);
   const [accounts, setAccounts] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [project, setProject] = useState(loadProject);
-  const [crewFilter, setCrewFilter] = useState<CrewKey | null>(null);
+  // A folder picked with "Add project": the next lead message carries it, then it clears.
+  const [leadProject, setLeadProject] = useState<string | null>(null);
   const [decIdx, setDecIdx] = useState(0);
   const narrow = useNarrow();
   useTick();
@@ -58,132 +45,136 @@ export function App() {
     send({ type: "main.start", prompt: firstRun && projectPath ? withProject(prompt, projectPath) : prompt });
   };
 
-  // New session: keep the dialog (and what was typed) open until the daemon creates the session; an
-  // error shows inside it instead of throwing the task away.
-  const [pendingCreate, setPendingCreate] = useState<Set<string> | null>(null);
-  const [createError, setCreateError] = useState<string | null>(null);
-  useEffect(() => {
-    if (!pendingCreate) return;
-    if (Object.values(state.sessions).some((s) => !pendingCreate.has(s.id) && !s.parentId && s.role === "worker")) {
-      setPendingCreate(null);
-      setCreating(false);
-    } else if (error) {
-      setPendingCreate(null);
-      setCreateError(error);
-      clearError();
-    }
-  }, [state.sessions, error, pendingCreate]);
-  const closeCreate = () => {
-    setCreating(false);
-    setPendingCreate(null);
-    setCreateError(null);
-  };
-
   // Errors fade on their own; clicking dismisses sooner.
   useEffect(() => {
     if (!error) return;
     const t = setTimeout(clearError, 10_000);
     return () => clearTimeout(t);
   }, [error]);
-  const workers = useMemo(() => all.filter((s) => s.role === "worker").sort(byAttention), [state.sessions]);
+  const workers = useMemo(() => all.filter((s) => s.role === "worker"), [state.sessions]);
   // Oldest call first; in the demo the visitor's own run should be the card they see.
   const decisions = useMemo(() => Object.values(state.decisions).sort((a, b) => (isDemo ? b.createdAt - a.createdAt : a.createdAt - b.createdAt)), [state.decisions]);
 
+  const sel = selected && state.sessions[selected] && !state.sessions[selected].archived ? state.sessions[selected] : null;
+  const mainItems = main ? (state.transcripts[main.id] ?? []) : [];
+  const leadNew = sel && leadSeen !== null ? mainItems.slice(leadSeen).filter((i) => i.kind === "agent").length : 0;
+
   const open = (id: string | null) => {
+    if (id && !selected) setLeadSeen(mainItems.length);
+    if (!id) setLeadSeen(null);
     setSelected(id);
     if (id && state.sessions[id] && isUnseen(state.sessions[id])) send({ type: "session.seen", sessionId: id });
   };
+  // A result that lands while its session is open is seen already.
+  useEffect(() => {
+    if (sel && isUnseen(sel)) send({ type: "session.seen", sessionId: sel.id });
+  }, [sel?.updatedAt, sel?.status]);
+  // A session that was archived or removed while open: back to the lead chat.
+  useEffect(() => {
+    if (selected && !sel) open(null);
+  }, [selected, sel]);
 
-  // Keyboard: n new · esc close · 1-9 answer the first decision · / focus composer
+  const focusLead = () => requestAnimationFrame(() => document.getElementById("main-composer")?.focus());
+  const modal = help || accounts || adding;
+
+  // Keyboard: ⌘1 / Esc lead chat · ↑/↓ move between tiles, Enter opens · 1-9 answer a decision · / focus the input · ? help
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing = e.target instanceof Element && e.target.closest("input, textarea, select");
-      if (e.key === "Escape") {
-        if (help) setHelp(false);
-        else if (viewing) setViewing(null);
-        else if (creating) closeCreate();
-        else setSelected(null);
+      const el = e.target instanceof Element ? e.target : null;
+      const typing = el?.closest("input, textarea, select");
+      if ((e.metaKey || e.ctrlKey) && e.key === "1" && !modal) {
+        e.preventDefault();
+        open(null);
+        focusLead();
         return;
       }
-      if (typing || e.metaKey || e.ctrlKey) return;
+      if (e.key === "Escape") {
+        if (help) setHelp(false);
+        else if (adding) setAdding(false);
+        else if (accounts) setAccounts(false);
+        // A draft in the input: the first Esc only leaves the input, so going back can't lose it.
+        else if (typing && (el as HTMLTextAreaElement).value) (el as HTMLElement).blur();
+        else if (selected) {
+          if (typing) (el as HTMLElement).blur();
+          open(null);
+        }
+        return;
+      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey || modal) return;
       if (e.key === "?" || (e.key === "/" && e.shiftKey)) {
         e.preventDefault();
         setHelp((v) => !v);
-      } else if (e.key === "n") {
-        e.preventDefault();
-        setCreating(true);
       } else if (e.key === "/") {
         e.preventDefault();
-        document.getElementById("main-composer")?.focus();
-      } else if (/^[1-9]$/.test(e.key) && decisions.length) {
-        const shown = decisions[Math.min(decIdx, decisions.length - 1)];
-        const opt = shown.options[Number(e.key) - 1];
-        if (opt) send({ type: "decision.answer", decisionId: shown.id, optionId: opt.id });
+        document.getElementById(selected ? "session-composer" : "main-composer")?.focus();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        // Only from the crew column (or nowhere in particular), so arrows still scroll a diff.
+        const a = document.activeElement;
+        if (a && a !== document.body && !a.closest(".crewcol")) return;
+        const tiles = [...document.querySelectorAll<HTMLElement>("[data-tile]")];
+        if (!tiles.length) return;
+        e.preventDefault();
+        const focused = tiles.indexOf(a?.closest("[data-tile]") as HTMLElement);
+        const cur = focused >= 0 ? focused : selected ? tiles.findIndex((t) => t.dataset.tile === selected) : -1;
+        const next = e.key === "ArrowDown" ? Math.min(cur + 1, tiles.length - 1) : Math.max(cur - 1, 0);
+        tiles[next].focus();
+        tiles[next].scrollIntoView({ block: "nearest" });
+      } else if (/^[1-9]$/.test(e.key)) {
+        const mine = selected ? decisions.filter((d) => d.sessionId === selected) : [];
+        const shown = selected ? mine[0] : decisions[Math.min(decIdx, decisions.length - 1)];
+        const opt = shown?.options[Number(e.key) - 1];
+        if (shown && opt) send({ type: "decision.answer", decisionId: shown.id, optionId: opt.id });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [decisions, decIdx, viewing, creating, help]);
-
-  const sel = selected ? state.sessions[selected] : null;
-  // The drawer stays mounted briefly after closing so it can slide out.
-  const { shown: drawer, leaving: drawerLeaving } = useLinger(sel);
-  const drawerWas = useRef(false);
-  const drawerEnter = !!drawer && !drawerWas.current;
-  useEffect(() => {
-    drawerWas.current = !!drawer;
-  }, [drawer]);
+  }, [decisions, decIdx, selected, help, adding, accounts, mainItems.length]);
 
   // A phone that isn't paired yet, or any window under 600px: the attention queue, nothing else.
   if (link === "unpaired") return <PairScreen />;
   if (narrow) return <PhoneHome state={state} send={send} link={link} />;
 
   return (
-    <div className={`app ${drawer ? "with-drawer" : ""}`}>
-      <Sidebar state={state} main={main} workers={workers} selected={selected} onSelect={open} onNew={() => setCreating(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} onAccounts={() => setAccounts(true)} connected={connected} filter={crewFilter} onClearFilter={() => setCrewFilter(null)} />
+    <div className="app">
+      <Crew state={state} workers={workers} selected={sel?.id ?? null} onOpen={open} send={send} connected={connected} onAddProject={() => setAdding(true)} onImport={() => send({ type: "sessions.import" })} onHelp={() => setHelp(true)} onAccounts={() => setAccounts(true)} />
 
-      <Thread
-        crewFilter={crewFilter}
-        onCrewFilter={setCrewFilter}
-        state={state}
-        main={main}
-        send={send}
-        onOpen={open}
-        decisions={decisions}
-        decIdx={decIdx}
-        onDecIdx={setDecIdx}
-        link={link}
-        onStart={startLead}
-        blocked={gate.ready ? undefined : gate.blocker}
-        focus={firstRun && !!project.trim()}
-        firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} recent={recent} /> : null}
-      />
+      <div className="center">
+        <Thread
+          hidden={!!sel}
+          state={state}
+          main={main}
+          send={send}
+          onOpen={open}
+          decisions={decisions}
+          decIdx={decIdx}
+          onDecIdx={setDecIdx}
+          link={link}
+          onStart={startLead}
+          blocked={gate.ready ? undefined : gate.blocker}
+          focus={firstRun && !!project.trim()}
+          firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} recent={recent} /> : null}
+          leadProject={leadProject}
+          onProjectUsed={() => setLeadProject(null)}
+        />
+        {sel && <SessionDetail key={sel.id} s={sel} state={state} send={send} onBack={() => { open(null); focusLead(); }} leadNew={leadNew} />}
+      </div>
 
-      {drawer && <Drawer key={drawer.id} s={drawer} enter={drawerEnter} leaving={drawerLeaving} state={state} send={send} onClose={() => setSelected(null)} onFile={(path) => setViewing({ session: drawer.id, path })} onOpen={open} />}
-
-      {creating && (
-        <NewSession
+      {adding && (
+        <AddProject
           recent={recent}
-          pending={!!pendingCreate}
-          error={createError}
-          onClose={closeCreate}
-          onCreate={(cmd) => {
-            if (isDemo) {
-              send(cmd);
-              setCreating(false);
-              return;
-            }
-            setCreateError(null);
-            clearError();
-            setPendingCreate(new Set(Object.keys(state.sessions)));
-            send(cmd);
+          onClose={() => setAdding(false)}
+          onPick={(p) => {
+            saveProject(p);
+            setLeadProject(p);
+            setAdding(false);
+            open(null);
+            focusLead();
           }}
         />
       )}
-      {viewing && <FileViewer {...viewing} onClose={() => setViewing(null)} />}
       {help && <ShortcutHelp onClose={() => setHelp(false)} />}
       {accounts && <Accounts onClose={() => setAccounts(false)} />}
-      {error && !pendingCreate && <Toast message={error} onClose={clearError} />}
+      {error && <Toast message={error} onClose={clearError} />}
     </div>
   );
 }
@@ -197,100 +188,28 @@ function Toast({ message, onClose }: { message: string; onClose: () => void }) {
   );
 }
 
-/** The last failure in a transcript that nothing has been sent after, and the prompt to resend. */
-function retryTarget(items: TranscriptItem[], status: SessionInfo["status"]): { index: number; prompt: string } | null {
-  if (status === "working" || status === "needs_you") return null;
-  let fail = -1;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const it = items[i];
-    if (it.kind === "user") break;
-    if (it.kind === "notice" && isFailureNotice(it.text)) {
-      fail = i;
-      break;
-    }
-  }
-  if (fail < 0) return null;
-  for (let i = fail - 1; i >= 0; i--) {
-    const it = items[i];
-    if (it.kind === "user") return it.system ? null : { index: fail, prompt: it.text };
-  }
-  return null;
-}
+/* ───────────── Add project: pick a folder; the lead's next message is about it ───────────── */
 
-/* ───────────── Sidebar: every session at a glance ───────────── */
-
-function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, onHelp, onAccounts, connected, filter, onClearFilter }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void; connected: boolean; filter: CrewKey | null; onClearFilter: () => void }) {
-  const spent = [main, ...workers].reduce((n, s) => n + (s?.usage?.costUsd ?? 0), 0);
-  const groups = new Map<string, SessionInfo[]>();
-  for (const s of workers.filter((w) => !filter || crewMatch(filter, w))) groups.set(s.project, [...(groups.get(s.project) ?? []), s]);
-  // A session that changes status re-sorts; FLIP slides the rows to their new spots.
-  const scroll = useFlip<HTMLDivElement>([...groups.values()].flat().map((s) => s.id).join());
-
+function AddProject({ recent, onClose, onPick }: { recent: string[]; onClose: () => void; onPick: (path: string) => void }) {
+  const [path, setPath] = useState(loadProject);
   return (
-    <nav className="sidebar" aria-label="Sessions">
-      <div className="side-head drag">
-        <span className="brand">
-          <span className="mark" aria-hidden />
-          Perzian
-          {isDemo && <span className="tag">demo</span>}
-        </span>
-        <span className={`conn ${connected ? "on" : "off"}`} title={connected ? "Daemon connected" : "Daemon offline"} />
-      </div>
-
-      <button className={`row main-row ${selected === null ? "active" : ""} ${main ? `s-${main.status}` : ""}`} onClick={() => onSelect(null)}>
-        <span className="mark small" aria-hidden />
-        <span className="row-title">Perzian</span>
-        {main?.status === "working" && <span className="dot" />}
-        <kbd>/</kbd>
-      </button>
-
-      <div className="side-scroll" ref={scroll}>
-        {[...groups.entries()].map(([project, list]) => (
-          <section key={project} className="side-group">
-            <h3 className="eyebrow">{project.split("/").slice(-1)[0]}</h3>
-            {list.map((s) => (
-              <button key={s.id} data-flip={s.id} className={`row s-${s.status} ${selected === s.id ? "active" : ""} ${s.live === false ? "dormant" : ""} ${isUnseen(s) ? "unseen-row" : ""}`} onClick={() => onSelect(selected === s.id ? null : s.id)} title={`${statusText(s)} · ${s.branch ?? s.project}${isUnseen(s) ? " · new result" : ""}`}>
-                <StatusGlyph s={s} />
-                <span className="row-title">{s.title}</span>
-                {s.status === "paused" && s.pause && <span className="row-note">{resumeTime(s.pause)}</span>}
-                <ChurnBar files={state.changes[s.id] ?? []} />
-              </button>
-            ))}
-          </section>
-        ))}
-        {filter && (
-          <button className="btn small side-filter" onClick={onClearFilter}>
-            Showing {CREW_LABEL[filter].toLowerCase()} · show all
-          </button>
-        )}
-        {workers.length === 0 && <p className="quiet side-empty">Sessions you or Perzian start show up here.</p>}
-      </div>
-
-      <div className="side-foot">
-        {spent > 0 && <p className="spent" title="Reported by the agents across all sessions, including Perzian">{cost(spent)} spent</p>}
-        <button className="btn new" onClick={onNew}>
-          New session <kbd>N</kbd>
-        </button>
-        <button className="link-btn" onClick={onImport} title="Show your recent Claude Code sessions here; open one to continue it">
-          Import recent Claude Code sessions
-        </button>
-        {!isDemo && (
-          <button className="link-btn" onClick={onAccounts}>
-            Accounts &amp; API keys
-          </button>
-        )}
-        <PhoneButton />
-        <button className="link-btn" onClick={onHelp}>
-          Keyboard shortcuts <kbd>?</kbd>
-        </button>
-      </div>
-    </nav>
+    <div className="modal" onClick={onClose}>
+      <form className="sheet" onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); if (path.trim()) onPick(path.trim()); }}>
+        <h2>Add project</h2>
+        <FolderPicker id="ap-project" project={path} setProject={setPath} recent={recent} onPicked={() => undefined} autoFocus={!path} />
+        <p className="quiet small">Then tell Perzian what to build in it. Sessions appear on the left.</p>
+        <div className="sheet-actions">
+          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn primary" disabled={!path.trim()}>Use this folder</button>
+        </div>
+      </form>
+    </div>
   );
 }
 
-/* ───────────── Thread: the main agent conversation, made of cards ───────────── */
+/* ───────────── Lead chat: the one place work starts ───────────── */
 
-function Thread({ crewFilter, onCrewFilter, state, main, send, onOpen, decisions, decIdx, onDecIdx, link, onStart, blocked, focus, firstRun }: { crewFilter: CrewKey | null; onCrewFilter: (k: CrewKey | null) => void; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; decIdx: number; onDecIdx: (i: number) => void; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode }) {
+function Thread({ hidden, state, main, send, onOpen, decisions, decIdx, onDecIdx, link, onStart, blocked, focus, firstRun, leadProject, onProjectUsed }: { hidden: boolean; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; decIdx: number; onDecIdx: (i: number) => void; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode; leadProject: string | null; onProjectUsed: () => void }) {
   const items = main ? (state.transcripts[main.id] ?? []) : [];
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
@@ -308,15 +227,16 @@ function Thread({ crewFilter, onCrewFilter, state, main, send, onOpen, decisions
       return false;
     }
   });
+  // Stay at the end as messages arrive, and land there again when coming back from a session.
   useEffect(() => {
-    end.current?.scrollIntoView({ block: "end" });
-  }, [items.length, decisions.length]);
+    if (!hidden) end.current?.scrollIntoView({ block: "end" });
+  }, [items.length, decisions.length, hidden]);
+  const folder = leadProject?.split("/").filter(Boolean).slice(-1)[0];
 
   return (
-    <main className="thread">
+    <main className="thread" hidden={hidden} aria-label="Lead chat">
       <div className="thread-head drag">
-        <h1 className="sr">Perzian</h1>
-        <CrewStrip state={state} filter={crewFilter} onFilter={onCrewFilter} onOpen={onOpen} />
+        <h1 className="lead-h">Lead chat</h1>
         <span className="grow" />
         {main?.status === "working" && <span className="thinking">thinking</span>}
         {main?.status === "paused" && <Paused s={main} send={send} />}
@@ -328,7 +248,6 @@ function Thread({ crewFilter, onCrewFilter, state, main, send, onOpen, decisions
         {link === "offline" && (empty ? <DaemonOffline /> : <OfflineBanner />)}
         {firstRun}
         {!main && !firstRun && !(link === "offline" && empty) && link !== "connecting" && link !== "refused" && <Welcome />}
-        <SinceYouLeft state={state} onOpen={onOpen} />
         <ThreadItems items={items} state={state} onOpen={onOpen} retry={retry && main ? { index: retry.index, run: () => send({ type: "session.prompt", sessionId: main.id, prompt: retry.prompt }) } : undefined} />
         <div ref={end} />
       </div>
@@ -374,67 +293,29 @@ function Thread({ crewFilter, onCrewFilter, state, main, send, onOpen, decisions
         )}
         <Composer
           id="main-composer"
-          placeholder={main ? "Ask Perzian, or tell it what to build…" : "What should it do? e.g. Fix the failing test"}
+          to="Perzian"
+          placeholder={main ? "Tell it what to build, or ask how things stand…" : "What should it do? e.g. Fix the failing test"}
           focus={focus}
           busy={main?.status === "working"}
           blocked={main ? undefined : blocked}
-          onSubmit={(text) => (main ? send({ type: "session.prompt", sessionId: main.id, prompt: text }) : onStart(text))}
+          // TODO: wire to `settings.setDefaultMode` once it lands in packages/protocol (another agent is adding it); disabled until then.
+          controls={<ModePicker value={main?.mode ?? "ask"} disabled title="Default permission mode for new work. Coming soon." />}
+          note={folder && (
+            <span className="proj-chip" title={leadProject ?? undefined}>
+              in <b>{folder}</b>
+              <button type="button" className="icon" aria-label="Clear project" onClick={onProjectUsed}>✕</button>
+            </span>
+          )}
+          onSubmit={(text) => {
+            const prompt = leadProject ? withProject(text, leadProject) : text;
+            if (leadProject) onProjectUsed();
+            if (main) send({ type: "session.prompt", sessionId: main.id, prompt });
+            else onStart(prompt);
+          }}
           onStop={main ? () => send({ type: "session.cancel", sessionId: main.id }) : undefined}
         />
       </div>
     </main>
-  );
-}
-
-const CREW_LABEL: Record<CrewKey, string> = { needs_you: "needs you", failed: "failed", working: "working", paused: "paused", done: "done since you left" };
-
-// Always-visible crew status: counts folded from session state; each count filters the sidebar (a single match opens it).
-function CrewStrip({ state, filter, onFilter, onOpen }: { state: State; filter: CrewKey | null; onFilter: (k: CrewKey | null) => void; onOpen: (id: string) => void }) {
-  const counts = crewStatus(Object.values(state.sessions));
-  if (!counts.length) return null;
-  return (
-    <div className="crew" role="status" aria-label="Crew status">
-      {counts.map(({ key, count }) => (
-        <button
-          key={key}
-          className={`btn small crew-btn s-${key} ${filter === key ? "on" : ""}`}
-          aria-pressed={filter === key}
-          title={filter === key ? "Show all sessions" : `Show only: ${CREW_LABEL[key]}`}
-          onClick={() => {
-            onFilter(filter === key ? null : key);
-            const only = Object.values(state.sessions).filter((s) => crewMatch(key, s));
-            if (filter !== key && only.length === 1) onOpen(only[0].id);
-          }}
-        >
-          <span className="dot" />
-          <Count n={count} /> {CREW_LABEL[key]}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// "Where was I": results that landed while you weren't looking, one click each.
-function SinceYouLeft({ state, onOpen }: { state: State; onOpen: (id: string) => void }) {
-  const unseen = Object.values(state.sessions)
-    .filter((s) => s.role === "worker" && !s.archived && isUnseen(s))
-    .sort((a, b) => b.updatedAt - a.updatedAt);
-  if (!unseen.length) return null;
-  return (
-    <div className="since">
-      <span className="eyebrow">New results</span>
-      {unseen.map((s) => (
-        <button key={s.id} className={`since-chip s-${s.status}`} onClick={() => onOpen(s.id)}>
-          <span className="dot" />
-          {s.title}
-          {state.outcomes[s.id]?.proof.length ? (
-            <span className="since-proof">
-              {state.outcomes[s.id].proof.filter((p) => p.passed).length}/{state.outcomes[s.id].proof.length}
-            </span>
-          ) : null}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -517,7 +398,7 @@ function Paused({ s, send }: { s: SessionInfo; send: Send }) {
 }
 
 // A spawned session, inline in the conversation as one line, updating live. Branch, files and
-// proof live in the drawer one click away.
+// proof live in its detail view one click away.
 function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: () => void }) {
   const pending = Object.values(state.decisions).filter((d) => d.sessionId === s.id).length;
   const files = state.changes[s.id] ?? [];
@@ -530,545 +411,6 @@ function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: 
       <span className="live-title">{s.title}</span>
       <span key={statusText(s)} className="live-status" title={pauseTitle(s)}>{statusText(s)}{pending > 1 ? ` · ${pending}` : ""}</span>
     </button>
-  );
-}
-
-/** `blocked`: why sending isn't possible yet; typing still works and the text is kept. */
-function Composer({ id, placeholder, focus, busy, blocked, onSubmit, onStop }: { id: string; placeholder: string; focus?: boolean; busy?: boolean; blocked?: string; onSubmit: (t: string) => void; onStop?: () => void }) {
-  const [text, setText] = useState("");
-  const submit = () => {
-    if (!text.trim() || blocked) return;
-    onSubmit(text.trim());
-    setText("");
-  };
-  return (
-    <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
-      <textarea
-        id={id}
-        rows={1}
-        autoFocus={focus}
-        value={text}
-        placeholder={placeholder}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }}
-      />
-      {busy && onStop ? (
-        <button type="button" className="btn" onClick={onStop}>Stop</button>
-      ) : (
-        <button className="btn primary" disabled={!text.trim() || !!blocked} title={blocked}>Send</button>
-      )}
-    </form>
-  );
-}
-
-function ModelPicker({ s, state, send }: { s: SessionInfo; state: State; send: Send }) {
-  const reported = state.configs[s.id]?.models ?? [];
-  const options = reported.length ? reported.map((m) => ({ id: m.value, label: m.name })) : AGENTS[s.agent].models;
-  const current = reported.length ? (state.configs[s.id]?.currentModel ?? "") : (s.model ?? "");
-  return (
-    <select className="picker" aria-label="Model" value={current} onChange={(e) => send({ type: "session.setModel", sessionId: s.id, model: e.target.value })}>
-      {!options.some((o) => o.id === current) && <option value={current}>{current || "Default"}</option>}
-      {options.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-    </select>
-  );
-}
-
-/* ───────────── Ship it: land a worktree session's work ───────────── */
-
-function ShipBar({ s, files, send }: { s: SessionInfo; files: number; send: Send }) {
-  const [confirming, setConfirming] = useState(false);
-  if (!s.worktree || !s.branch) return null;
-  const sh = s.ship;
-  if (sh?.state === "merged")
-    return (
-      <section className="ship shipped">
-        <b>✓ Merged into {sh.into}</b>
-        <span>{sh.detail ?? "The worktree and branch were cleaned up."} This session is closed; start a new one to keep going.</span>
-      </section>
-    );
-  if (sh?.state === "pr")
-    return (
-      <section className="ship shipped">
-        <b>✓ Pull request opened</b>
-        {sh.url && <a className="btn small" href={sh.url} target="_blank" rel="noopener">View on GitHub ↗</a>}
-        {sh.detail && <span>{sh.detail}</span>}
-      </section>
-    );
-  if (s.status === "working" || s.status === "needs_you" || (files === 0 && !sh)) return null;
-  const busy = sh?.state === "shipping";
-  const into = s.baseBranch ?? "your branch";
-  // Merging writes into the developer's own checkout, so it takes one quiet confirm.
-  if (confirming && !busy)
-    return (
-      <section className="ship">
-        <h3 className="eyebrow">Ship it</h3>
-        <p className="ship-confirm">
-          Merge {files} changed file{files === 1 ? "" : "s"} into <code>{into}</code> in <code>{s.project}</code>? The session's worktree is removed afterwards.
-        </p>
-        <div className="ship-row">
-          <button className="btn primary" autoFocus onClick={() => { setConfirming(false); send({ type: "session.ship", sessionId: s.id, how: "merge" }); }}>
-            Merge
-          </button>
-          <button className="btn ghost" onClick={() => setConfirming(false)}>Cancel</button>
-        </div>
-      </section>
-    );
-  return (
-    <section className="ship">
-      <h3 className="eyebrow">Ship it</h3>
-      <div className="ship-row">
-        <button className="btn primary" disabled={busy} onClick={() => setConfirming(true)}>
-          {busy && sh.how === "merge" ? "Merging…" : `Merge into ${into}`}
-        </button>
-        <button className="btn" disabled={busy} onClick={() => send({ type: "session.ship", sessionId: s.id, how: "pr" })}>
-          {busy && sh.how === "pr" ? "Opening PR…" : "Open PR"}
-        </button>
-      </div>
-      {sh?.state === "conflict" && (
-        <div className="ship-msg">
-          <b>Conflicts with {sh.into} in {sh.files?.length} file{sh.files?.length === 1 ? "" : "s"}.</b> Nothing was merged.
-          <ul>{sh.files?.map((f) => <li key={f}><code>{f}</code></li>)}</ul>
-          <button
-            className="btn small"
-            onClick={() => send({ type: "session.prompt", sessionId: s.id, prompt: `Merging into ${sh.into} conflicts in: ${sh.files?.join(", ")}. Rebase this branch onto ${sh.into}, resolve the conflicts, and run the checks again.` })}
-          >
-            Ask the agent to resolve
-          </button>
-        </div>
-      )}
-      {sh?.state === "error" && <p className="ship-msg">{sh.detail}</p>}
-    </section>
-  );
-}
-
-/* ───────────── Ready worktrees: local files + install before the first prompt ───────────── */
-
-function SetupBar({ s, send }: { s: SessionInfo; send: Send }) {
-  const st = s.setup;
-  if (!st) return null;
-  const files = st.copied.length ? `copied ${st.copied.length} local file${st.copied.length === 1 ? "" : "s"}` : "";
-  const facts = [files, ...st.install].filter(Boolean).join(" · ");
-  const detail = [...st.copied, ...(st.notes ?? [])].join("\n") || undefined;
-  const act = (action: "retry" | "skip") => send({ type: "session.setup", sessionId: s.id, action });
-  if (st.state === "running")
-    return (
-      <section className="setup">
-        <div className="setup-line">
-          <span className="dot s-working" />
-          <b>Setting up…</b>
-          <span className="setup-facts" title={detail}>{st.current ? <code>{st.current}</code> : (facts || "copying local files")}</span>
-          <button type="button" className="btn ghost small" onClick={() => act("skip")} title="Send the first message now, without waiting">Start anyway</button>
-        </div>
-      </section>
-    );
-  if (st.state === "failed")
-    return (
-      <section className="setup" role="alert">
-        <div className="setup-line">
-          <span className="dot s-failed" />
-          <b>Setup failed</b>
-          <span className="setup-facts"><code>{st.error?.command}</code></span>
-          <button type="button" className="btn small" onClick={() => act("retry")}>Retry</button>
-          <button type="button" className="btn ghost small" onClick={() => act("skip")}>Start anyway</button>
-        </div>
-        {st.error?.tail && <pre className="setup-tail">{st.error.tail}</pre>}
-      </section>
-    );
-  if (!facts && !st.notes?.length) return null;
-  return (
-    <p className="quiet setup-done" title={detail}>
-      {st.state === "skipped" ? "Started without finishing setup" : "Worktree ready"}
-      {facts && ` · ${facts}`}
-      {st.notes?.map((n) => <span key={n} className="setup-note">{n}</span>)}
-    </p>
-  );
-}
-
-/* ───────────── Declared checks (perzian.json): the daemon runs them when the agent finishes ───────────── */
-
-const RUN_LABEL: Record<CheckRun["state"], (r: CheckRun) => string> = {
-  running: () => "Running",
-  fixing: (r) => `Sent back to the agent · fix ${r.attempt} of ${r.maxAttempts}`,
-  passed: () => "All pass",
-  failed: (r) => `Still failing after ${r.maxAttempts} fixes · needs you`,
-  cancelled: () => "Stopped",
-};
-
-function DeclaredChecks({ s, send }: { s: SessionInfo; send: Send }) {
-  const declared = checkPlan(s);
-  if (s.checksError && !declared.length) {
-    return (
-      <section>
-        <h3 className="eyebrow">Checks</h3>
-        <p className="checks-error">✕ {s.checksError}</p>
-      </section>
-    );
-  }
-  if (!declared.length) return null;
-  const run = s.checkRun;
-  const byName = new Map((run?.results ?? []).map((r) => [r.name, r]));
-  const failed = (run?.results ?? []).filter((r) => r.state === "failed");
-  return (
-    <section>
-      <h3 className="eyebrow">
-        Checks <b>{declared.length}</b>
-        {run && <span className={`checks-state cr-${run.state}`}>{RUN_LABEL[run.state](run)}</span>}
-      </h3>
-      <ul className="checks">
-        {declared.map((c) => {
-          const r = byName.get(c.name);
-          const state = r?.state ?? "pending";
-          const meta = r && (r.state === "passed" || r.state === "failed") ? [r.summary ?? (r.exitCode !== undefined ? `exit ${r.exitCode}` : undefined), r.durationMs !== undefined ? `${(r.durationMs / 1000).toFixed(1)}s` : undefined].filter(Boolean).join(" · ") : "";
-          return (
-            <li key={c.name} className={`check ck-${state}`} title={[`$ ${c.run}`, r?.exitCode !== undefined && `exit ${r.exitCode}`, r?.timedOut && "timed out"].filter(Boolean).join("\n")}>
-              <span className="check-mark">{state === "passed" ? "✓" : state === "failed" ? "✕" : state === "running" ? "◌" : "·"}</span>
-              <span className="check-name">{c.name}</span>
-              <code className="check-run">{c.run}</code>
-              {meta && <span className="check-meta">{meta}</span>}
-              {state === "failed" && r?.tail && <pre className="check-tail">{r.tail}</pre>}
-            </li>
-          );
-        })}
-      </ul>
-      <button className="btn small" disabled={run?.state === "running" || s.status === "working"} onClick={() => send({ type: "session.runChecks", sessionId: s.id })}>
-        {run?.state === "running" ? "Running…" : "Run checks"}
-      </button>
-      {run?.state === "failed" && failed.length > 0 && (
-        <button
-          className="btn small"
-          onClick={() => send({ type: "session.prompt", sessionId: s.id, prompt: `These required checks fail: ${failed.map((r) => `${r.name} (\`${r.run}\`)`).join(", ")}. Find the cause and fix it, then run them again.` })}
-        >
-          Ask the agent to fix
-        </button>
-      )}
-    </section>
-  );
-}
-
-/* ───────────── Drawer: deep dive into one session ───────────── */
-
-function Drawer({ s, enter, leaving, state, send, onClose, onFile, onOpen }: { s: SessionInfo; enter: boolean; leaving: boolean; state: State; send: Send; onClose: () => void; onFile: (path: string) => void; onOpen: (id: string) => void }) {
-  const [showTranscript, setShowTranscript] = useState(false);
-  const [slideIn] = useState(enter); // only the open animates, not switching between sessions
-  const outcome = state.outcomes[s.id];
-  const files = state.changes[s.id] ?? [];
-  const transcript = state.transcripts[s.id] ?? [];
-  const tools = transcript.filter((t) => t.kind === "tool");
-  const decisions = Object.values(state.decisions).filter((d) => d.sessionId === s.id);
-  const pending = useExiting(decisions, (d) => d.id);
-  const lastAgent = [...transcript].reverse().find((t) => t.kind === "agent");
-  const parent = s.parentId ? state.sessions[s.parentId] : undefined;
-  // Merged: the work landed and the worktree is gone, so the session takes no more prompts.
-  const closed = !!s.worktree && s.ship?.state === "merged";
-  const retry = closed ? null : retryTarget(transcript, s.status);
-  const failure = retry ? transcript[retry.index] : undefined;
-
-  return (
-    <aside className={`drawer s-${s.status} ${slideIn ? "enter" : ""} ${leaving ? "leave" : ""}`} aria-label="Session detail">
-      <div className="drawer-head drag">
-        <StatusGlyph s={s} />
-        <div className="drawer-title">
-          <h2>{s.title}</h2>
-          <p>
-            {s.status === "paused" ? <Paused s={s} send={send} /> : <span key={statusText(s)} className="status-text">{statusText(s)}</span>}
-            {s.progress && s.status === "working" && <> · {s.progress.phase} {s.progress.step}/{s.progress.of}</>}
-            {s.live === false && <> · asleep</>}
-          </p>
-        </div>
-        <button className="icon bordered" onClick={onClose} aria-label="Close">✕</button>
-      </div>
-
-      <div className="drawer-meta">
-        {s.branch && <code title={s.cwd}>{s.worktree ? "⑂ " : ""}{s.branch}</code>}
-        <span title={AGENTS[s.agent].experimental ? "Experimental: less tested than Claude Code" : undefined}>{AGENTS[s.agent].label}{AGENTS[s.agent].experimental ? " · experimental" : ""}</span>
-        <Usage s={s} />
-        {parent && <button className="text-link" onClick={() => onOpen(parent.id)}>from {parent.title} ›</button>}
-      </div>
-      <div className="drawer-controls">
-        <label className="control">
-          <span>Model</span>
-          <ModelPicker s={s} state={state} send={send} />
-        </label>
-        <label className="control">
-          <span>Permissions</span>
-          <select className="picker" aria-label="Permission mode" value={s.mode ?? "ask"} onChange={(e) => send({ type: "session.setMode", sessionId: s.id, mode: e.target.value as PermissionMode })}>
-            {(Object.keys(MODE_LABEL) as PermissionMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
-          </select>
-        </label>
-      </div>
-
-      <div className="drawer-scroll">
-        <SetupBar s={s} send={send} />
-        {retry && failure?.kind === "notice" && <FailureNotice text={failure.text} onRetry={() => send({ type: "session.prompt", sessionId: s.id, prompt: retry.prompt })} />}
-        {pending.map(({ item: d, leaving }) => (
-          <Slot key={d.id} id={d.id} leaving={leaving} className="in-drawer">
-            <DecisionCard d={d} session={s} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: d.id, optionId })} />
-          </Slot>
-        ))}
-
-        <ShipBar s={s} files={files.length} send={send} />
-
-        {outcome && (
-          <section className={`outcome o-${outcome.status}`}>
-            <div className="outcome-head">
-              <span className="outcome-badge">{outcome.status === "success" ? "✓ Done" : outcome.status === "failed" ? "✕ Failed" : "◐ Partial"}</span>
-              {outcome.derived && <span className="tag" title="The agent didn't report an outcome; built from git">auto</span>}
-            </div>
-            <p className="outcome-intent">{outcome.intent}</p>
-            <ProofPills o={outcome} />
-            {outcome.risks.map((r, i) => <p key={i} className="risk">⚠ {r}</p>)}
-            {outcome.followups.length > 0 && !closed && (
-              <div className="followups">
-                {outcome.followups.map((f, i) => (
-                  <button key={i} className="followup" onClick={() => send({ type: "session.prompt", sessionId: s.id, prompt: f })} title="Send to this session as the next task">
-                    <span>{f}</span>
-                    <span className="followup-go">Send →</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-        {!outcome && (
-          <section>
-            <h3 className="eyebrow">Outcome</h3>
-            <p className="quiet">{s.status === "working" || s.status === "needs_you" || s.status === "paused" ? "Lands here when the agent finishes, with proof." : s.status === "failed" ? "None. The agent stopped before reporting one." : "No outcome yet. Send a task to get one."}</p>
-          </section>
-        )}
-
-        <DeclaredChecks s={s} send={send} />
-
-        <section>
-          <h3 className="eyebrow">
-            Change map <b>{files.length}</b>
-            {files.length > 0 && <ChurnBar files={files} />}
-          </h3>
-          <ChangeMap files={files} onOpen={onFile} status={s.status} />
-        </section>
-
-        <section>
-          <h3 className="eyebrow">Activity <b>{tools.length}</b></h3>
-          <div className="activity">
-            {tools.map((t) => t.kind === "tool" && <span key={t.toolCallId} className={`act k-${t.toolKind ?? "other"} st-${t.status}`} title={`${t.toolKind ?? "tool"}: ${t.title}`} />)}
-            {tools.length === 0 && <span className="quiet">Nothing yet</span>}
-          </div>
-          <div className="legend">
-            <span><i className="act k-read" /> read</span>
-            <span><i className="act k-edit" /> edit</span>
-            <span><i className="act k-execute" /> run</span>
-            <span><i className="act st-failed" /> failed</span>
-          </div>
-        </section>
-
-        {lastAgent && lastAgent.kind === "agent" && !showTranscript && <div className="msg agent small">{lastAgent.text}</div>}
-
-        <button className="btn wide" onClick={() => setShowTranscript((v) => !v)}>
-          {showTranscript ? "Hide transcript" : `Read full transcript (${transcript.length})`}
-        </button>
-        {showTranscript && (
-          <ol className="transcript">
-            {transcript.map((t, i) => (
-              <li key={i} className={`t-${t.kind}`}>
-                {t.kind === "tool" ? <><b>{t.toolKind ?? "tool"}</b> {t.title}</> : t.kind === "spawn" ? <>started {t.title}</> : t.text}
-              </li>
-            ))}
-          </ol>
-        )}
-      </div>
-
-      <div className="drawer-foot">
-        {closed ? (
-          <p className="closed-note">Merged into {s.ship?.into ?? s.baseBranch ?? "your branch"}. This session is closed; start a new one to keep going.</p>
-        ) : (
-          <Composer id="session-composer" placeholder={`Tell ${s.title}…`} busy={s.status === "working"} onSubmit={(text) => send({ type: "session.prompt", sessionId: s.id, prompt: text })} onStop={() => send({ type: "session.cancel", sessionId: s.id })} />
-        )}
-        <button className="btn ghost small" onClick={() => { send({ type: "session.archive", sessionId: s.id }); onClose(); }}>Archive</button>
-      </div>
-    </aside>
-  );
-}
-
-/* ───────────── Read-only code ───────────── */
-
-type LineKind = "" | "add" | "del" | "hunk" | "meta";
-function classify(l: string, diff: boolean): LineKind {
-  if (!diff) return "";
-  if (l.startsWith("@@")) return "hunk";
-  if (/^(diff |index |--- |\+\+\+ |new file|deleted file|similarity|rename |old mode|new mode|\\ No newline)/.test(l)) return "meta";
-  if (l.startsWith("+")) return "add";
-  if (l.startsWith("-")) return "del";
-  return "";
-}
-
-function FileViewer({ session, path, onClose }: { session: string; path: string; onClose: () => void }) {
-  const [tab, setTab] = useState<"diff" | "file">("diff");
-  const [text, setText] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [tokens, setTokens] = useState<Map<number, ThemedToken[]> | null>(null);
-  useEffect(() => {
-    setText(null);
-    setErr(null);
-    setTokens(null);
-    fetchText(tab, session, path).then(setText, (e) => setErr(String(e.message ?? e)));
-  }, [tab, session, path]);
-
-  const diff = tab === "diff";
-  const lines = useMemo(() => (text ?? "").replace(/\n$/, "").split("\n"), [text]);
-  const kinds = useMemo(() => lines.map((l) => classify(l, diff)), [lines, diff]);
-
-  // Highlight only code lines; in a diff, strip the +/-/space prefix first and map tokens back by index.
-  useEffect(() => {
-    if (text === null) return;
-    let cancelled = false;
-    const idx: number[] = [];
-    const code: string[] = [];
-    lines.forEach((l, i) => {
-      if (kinds[i] === "hunk" || kinds[i] === "meta") return;
-      idx.push(i);
-      code.push(diff ? l.slice(1) : l);
-    });
-    tokenize(code, path).then((t) => {
-      if (cancelled || !t) return;
-      const m = new Map<number, ThemedToken[]>();
-      t.forEach((line, j) => m.set(idx[j], line));
-      setTokens(m);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [text, lines, kinds, diff, path]);
-
-  return (
-    <div className="modal" onClick={onClose}>
-      <div className="viewer" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={path}>
-        <div className="viewer-head">
-          <code>{path}</code>
-          <div className="tabs">
-            <button className={tab === "diff" ? "on" : ""} onClick={() => setTab("diff")}>Diff</button>
-            <button className={tab === "file" ? "on" : ""} onClick={() => setTab("file")}>File</button>
-          </div>
-          <span className="tag">read-only</span>
-          <button className="icon bordered" onClick={onClose} aria-label="Close">✕</button>
-        </div>
-        <div className="viewer-body">
-          {err && <p className="quiet">{err}</p>}
-          {text === null && !err && <p className="quiet">Loading…</p>}
-          {text !== null && (
-            <pre className={`code ${tab}`}>
-              {lines.map((l, i) => {
-                const k = kinds[i];
-                const toks = tokens?.get(i);
-                return (
-                  <div key={i} className={`ln ${k}`}>
-                    <span className="gutter">{diff ? (k === "add" ? "+" : k === "del" ? "−" : "") : i + 1}</span>
-                    <span>
-                      {toks
-                        ? toks.length
-                          ? toks.map((t, j) => <span key={j} style={{ color: t.color }}>{t.content}</span>)
-                          : " "
-                        : (diff && k !== "hunk" && k !== "meta" ? l.slice(1) : l) || " "}
-                    </span>
-                  </div>
-                );
-              })}
-            </pre>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ───────────── New session ───────────── */
-
-function NewSession({ recent, onClose, onCreate, pending, error }: { recent: string[]; onClose: () => void; onCreate: (c: Command) => void; pending: boolean; error: string | null }) {
-  const remembered = loadProject();
-  const [project, setProject] = useState(remembered);
-  const [prompt, setPrompt] = useState("");
-  const [title, setTitle] = useState("");
-  const [agent, setAgent] = useState<AgentKind>("claude-code");
-  const [model, setModel] = useState("");
-  const [mode, setMode] = useState<PermissionMode>("ask");
-  const [worktree, setWorktree] = useState(true);
-  // Everything but folder and task has a default; the options open themselves when an error needs one.
-  const [opts, setOpts] = useState(false);
-  useEffect(() => {
-    if (error && /worktree|git repo|CLI not found/i.test(error)) setOpts(true);
-  }, [error]);
-  return (
-    <div className="modal" onClick={onClose}>
-      <form
-        className="sheet"
-        onClick={(e) => e.stopPropagation()}
-        onSubmit={(e) => {
-          e.preventDefault();
-          saveProject(project);
-          onCreate({ type: "session.create", project, prompt, title: title || undefined, agent, model: model || undefined, mode, worktree });
-        }}
-      >
-        <FolderPicker id="ns-project" project={project} setProject={setProject} recent={recent} onPicked={() => setTimeout(() => document.getElementById("ns-prompt")?.focus(), 0)} autoFocus={!project} />
-        <textarea
-          id="ns-prompt"
-          required
-          rows={4}
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              e.currentTarget.form?.requestSubmit();
-            }
-          }}
-          placeholder="What should it do?"
-          aria-label="Task"
-          autoFocus={!!project}
-        />
-        <details className="opts" open={opts} onToggle={(e) => setOpts(e.currentTarget.open)}>
-          <summary className="btn small">Options</summary>
-          <div className="opts-body">
-            <input id="ns-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Name" aria-label="Name" />
-            <div className="sheet-row">
-              <label>
-                Agent
-                <select id="ns-agent" value={agent} onChange={(e) => { setAgent(e.target.value as AgentKind); setModel(""); }}>
-                  {(Object.keys(AGENTS) as AgentKind[]).map((a) => <option key={a} value={a}>{AGENTS[a].label}{AGENTS[a].experimental ? " (experimental)" : ""}</option>)}
-                </select>
-              </label>
-              <label>
-                Model
-                <select id="ns-model" value={model} onChange={(e) => setModel(e.target.value)}>
-                  {AGENTS[agent].models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
-                </select>
-              </label>
-              <label>
-                Permissions
-                <select id="ns-mode" value={mode} onChange={(e) => setMode(e.target.value as PermissionMode)}>
-                  {(Object.keys(MODE_LABEL) as PermissionMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
-                </select>
-              </label>
-            </div>
-            <label className="check">
-              <input id="ns-worktree" type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} />
-              Own git worktree
-            </label>
-          </div>
-        </details>
-        {error && (
-          <p className="sheet-error" role="alert">
-            {friendlyError(error).what} {friendlyError(error).fix}
-          </p>
-        )}
-        <div className="sheet-actions">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={pending}>{pending ? "Starting…" : "Start"}</button>
-        </div>
-      </form>
-    </div>
   );
 }
 

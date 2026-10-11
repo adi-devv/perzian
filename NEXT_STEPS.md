@@ -5,10 +5,13 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 ## Now (no new features until these are done)
 1. **Dev testing.** Drive the real app through scenarios a new dev would hit: first run, pick a folder, "add a login page",
    answer a decision card, a failing check, ship (merge and PR), a usage-limit pause, phone pairing. Note every confusing
-   moment, extra click or wall of text, then fix in small batches. Known: "Always"/"Deny" on the decision card look disabled.
-2. **UI direction.** Decide on the hybrid prototype (`prototypes/hybrid.html`, not committed yet): mission-control board as
-   home (tiles sized by urgency, chat becomes a ⌘K bar), codebase map inside a session (folders as regions, agents as dots,
-   overlapping dots warn of conflicts), decision inbox on the phone. Alternatives considered: subway-map timeline.
+   moment, extra click or wall of text, then fix in small batches.
+2. **UI direction: crew + center is built; finish it.** Left: the crew (one live tile per session, grouped by project, urgency-sorted, answerable in place).
+   Center: lead chat, or one session's detail (Changes, Map, Checks, Transcript). Leftovers:
+   - "Add project" only sets local lead-composer state; an empty project can't persist without a daemon event.
+   - The Map is a simple directory-region view (regions grow with churn), not a treemap with agents as dots yet.
+   - The lead composer's default permission-mode picker is disabled until `settings.setDefaultMode` lands in packages/protocol (TODO in App.tsx).
+   - Decision inbox on the phone, and the old alternatives (subway-map timeline), are still open.
 3. **Small eval set.** About 5 scripted tasks run against a real agent, scored on finished, checks passed, and an honest outcome.
 4. **Try the Mac app** (`npm run app`) and **publish v0.0.1** as a GitHub Release (`npm run dist`, upload the zip, link it).
 

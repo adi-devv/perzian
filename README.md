@@ -12,7 +12,7 @@ what's happening at a glance:
 
 - **Sessions list:** every session color-coded (working · needs you · done · failed · idle), ordered by attention
 - **Main thread:** spawned sessions as live mini-tiles, outcome cards, and a needs-you dock of one-click decisions
-- **Deep dive drawer:** outcome, live change map, read-only diff/file viewer, activity, full transcript
+- **Session detail:** outcome, live change map, read-only diff/file viewer, activity, full transcript
 
 Each session can get its own git worktree, permission mode (ask · edits · plan · auto) and model. Sessions
 resume after a daemon restart.
@@ -85,7 +85,7 @@ Put a `perzian.json` at the repo root to name checks that must pass, next to the
 ```
 
 When an agent finishes, Perzian runs each `run` command itself in the session's worktree (default timeout 300 s)
-and shows ✓/✕ with the real exit code in the session drawer. Failures go back to the agent to fix, up to 2 times;
+and shows ✓/✕ with the real exit code in the session detail. Failures go back to the agent to fix, up to 2 times;
 then the session is marked failed for you to look at. Agents see the checks in their brief and can run exactly
 these commands without a permission card. The file is read when a session starts; a malformed one shows an error
 and its checks don't run.

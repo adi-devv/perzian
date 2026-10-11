@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
-import type { Decision, FileChange, Outcome, SessionInfo, SessionStatus } from "@perzian/protocol";
+import { useEffect, useRef, useState } from "react";
+import { AGENTS, MODE_LABEL, type Command, type Decision, type FileChange, type PermissionMode, type SessionInfo, type SessionStatus, type State, type TranscriptItem } from "@perzian/protocol";
+import { isFailureNotice } from "./onboarding.tsx";
+
+type Send = (c: Command) => void;
 
 export const STATUS_LABEL: Record<SessionStatus, string> = { needs_you: "Needs you", working: "Working", failed: "Failed", done: "Done", idle: "Idle", paused: "Paused" };
 
@@ -85,43 +88,30 @@ export function churn(files: FileChange[]) {
 }
 
 // Compact +/− counts, colored only in the digits.
-export function ChurnBar({ files }: { files: FileChange[] }) {
-  const { add, del } = churn(files);
-  if (!files.length) return null;
-  return (
-    <span className="churn" title={`${files.length} files · +${add} −${del}`}>
-      <em className="a">+{add}</em>
-      <em className="d">−{del}</em>
-    </span>
-  );
-}
-
 export function StatusGlyph({ s }: { s: SessionInfo }) {
   if (s.status === "working" && s.progress) return <Ring step={s.progress.step} of={s.progress.of} />;
   return <span key={s.status} className="dot" />;
 }
 
-// Observed proofs (the daemon saw the command run) read as facts; self-reported ones are marked as claims.
-export function ProofPills({ o }: { o: Outcome }) {
-  if (!o.proof.length) return o.derived ? <span className="pill muted">no checks run</span> : null;
-  return (
-    <span className="pills">
-      {o.proof.map((p, i) => (
-        <span
-          key={i}
-          className={`pill ${p.passed ? "ok" : "bad"} ${p.observed ? "observed" : "claimed"}`}
-          title={[p.command && `$ ${p.command}`, p.exitCode !== undefined && `exit ${p.exitCode}`, p.durationMs !== undefined && `${(p.durationMs / 1000).toFixed(1)}s`, p.detail, p.observed ? "Verified by Perzian" : "Reported by the agent"].filter(Boolean).join("\n")}
-        >
-          {p.passed ? "✓" : "✕"} {p.summary ? `${p.label} · ${p.summary}` : p.label}
-          {!p.observed && <em className="claim">claimed</em>}
-        </span>
-      ))}
-    </span>
-  );
+/** Focus a control on mount, unless the developer is already typing somewhere. */
+export function useFocusOnMount(on: boolean | undefined) {
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!on) return;
+    const a = document.activeElement;
+    if (a && a !== document.body && a.closest("input, textarea, select")) return;
+    ref.current?.focus({ preventScroll: true });
+  }, [on]);
+  return ref;
 }
+
+/** The option that says no: what a destructive request focuses by default. */
+export const denyOption = (d: Decision) => d.options.find((o) => o.kind === "reject_once") ?? d.options.find((o) => o.kind === "reject_always");
 
 export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decision; session?: SessionInfo; onAnswer: (id: string | null) => void; onOpen?: () => void; index?: number }) {
   const perm = d.source === "permission";
+  const deny = d.destructive ? denyOption(d) : undefined;
+  const denyRef = useFocusOnMount(!!deny);
   return (
     <article className={`decision ${perm ? "perm" : "ask"} ${d.destructive ? "destructive" : ""}`}>
       <header>
@@ -143,7 +133,7 @@ export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decis
       )}
       <div className={`options ${perm ? "row" : ""}`}>
         {d.options.map((o) => (
-          <button key={o.id} className={`opt k-${o.kind ?? "choice"} ${d.recommended === o.id ? "rec" : ""}`} onClick={() => onAnswer(o.id)}>
+          <button key={o.id} ref={deny?.id === o.id ? denyRef : undefined} className={`opt k-${o.kind ?? "choice"} ${d.recommended === o.id ? "rec" : ""} ${deny?.id === o.id ? "deny-default" : ""}`} onClick={() => onAnswer(o.id)}>
             <span className="opt-label">{o.label}</span>
             {o.tradeoff && <span className="opt-trade">{o.tradeoff}</span>}
           </button>
@@ -153,70 +143,83 @@ export function DecisionCard({ d, session, onAnswer, onOpen, index }: { d: Decis
   );
 }
 
-const GLYPH = { added: "+", modified: "~", deleted: "−", renamed: "→" } as const;
-
-// Change map: files grouped by directory; each row shows a magnitude bar and, when known,
-// the functions/classes that changed. Click a row for the read-only diff.
-const NO_CHANGES: Record<SessionStatus, string> = {
-  working: "No file changes yet. Edits show up here as they happen.",
-  needs_you: "No file changes yet.",
-  done: "Finished without changing files.",
-  failed: "No files changed before it stopped.",
-  idle: "No file changes yet.",
-  paused: "No file changes yet.",
-};
-
-export function ChangeMap({ files, onOpen, status }: { files: FileChange[]; onOpen: (path: string) => void; status?: SessionStatus }) {
-  if (!files.length) return <p className="quiet">{NO_CHANGES[status ?? "idle"]}</p>;
-  const groups = new Map<string, FileChange[]>();
-  for (const f of files) {
-    const i = f.path.lastIndexOf("/");
-    const dir = i === -1 ? "." : f.path.slice(0, i);
-    groups.set(dir, [...(groups.get(dir) ?? []), f]);
+/** The last failure in a transcript that nothing has been sent after, and the prompt to resend. */
+export function retryTarget(items: TranscriptItem[], status: SessionInfo["status"]): { index: number; prompt: string } | null {
+  if (status === "working" || status === "needs_you") return null;
+  let fail = -1;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "user") break;
+    if (it.kind === "notice" && isFailureNotice(it.text)) {
+      fail = i;
+      break;
+    }
   }
-  const max = Math.max(...files.map((f) => f.additions + f.deletions), 1);
+  if (fail < 0) return null;
+  for (let i = fail - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.kind === "user") return it.system ? null : { index: fail, prompt: it.text };
+  }
+  return null;
+}
+
+/** An input that says who it talks to: "To: Perzian" or "To: <session title>". `blocked`: why sending isn't possible yet; typing still works and the text is kept. */
+export function Composer({ id, to, placeholder, focus, busy, blocked, onSubmit, onStop, note, controls }: { id: string; to: string; placeholder: string; focus?: boolean; busy?: boolean; blocked?: string; onSubmit: (t: string) => void; onStop?: () => void; note?: React.ReactNode; controls?: React.ReactNode }) {
+  const [text, setText] = useState("");
+  const submit = () => {
+    if (!text.trim() || blocked) return;
+    onSubmit(text.trim());
+    setText("");
+  };
   return (
-    <div className="changemap">
-      {[...groups.entries()].map(([dir, list]) => (
-        <div key={dir} className="cm-group">
-          <span className="cm-dir">{dir === "." ? "./" : `${dir}/`}</span>
-          <div className="cm-files">
-            {list.map((f) => {
-              const n = f.additions + f.deletions;
-              const width = `${Math.max(6, Math.sqrt(n / max) * 100)}%`;
-              const symbols = (f as FileChange & { symbols?: { name: string; kind: string; change: string }[] }).symbols ?? [];
-              return (
-                <button key={f.path} className={`cm-file c-${f.kind}`} onClick={() => onOpen(f.path)} title={`${f.path}  +${f.additions} −${f.deletions}`}>
-                  <span className="cm-name">
-                    <b>{GLYPH[f.kind]}</b>
-                    <span className="cm-fname">{f.path.slice(f.path.lastIndexOf("/") + 1)}</span>
-                  </span>
-                  <span className="cm-split">
-                    <span className="cm-mag" style={{ width }}>
-                      <i className="add" style={{ flex: f.additions || 0.0001 }} />
-                      <i className="del" style={{ flex: f.deletions || 0.0001 }} />
-                    </span>
-                  </span>
-                  <span className="cm-n">
-                    <em className="a">+{f.additions}</em> <em className="d">−{f.deletions}</em>
-                  </span>
-                  {symbols.length > 0 && (
-                    <span className="cm-sym">
-                      {symbols.slice(0, 12).map((sym, i) => (
-                        <span key={i} className={`sym-${sym.change}`} title={sym.kind}>
-                          {sym.name}
-                          {sym.kind === "function" || sym.kind === "method" ? "()" : ""}
-                        </span>
-                      ))}
-                      {symbols.length > 12 && <span>+{symbols.length - 12} more</span>}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-    </div>
+    <form className="composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+      <label className="to" htmlFor={id}>
+        To: <b>{to}</b>
+        {note}
+      </label>
+      <div className="composer-row">
+        <textarea
+          id={id}
+          rows={1}
+          autoFocus={focus}
+          value={text}
+          placeholder={placeholder}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+        />
+        {controls}
+        {busy && onStop ? (
+          <button type="button" className="btn" onClick={onStop}>Stop</button>
+        ) : (
+          <button className="btn primary" disabled={!text.trim() || !!blocked} title={blocked}>Send</button>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/** Permission mode as a compact toggle beside a composer, like Claude's: Ask / Edits / Plan / Auto. */
+export function ModePicker({ value, onChange, disabled, title }: { value: PermissionMode; onChange?: (m: PermissionMode) => void; disabled?: boolean; title?: string }) {
+  return (
+    <select className="picker mode-pick" aria-label="Permission mode" title={title} disabled={disabled} value={value} onChange={(e) => onChange?.(e.target.value as PermissionMode)}>
+      {(Object.keys(MODE_LABEL) as PermissionMode[]).map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+    </select>
+  );
+}
+
+export function ModelPicker({ s, state, send }: { s: SessionInfo; state: State; send: Send }) {
+  const reported = state.configs[s.id]?.models ?? [];
+  const options = reported.length ? reported.map((m) => ({ id: m.value, label: m.name })) : AGENTS[s.agent].models;
+  const current = reported.length ? (state.configs[s.id]?.currentModel ?? "") : (s.model ?? "");
+  return (
+    <select className="picker" aria-label="Model" value={current} onChange={(e) => send({ type: "session.setModel", sessionId: s.id, model: e.target.value })}>
+      {!options.some((o) => o.id === current) && <option value={current}>{current || "Default"}</option>}
+      {options.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+    </select>
   );
 }
