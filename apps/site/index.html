@@ -67,7 +67,25 @@
 
     <section class="features" id="features">
       <div class="wrap">
-        <article class="feature">
+        <article class="feature feature-lead">
+          <div class="feature-copy">
+            <p class="kicker">Never stuck waiting</p>
+            <h2>Hit your limit at 2 am? Perzian picks up when it resets.</h2>
+            <p>Sessions pause cleanly at a usage limit and resume on their own when it resets. No new prompt needed.</p>
+          </div>
+          <div class="feature-visual" aria-label="Example session paused at a usage limit, then resumed">
+            <div class="ui-card">
+              <div class="ui-row"><span class="dot"></span><b>Migrate billing</b><span class="ui-age">Paused</span></div>
+              <ul class="ui-proofs">
+                <li class="ok"><span>✓</span> Step 4 of 6 finished</li>
+                <li class="claimed"><span>·</span> Usage limit reached <em>resumes 02:00</em></li>
+                <li class="claimed"><span>·</span> Picks up at step 5 <em>no prompt</em></li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="feature flip">
           <div class="feature-copy">
             <p class="kicker">Verified, not claimed</p>
             <h2>Nothing ships on their word.</h2>
@@ -75,12 +93,31 @@
           </div>
           <div class="feature-visual" aria-label="Example outcome with verified and claimed checks">
             <div class="ui-card">
-              <div class="ui-row"><span class="dot s-done"></span><b>Dark mode tokens</b><span class="ui-age">Done</span></div>
+              <div class="ui-row"><span class="dot"></span><b>Dark mode tokens</b><span class="ui-age">Done</span></div>
               <ul class="ui-proofs">
                 <li class="ok"><span>✓</span> npm test · 142 passed <em>exit 0</em></li>
                 <li class="ok"><span>✓</span> vite build <em>exit 0</em></li>
                 <li class="bad"><span>✕</span> playwright test checkout · 2 failed <em>exit 1</em></li>
                 <li class="claimed"><span>✓</span> Light and dark snapshots <em>claimed</em></li>
+              </ul>
+            </div>
+          </div>
+        </article>
+
+        <article class="feature">
+          <div class="feature-copy">
+            <p class="kicker">Your rules, enforced</p>
+            <h2>Your checks run every time.</h2>
+            <p>When an agent says it's done, Perzian runs the checks your repo declares in <code>perzian.json</code> itself. It records ✓ or ✕ with the real exit code and sends failures back to the agent to fix.</p>
+          </div>
+          <div class="feature-visual" aria-label="Example declared checks with exit codes">
+            <div class="ui-card">
+              <div class="ui-row"><span class="dot"></span><b>Checkout retries</b><span class="ui-age">Checking</span></div>
+              <ul class="ui-proofs">
+                <li class="ok"><span>✓</span> lint <em>exit 0</em></li>
+                <li class="ok"><span>✓</span> typecheck <em>exit 0</em></li>
+                <li class="bad"><span>✕</span> npm test · 2 failed <em>exit 1</em></li>
+                <li class="claimed"><span>·</span> Sent back to the agent to fix <em>round 1</em></li>
               </ul>
             </div>
           </div>
