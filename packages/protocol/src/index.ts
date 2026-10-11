@@ -354,7 +354,10 @@ export type Command =
   | { type: "session.setup"; sessionId: string; action: "retry" | "skip" }
   | { type: "main.start"; model?: string; agent?: AgentKind; prompt?: string }
   | { type: "sessions.import"; sinceDays?: number; limit?: number }
-  | { type: "decision.answer"; decisionId: string; optionId: string | null };
+  | { type: "decision.answer"; decisionId: string; optionId: string | null }
+  // The Mac UI says whether it is focused, so phone pushes can stay quiet while you are looking at it.
+  // Not in the phone's allowlist: a phone can't claim the Mac is busy.
+  | { type: "ui.presence"; focused: boolean };
 
 // daemon -> UI envelope
 export type ServerMessage =

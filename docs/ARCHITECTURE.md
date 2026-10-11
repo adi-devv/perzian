@@ -155,6 +155,33 @@ The lead gets paused/resumed lines through the same batched updates as finished 
 All UI state is a fold over `PerzianEvent`s (`packages/protocol/src/fold.ts`, shared by daemon and UI). The
 daemon appends every event to the store and sends a snapshot on connect, then live events.
 
+## Phone access (opt-in, off by default)
+
+`apps/daemon/src/phone.ts` runs a SEPARATE listener (127.0.0.1:4319) only while Phone access is on. The main
+listener trusts loopback and "no Origin"; anything arriving through a proxy would inherit that, so the phone
+listener has no such tier: every request but the static shell and `/pair` needs a device token, Host and Origin
+must be on a one-name allowlist, no CORS, and the API is an allowlist (ping, `/api/push/*`, four commands).
+Pairing codes are in-memory, 2 min, single use, with a global lockout after repeated misses. Device tokens are
+stored as SHA-256 hashes (`phones.json`, 0600).
+
+Two ways in, same listener, same tokens:
+- **Tailscale:** `tailscale serve` proxies `https://<mac>.<tailnet>.ts.net:8443`; the allowlist is that MagicDNS name.
+- **No setup:** `tunnel.ts` runs the user's own `cloudflared tunnel --url http://127.0.0.1:4319` (never downloaded or
+  bundled; missing shows `brew install cloudflared`), parses the `https://*.trycloudflare.com` URL from its log and
+  adds that one name to the allowlist (it starts empty, so nothing is served before the tunnel exists). The URL is
+  public and changes every run, so every run needs a fresh QR; paired devices keep their tokens. The tunnel dies
+  with phone access or the daemon (`killTunnel` on exit). No uptime guarantee.
+
+**Web Push** (`push.ts`): the daemon sends it itself with the `web-push` package and VAPID keys generated once
+(`vapid.json`, 0600), straight to the browser vendor's push service. The PWA's service worker (`public/sw.js`)
+subscribes after a tap on "Turn on notifications" (iOS: installed PWA only; the UI says "Add to Home Screen first"
+otherwise) and posts the subscription to `/api/push/subscribe` with its device token. It is stored on that
+device's record, so revoking a device deletes it; 404/410 from the push service drops it. Endpoints must be https on a
+known push host (a stolen token can't aim the daemon elsewhere). A push goes out when a session becomes
+needs-you, failed or done; a burst within 5 s is one notification. The payload is a status word and the session
+title only (never code, diffs or agent text); tapping opens that session. Pushes are skipped while Phone access is
+off and while the Mac UI reports itself focused (`ui.presence`, 10 s heartbeat, 30 s expiry; a phone can't send it).
+
 ## UI layout
 
 - **Left:** sessions list, ordered by attention, color-coded status.

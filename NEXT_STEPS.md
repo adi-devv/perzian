@@ -16,13 +16,9 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 4. **Try the Mac app** (`npm run app`) and **publish v0.0.1** as a GitHub Release (`npm run dist`, upload the zip, link it).
 
 ## Features
-1. **Phone access, phase 2 (phase 1 is built, see FEATURES.md).** Try phase 1 on a real phone first (`Open on phone` in the sidebar).
-   - Web Push: the daemon sends it itself (VAPID, straight to Apple/Google push, no servers of ours) when a session needs you, finishes or fails.
-   - Same Wi-Fi without Tailscale is a view-only fallback (no HTTPS, so no push).
-   - **"No setup" mode:** bundle a Cloudflare quick tunnel so neither device installs anything; HTTPS, so push works; $0 to us;
-     the pairing token is the only gate and quick tunnels have no uptime guarantee. About 1-2 days.
-   - Later, if people want zero setup with guarantees: our own Cloudflare Durable Objects relay with end-to-end encryption,
-     about $5-30/month per 1k active users, possibly paid. Firebase rejected (data at Google, per-event cost).
+1. **Phone access, try phases 1 and 2 on a real phone** (`Open on phone` in the sidebar): Tailscale and the Cloudflare quick tunnel, then Web Push on an iPhone (Home Screen app) and Android.
+   Confirm a real push arrives and tapping opens the session. Not done: a push for the account usage card (there is no account-level event yet; a session pausing at a limit doesn't push).
+   Same Wi-Fi without Tailscale is a view-only fallback (no HTTPS, so no push), only if people ask.
 2. **Branches for teams.** Teams don't ship straight to main. PR is already the default ship action. Next: base picker on New session (lead can pass `base`),
    fetch and branch from `origin/<base>` (offline falls back to local with a note), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
 3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
@@ -64,3 +60,5 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 ## Later
 - Codex end-to-end test (needs an OpenAI account), notarized builds + auto-update ($99 Apple account),
   Linux/Windows builds, team/cloud layer.
+- Phone relay, if people want zero setup with guarantees: our own Cloudflare Durable Objects relay with end-to-end
+  encryption, about $5-30/month per 1k active users, possibly paid. Firebase rejected (data at Google, per-event cost).
