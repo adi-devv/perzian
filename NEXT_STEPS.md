@@ -15,7 +15,13 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    built from `list_sessions` and outcomes (roadmap: "Main agent summarizes crew state into decisions").
 3. **Calm visuals, follow-through.** The app now keeps color only for needs you (amber) and failed (red).
    Apply the same rule to the site's feature mockups (`apps/site`), and review the app with real sessions for leftover noise.
-4. **Phone access (after trying the Mac app).** QR code + one-time pairing token opens the UI on your phone,
+4. **Runs through usage limits.** Watch each agent's plan usage (5-hour and weekly windows). As a limit nears, finish the
+   current step cleanly, then pause instead of failing. When the limit resets, resume by itself: same sessions, same
+   worktrees, no new prompt needed. Show it plainly: "Paused · resumes 3:40 pm" on the session.
+   Needs: detect limit errors and reset times from the adapter (Claude reports rate-limit info; Codex TBD), a persisted
+   resume queue in the daemon (survives restarts), and the lead told what was paused and what resumed.
+   **Marketing:** "Hit your limit at 2 am? Perzian picks up when it resets." Lead with it on the site as a feature card.
+5. **Phone access (after trying the Mac app).** QR code + one-time pairing token opens the UI on your phone,
    on the same Wi-Fi or through Tailscale. Mainly for answering decision cards. Needs token auth on the daemon.
 
 ## Known gaps
