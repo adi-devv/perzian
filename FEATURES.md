@@ -14,7 +14,7 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ Import existing Claude Code sessions from `~/.claude` (read-only), then resume them.
 
 ## Sessions and worktrees
-- ✅ Each session can get its own git worktree, permission mode (ask, edits, plan, auto) and model; sessions resume after a daemon restart.
+- ✅ Each session gets its own git worktree by default, even a single task (`worktree: false` opts out), plus a permission mode (ask, edits, plan, auto) and model; sessions resume after a daemon restart.
 - ✅ Claude Code over ACP; Codex is experimental.
 - ✅ Ready worktrees: before the first message, copy gitignored `.env*`/`.npmrc` files and run the lockfile's install (npm ci, falling back to npm install with the committed lockfile kept); shows "Setting up…" with Retry / Start anyway.
 

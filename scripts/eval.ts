@@ -25,7 +25,7 @@ const VALID_MODELS = new Set(["", "claude-haiku-5-5", "claude-sonnet-5-5", "clau
 
 interface Expect {
   spawns?: [number, number]; // inclusive range of spawn_session calls across all turns
-  worktree?: boolean | "any"; // every child's worktree flag; default: true when >1 spawn expected
+  worktree?: boolean | "any"; // every child's worktree flag; default: true when a spawn is expected (every session gets one)
   askBefore?: "spawn"; // main must ask_decision before its first spawn (or instead of spawning)
   noAsk?: boolean; // no ask_decision from anyone: the task is clear
   maxReplyWords?: number; // per main turn, all agent text in the turn (default 80)
@@ -358,7 +358,7 @@ function score(c: Case, r: RunResult, repo: string, tapDir: string) {
     const [lo, hi] = x.spawns;
     add("spawn count", kids.length >= lo && kids.length <= hi, `${kids.length} (want ${lo === hi ? lo : `${lo}-${hi}`})`);
   }
-  const wantWorktree = x.worktree ?? (x.spawns && x.spawns[0] > 1 ? true : "any");
+  const wantWorktree = x.worktree ?? (x.spawns && x.spawns[0] >= 1 ? true : "any");
   if (wantWorktree !== "any" && kids.length) add("worktree", frac(kids.map((k) => !!k.worktree === wantWorktree)), kids.map((k) => (k.worktree ? "wt" : "in-place")).join(","));
 
   if (x.askBefore === "spawn") {

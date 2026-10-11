@@ -814,6 +814,16 @@ const SUPERSEDES: Partial<Record<Proof["kind"], Proof["kind"][]>> = {
 };
 
 /**
+ * Status of an outcome the daemon builds itself (the agent didn't report one): success only when at least
+ * one observed check ran and all of them passed; any observed failure is partial; nothing observed is unverified.
+ */
+export function derivedStatus(proof: Proof[]): "success" | "partial" | "unverified" {
+  const seen = proof.filter((p) => p.observed);
+  if (!seen.length) return "unverified";
+  return seen.every((p) => p.passed) ? "success" : "partial";
+}
+
+/**
  * Observed proofs first; then the agent's own claims that no observation settles. A reported proof is
  * dropped when an observed proof has a superseding kind, or when its label is (or classifies like) an
  * observed command.

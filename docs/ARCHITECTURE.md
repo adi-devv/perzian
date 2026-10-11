@@ -39,7 +39,7 @@ coding agent. Adapters: `@agentclientprotocol/claude-agent-acp` (Claude Code), `
 
 Per session the daemon:
 
-1. Optionally creates a worktree: branch `perzian/<slug>-<id6>` at `$PERZIAN_HOME/worktrees/<repo>/<slug>-<id6>`,
+1. Creates a worktree (every session in a repo, unless `worktree: false`): branch `perzian/<slug>-<id6>` at `$PERZIAN_HOME/worktrees/<repo>/<slug>-<id6>`,
    and records `baseSha` (HEAD at start). Then readies it (`setup.ts`): copies the checkout's gitignored `.env*` and
    local config files, runs the lockfile's install, and records progress in `SessionInfo.setup`. Prompts wait for
    it; a failure holds them until the developer picks Retry or Start anyway (`session.setup`).
@@ -80,7 +80,8 @@ Agents get `REPORT_INSTRUCTIONS` and the report MCP so they report **data**:
 | `report_outcome { intent, status, changed, proof, risks, followups }` | outcome card |
 
 **Derived outcomes:** if a worker's turn ends (`end_turn`) with file changes but no `report_outcome`, the daemon
-builds one (`derived: true`) from the prompt and the session's git changes.
+builds one (`derived: true`) from the prompt and the session's git changes. Its status is `success` only when at least
+one observed check ran and all passed, `partial` when one failed, and `unverified` ("Done · not verified") when none ran.
 
 **Checks:** at spawn the daemon detects the project's check commands (`checks.ts`: package.json scripts
 test/typecheck/lint/build with the lockfile's package manager, pytest/mypy/ruff, Cargo, go.mod, a Makefile

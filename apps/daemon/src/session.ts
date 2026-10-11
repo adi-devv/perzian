@@ -19,7 +19,7 @@ import {
 import type { EventStore } from "./store.ts";
 import * as git from "./git.ts";
 import { symbolChanges } from "./symbols.ts";
-import { ProofTracker, mergeProofs } from "./proof.ts";
+import { ProofTracker, derivedStatus, mergeProofs } from "./proof.ts";
 import { existsSync } from "node:fs";
 import { adapterEntry, agentEnv } from "./agents.ts";
 import type { Credentials } from "./credentials.ts";
@@ -607,7 +607,8 @@ export class AgentSession {
         outcome: {
           sessionId: this.info.id,
           intent: previous?.intent ?? prompt.split("\n")[0].slice(0, 140),
-          status: failedCheck ? "partial" : "success",
+          // No observed check, no success: the declared checks (if any) upgrade it when they pass.
+          status: derivedStatus(observed),
           changed: files.map((f) => ({ path: f.path, kind: f.kind })),
           proof: observed,
           risks: previous?.risks ?? [],
@@ -695,7 +696,8 @@ export class AgentSession {
     const rest = current.proof.filter((p) => !names.has(p.label) && !(p.command && runs.has(p.command.trim())));
     const proof = [...proofs, ...rest];
     let status = current.status;
-    if (status === "success" && proofs.some((p) => !p.passed)) {
+    if (current.derived) status = derivedStatus(proof);
+    else if (status === "success" && proofs.some((p) => !p.passed)) {
       status = "partial";
       this.downgraded = current.createdAt;
     } else if (status === "partial" && this.downgraded === current.createdAt && proof.every((p) => p.passed || !p.observed)) {
@@ -1086,9 +1088,14 @@ export class AgentSession {
   }
 }
 
-export async function prepareWorkspace(project: string, home: string, title: string, id: string, worktree: boolean) {
+/**
+ * Where a session works. Every task in a git repo gets its own worktree unless the caller says
+ * `worktree: false`, so its work lands as a branch that can be merged or opened as a PR, never as
+ * uncommitted edits on the developer's branch.
+ */
+export async function prepareWorkspace(project: string, home: string, title: string, id: string, worktree?: boolean) {
   if (!(await git.isRepo(project))) return { cwd: project, branch: undefined, baseSha: undefined, worktree: false };
-  if (worktree) {
+  if (worktree !== false) {
     const wt = await git.createWorktree(project, home, title, id);
     return { cwd: wt.path, branch: wt.branch, baseSha: await git.head(wt.path), worktree: true, baseBranch: wt.baseBranch };
   }

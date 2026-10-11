@@ -233,6 +233,21 @@ describe("declared checks loop (fake agent)", () => {
     }
   });
 
+  test("no report and no check ran: the derived outcome is unverified, not success", async () => {
+    const cwd = repo([]);
+    const { s, store } = session(cwd, "fix");
+    try {
+      await s.prompt("Make the tests pass");
+      assert.equal(store.state().sessions[s.info.id].status, "done");
+      const outcome = store.state().outcomes[s.info.id];
+      assert.equal(outcome.derived, true);
+      assert.equal(outcome.status, "unverified");
+      assert.deepEqual(outcome.proof, []);
+    } finally {
+      s.dispose();
+    }
+  });
+
   test("the agent runs exactly the declared command without a card; anything else asks", async () => {
     const cwd = repo([{ name: "kodo tests", run: "kodo test --all" }]);
     process.env.FAKE_AGENT_COMMANDS = JSON.stringify(["kodo test --all", "kodo test --all --watch"]);

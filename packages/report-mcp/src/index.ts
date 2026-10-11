@@ -111,7 +111,7 @@ server.tool(
       .optional()
       .describe("Omit for the default. Exact ids only: claude-haiku-5-5 (mechanical), claude-sonnet-5-5, claude-opus-5-5 (hard design/algorithms/debugging)"),
     mode: z.enum(["ask", "edits", "plan", "auto"]).optional().describe("Omit for the developer's default. plan = analysis only, no edits; auto = only if the developer asked for hands-off"),
-    worktree: z.boolean().optional().describe("true whenever two or more sessions work on the same repo at once (isolated git worktree)"),
+    worktree: z.boolean().optional().describe("Omit: every session gets its own git worktree and branch by default. false only when the developer asks to work directly on their branch"),
     extraDirs: z.array(z.string()).optional().describe("Absolute paths of extra folders (besides project) the session may edit without asking, e.g. a sibling package"),
   },
   async (args) => text(await send({ tool: "spawn_session", sessionId, args })),

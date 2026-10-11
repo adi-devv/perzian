@@ -71,6 +71,7 @@ export function tileLine(s: SessionInfo, state: State, pending: Decision[]): str
     const failed = proof.some((p) => !p.passed);
     return failed ? "Checks failed" : "Checks pass · ready to ship";
   }
+  if (o?.status === "unverified") return "Done · not verified";
   return "Ready to review";
 }
 

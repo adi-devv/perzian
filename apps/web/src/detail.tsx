@@ -277,6 +277,7 @@ function Proof({ s, outcome, send, closed }: { s: SessionInfo; outcome?: Outcome
         <h3 className="h3">
           Outcome
           {outcome?.derived && <span className="tag" title="The agent didn't report an outcome; built from git">auto</span>}
+          {outcome?.status === "unverified" && <span className="tag" title="No checks ran, so nothing confirms it works">not verified</span>}
         </h3>
         {outcome ? (
           <>

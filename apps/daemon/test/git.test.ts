@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as git from "../src/git.ts";
+import { prepareWorkspace } from "../src/session.ts";
 
 const run = (cwd: string, ...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
@@ -153,6 +154,33 @@ describe("git helpers", () => {
     assert.equal(await git.currentBranch(repo), undefined);
     await assert.rejects(git.createWorktree(repo, join(root, "home"), "x", "222222"), /detached HEAD/);
     run(repo, "checkout", "-q", "-");
+  });
+});
+
+describe("prepareWorkspace", () => {
+  let root: string;
+  let repo: string;
+  before(() => ({ root, repo } = makeRepo()));
+  after(() => rmSync(root, { recursive: true, force: true }));
+
+  test("every task gets its own worktree by default, even a single one", async () => {
+    const ws = await prepareWorkspace(repo, join(root, "home"), "One task", "aaaaaa111");
+    assert.equal(ws.worktree, true);
+    assert.notEqual(ws.cwd, repo);
+    assert.equal(ws.branch, "perzian/one-task-aaaaaa");
+    assert.equal("baseBranch" in ws ? ws.baseBranch : undefined, await git.currentBranch(repo));
+  });
+
+  test("worktree: false works in the checkout, on the developer's branch", async () => {
+    const ws = await prepareWorkspace(repo, join(root, "home"), "In place", "bbbbbb222", false);
+    assert.deepEqual([ws.cwd, ws.worktree, ws.branch], [repo, false, await git.currentBranch(repo)]);
+  });
+
+  test("a folder that isn't a repo is used as is", async () => {
+    const plain = join(root, "plain");
+    mkdirSync(plain);
+    const ws = await prepareWorkspace(plain, join(root, "home"), "x", "cccccc333");
+    assert.deepEqual([ws.cwd, ws.worktree, ws.branch], [plain, false, undefined]);
   });
 });
 
