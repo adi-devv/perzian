@@ -134,14 +134,7 @@
           <a class="btn btn-primary" href="https://github.com/adi-devv/perzian#quick-start">Get Perzian for macOS</a>
           <a class="btn star" href="https://github.com/adi-devv/perzian"><svg class="star-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l1.9 4 4.4.5-3.3 3 .9 4.3L8 11.1l-3.9 2.2.9-4.3-3.3-3 4.4-.5z"/></svg>Star on GitHub<span class="star-n" data-stars hidden></span></a>
         </div>
-        <form class="notify" id="notify" method="post" target="_blank" hidden>
-          <label for="notify-email">Get an email when the signed Mac app ships.</label>
-          <div class="notify-row">
-            <input id="notify-email" type="email" name="email" placeholder="you@domain.com" autocomplete="email" required />
-            <button class="btn btn-sm" type="submit">Notify me</button>
-          </div>
-          <p class="notify-done" hidden>Thanks. Check your inbox to confirm.</p>
-        </form>
+        <p class="notify">Want to know when the signed Mac app ships? On <a href="https://github.com/adi-devv/perzian">GitHub</a>, click <b>Watch → Custom → Releases</b>.</p>
         <p class="fine">Free and open source (MIT). macOS on Apple Silicon. Uses your own Claude Code login.</p>
       </div>
     </section>
@@ -160,9 +153,6 @@
   </footer>
 
   <script>
-    // Buttondown username for the "notify me" list. Empty keeps the form hidden.
-    const BUTTONDOWN = "";
-
     (async () => {
       const fmt = (n) => (n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, "") + "k" : String(n));
       let n;
@@ -183,19 +173,6 @@
         el.hidden = false;
       });
     })();
-
-    const form = document.getElementById("notify");
-    if (BUTTONDOWN) {
-      form.action = `https://buttondown.com/api/emails/embed-subscribe/${BUTTONDOWN}`;
-      form.hidden = false;
-      form.addEventListener("submit", () => {
-        setTimeout(() => {
-          form.querySelector(".notify-row").hidden = true;
-          form.querySelector("label").hidden = true;
-          form.querySelector(".notify-done").hidden = false;
-        }, 0);
-      });
-    }
 
     document.querySelectorAll("[data-copy]").forEach((btn) => {
       btn.addEventListener("click", async () => {

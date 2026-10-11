@@ -179,14 +179,9 @@ p { margin: 0; }
 .final h2 { margin: 0 auto; font-size: clamp(30px, 4vw, 48px); line-height: 1.08; letter-spacing: -0.04em; font-weight: 600; max-width: 18ch; text-wrap: balance; }
 .final .fine { margin-top: 22px; }
 
-.notify { margin: 40px auto 0; max-width: 420px; }
-.notify label { display: block; font-size: 14px; color: var(--fg-2); margin-bottom: 12px; }
-.notify-row { display: flex; gap: 8px; }
-.notify input { flex: 1; min-width: 0; height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg-2); color: var(--fg); font: 14px var(--font); }
-.notify input::placeholder { color: var(--fg-3); }
-.notify input:focus { outline: none; border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
-.notify .btn { cursor: pointer; font-family: var(--font); }
-.notify-done { margin: 0; font-size: 14px; color: var(--fg-2); }
+.notify { margin: 36px auto 0; max-width: 46ch; font-size: 14px; color: var(--fg-2); text-wrap: balance; }
+.notify b { font-weight: 500; color: var(--fg); }
+.notify a { text-underline-offset: 3px; }
 
 /* star */
 .star-ic { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linejoin: round; margin-left: -2px; }
