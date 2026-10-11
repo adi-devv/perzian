@@ -75,7 +75,12 @@ const MAX_CHECKS = 20;
 const CHECK_FIELDS = new Set(["name", "run", "timeoutSec"]);
 
 /** Parses and validates perzian.json. Throws an Error whose message says what to fix. */
-export function parsePerzianConfig(text: string): DeclaredCheck[] {
+export const parsePerzianConfig = (text: string): DeclaredCheck[] => parseList(text, "checks");
+
+/** The optional `"setup": [{name, run, timeoutSec?}]` steps, run after the built-in worktree setup. Same shape and rules as checks. */
+export const parsePerzianSetup = (text: string): DeclaredCheck[] => parseList(text, "setup");
+
+function parseList(text: string, key: "checks" | "setup"): DeclaredCheck[] {
   let raw: unknown;
   try {
     raw = JSON.parse(text);
@@ -83,14 +88,14 @@ export function parsePerzianConfig(text: string): DeclaredCheck[] {
     throw new Error(`${CONFIG_FILE} is not valid JSON (${(e as Error).message})`);
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${CONFIG_FILE} must be an object, like { "checks": [{ "name": "unit", "run": "npm test" }] }`);
-  const list = (raw as { checks?: unknown }).checks;
+  const list = (raw as Record<string, unknown>)[key];
   if (list === undefined) return [];
-  if (!Array.isArray(list)) throw new Error(`${CONFIG_FILE}: "checks" must be a list`);
-  if (list.length > MAX_CHECKS) throw new Error(`${CONFIG_FILE}: at most ${MAX_CHECKS} checks`);
+  if (!Array.isArray(list)) throw new Error(`${CONFIG_FILE}: "${key}" must be a list`);
+  if (list.length > MAX_CHECKS) throw new Error(`${CONFIG_FILE}: at most ${MAX_CHECKS} ${key}`);
   const out: DeclaredCheck[] = [];
   const names = new Set<string>();
   list.forEach((c: unknown, i) => {
-    const at = `${CONFIG_FILE}: checks[${i}]`;
+    const at = `${CONFIG_FILE}: ${key}[${i}]`;
     if (!c || typeof c !== "object" || Array.isArray(c)) throw new Error(`${at} must be an object with "name" and "run"`);
     const o = c as Record<string, unknown>;
     const unknown = Object.keys(o).find((k) => !CHECK_FIELDS.has(k));
@@ -129,6 +134,20 @@ export function loadDeclaredChecks(...dirs: string[]): { checks: DeclaredCheck[]
     }
   }
   return { checks: [] };
+}
+
+/** Custom setup steps from the first of `dirs` that has a perzian.json. */
+export function loadDeclaredSetup(...dirs: string[]): { steps: DeclaredCheck[]; error?: string } {
+  for (const dir of dirs) {
+    const text = read(dir, CONFIG_FILE);
+    if (text === undefined) continue;
+    try {
+      return { steps: parsePerzianSetup(text) };
+    } catch (e) {
+      return { steps: [], error: (e as Error).message };
+    }
+  }
+  return { steps: [] };
 }
 
 /** Detected commands plus the declared ones not already among them: what the brief and the lead see. */

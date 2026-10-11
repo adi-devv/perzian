@@ -13,8 +13,9 @@ import { assertPromptable, interruptedShip, isShipHow, ship } from "./ship.ts";
 import { doctor, doctorHeaders, installCommand, resetDoctorCache } from "./doctor.ts";
 import { Credentials, PROVIDERS } from "./credentials.ts";
 import { exec } from "node:child_process";
-import { allChecks, detectChecks, loadDeclaredChecks } from "./checks.ts";
-import { LeadNotifier, type ChildReport } from "./notify.ts";
+import { allChecks, detectChecks, loadDeclaredChecks, loadDeclaredSetup } from "./checks.ts";
+import { KeepAwake, isActive } from "./keepawake.ts";
+import { LeadNotifier, filePersistence, type ChildReport } from "./notify.ts";
 import { spawnBlocker } from "./observe.ts";
 import { ResumeQueue } from "./resume.ts";
 import { loadDesktopToken, trustedOrigin } from "./origin.ts";
@@ -120,7 +121,10 @@ const notifier = new LeadNotifier({
   notice: (leadId, text) => sessions.get(leadId)?.notice(text),
   // A worker that started sessions of its own hears about them too, worded for a worker.
   audience: (leadId) => (sessions.get(leadId)?.info.role === "main" ? "lead" : "worker"),
+  ...filePersistence(join(home, "notify-pending.json")),
 });
+// Updates the lead hadn't heard yet when the daemon last stopped: deliver now (deferred: we're still booting).
+setImmediate(() => notifier.restore());
 store.subscribe((e) => {
   if (e.type === "session.paused" || e.type === "session.resumed") {
     const info = store.state().sessions[e.sessionId];
@@ -138,6 +142,13 @@ store.subscribe((e) => {
   if (info.parentId && (e.status === "done" || e.status === "failed")) setImmediate(() => notifier.childSettled(info.parentId!, info.id));
   // Any session may be a parent (workers can start sessions); nothing pending makes this a no-op.
   if (e.status !== "working" && e.status !== "needs_you") setImmediate(() => notifier.leadIdle(info.id));
+});
+
+// Keep the Mac awake while any session is working or needs you (macOS only; see keepawake.ts).
+const keepAwake = new KeepAwake();
+const syncAwake = () => keepAwake.set(Object.values(store.state().sessions).some((s) => !s.archived && isActive(s.status)));
+store.subscribe((e) => {
+  if (e.type === "session.status" || e.type === "session.created" || (e.type === "session.updated" && "archived" in e.patch)) syncAwake();
 });
 
 // Sessions paused at a usage limit resume by themselves when it resets: same session, same worktree, a
@@ -169,9 +180,10 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   const ws = await prepareWorkspace(project, home, title, id, !!args.worktree);
   // perzian.json from the worktree (committed), else the checkout (not committed yet). Read once, here.
   const declared = loadDeclaredChecks(ws.cwd, project);
+  const setupCfg = loadDeclaredSetup(ws.cwd, project);
   const checks = allChecks(detectChecks(ws.cwd), declared.checks);
   const s = AgentSession.create(
-    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode ?? store.state().settings.defaultMode, ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, checksError: declared.error, ...extra },
+    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode ?? store.state().settings.defaultMode, ...(extraDirs.length ? { extraDirs } : {}), checks, declaredChecks: declared.checks, declaredSetup: setupCfg.steps, checksError: declared.error ?? setupCfg.error, ...extra },
     deps,
   );
   if (args.worktree && !ws.worktree) s.notice("This folder isn't a git repo, so the session works in it directly (no worktree)");
@@ -492,6 +504,7 @@ wss.on("error", listenFailed); // ws re-emits the server's errors; unhandled, th
 http.listen(port, "127.0.0.1", () => console.log(`perzian daemon on ${daemonUrl} (home ${home})`));
 
 const shutdown = () => {
+  keepAwake.stop();
   resumeQueue.dispose();
   for (const s of sessions.values()) s.dispose();
   process.exit(0);

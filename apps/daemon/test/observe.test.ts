@@ -97,6 +97,17 @@ describe("ToolObserver", () => {
     assert.equal(o.onTool({ toolCallId: "k2", name: "KillShell", rawInput: { shell_id: "bash_7" } })?.background?.[0].ended, true);
   });
 
+  test("kill <pid>, pkill and kill-by-port end tracked background processes", () => {
+    const o = make();
+    o.onTool({ toolCallId: "b1", kind: "execute", rawInput: { command: "npm run dev &" }, rawOutput: "[1] 4242" });
+    o.onTool({ toolCallId: "b2", kind: "execute", rawInput: { command: "node server.js --port 5000 &" } });
+    o.onTool({ toolCallId: "b3", kind: "execute", rawInput: { command: "python -m http.server 8000 &" } });
+    assert.equal(o.onTool({ toolCallId: "k0", kind: "execute", rawInput: { command: "kill 999" } }), undefined);
+    assert.deepEqual(o.onTool({ toolCallId: "k1", kind: "execute", rawInput: { command: "kill -9 4242" } })?.background?.map((b) => !!b.ended), [true, false, false]);
+    assert.deepEqual(o.onTool({ toolCallId: "k2", kind: "execute", rawInput: { command: "kill $(lsof -ti:5000)" } })?.background?.map((b) => !!b.ended), [true, true, false]);
+    assert.deepEqual(o.onTool({ toolCallId: "k3", kind: "execute", rawInput: { command: 'pkill -f "http.server"' } })?.background?.map((b) => !!b.ended), [true, true, true]);
+  });
+
   test("a port from the output when the command doesn't say", () => {
     const o = make();
     o.onTool({ toolCallId: "b1", kind: "execute", rawInput: { command: "npm start &" } });

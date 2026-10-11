@@ -1,6 +1,9 @@
 import { beforeEach, describe, mock, test } from "node:test";
 import assert from "node:assert/strict";
-import { formatChildFinished, LeadNotifier, type ChildReport } from "../src/notify.ts";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { filePersistence, formatChildFinished, LeadNotifier, type ChildReport, type PendingUpdates } from "../src/notify.ts";
 
 const report = (id: string, over: Partial<ChildReport> = {}): ChildReport => ({
   id,
@@ -185,5 +188,57 @@ describe("formatChildFinished: audience", () => {
     assert.match(worker, /Carry on with your own task/);
     assert.doesNotMatch(worker, /Reply to the developer/);
     assert.match(formatChildFinished([child]), /Reply to the developer/);
+  });
+});
+
+describe("LeadNotifier: persistence", () => {
+  const mk = (saved: { current: PendingUpdates }, delivered: string[], busy = () => false) =>
+    new LeadNotifier({
+      busy,
+      report: (id) => report(id),
+      deliver: (_l, text) => delivered.push(text),
+      notice: () => {},
+      load: () => structuredClone(saved.current),
+      save: (d) => (saved.current = structuredClone(d)),
+      debounceMs: 0,
+    });
+
+  test("pending updates are saved, survive a 'restart', and are cleared once delivered", () => {
+    mock.timers.enable({ apis: ["setTimeout"] });
+    const saved = { current: {} as PendingUpdates };
+    const first = mk(saved, [], () => true); // lead busy: nothing delivered
+    first.childPrompted("a", true);
+    first.childSettled("lead", "a");
+    assert.deepEqual(saved.current, { lead: { a: "finished" } });
+    first.dispose();
+    mock.timers.reset();
+
+    const delivered: string[] = [];
+    mk(saved, delivered).restore();
+    assert.equal(delivered.length, 1);
+    assert.match(delivered[0], /id=a /);
+    assert.deepEqual(saved.current, {});
+  });
+
+  test("restore waits for a busy lead, then delivers on idle", () => {
+    const saved = { current: { lead: { b: "finished" } } as PendingUpdates };
+    const delivered: string[] = [];
+    let busy = true;
+    const n = mk(saved, delivered, () => busy);
+    n.restore();
+    assert.equal(delivered.length, 0);
+    busy = false;
+    n.leadIdle("lead");
+    assert.equal(delivered.length, 1);
+  });
+
+  test("filePersistence tolerates a missing or corrupt file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "notify-"));
+    const p = filePersistence(join(dir, "sub", "p.json"));
+    assert.deepEqual(p.load!(), {});
+    p.save!({ lead: { a: "paused" } });
+    assert.deepEqual(p.load!(), { lead: { a: "paused" } });
+    writeFileSync(join(dir, "bad.json"), "{nope");
+    assert.deepEqual(filePersistence(join(dir, "bad.json")).load!(), {});
   });
 });

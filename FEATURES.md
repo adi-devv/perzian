@@ -28,6 +28,8 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ Change map by symbol (tree-sitter plus `git diff`), a read-only diff/file viewer, activity and a grouped transcript in the session detail view.
 - ⚠️ Map: a squarified treemap of the repo's real files (git, sized by bytes), shaded by how much this project's sessions changed each region; each active session is a dot on the file it last edited (click opens it), hover shows path and who touched it, click a folder to zoom (breadcrumb back). Small files fold into "+N" cells and drawing is capped, so big repos stay smooth.
 - ✅ Declared checks: `perzian.json` lists your own checks; the daemon runs them when an agent says it's done, sends failures back (2 rounds), and allows them without a card. A broken `perzian.json` is named in the Checks tab.
+- ✅ Custom setup steps: `perzian.json` `"setup": [{name, run, timeoutSec?}]` run after the built-in worktree setup; a failure offers Retry / Start anyway.
+- ✅ The Mac stays awake (`caffeinate`) while any session is working or needs you. The lead's pending "session finished" updates survive a daemon restart. `kill <pid>` / `pkill` / kill-by-port marks a background process ended.
 - ✅ "Run checks" in the session detail reruns the declared and detected checks (running, then ✓/✕).
 
 ## Ship

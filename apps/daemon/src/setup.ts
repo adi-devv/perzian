@@ -195,6 +195,8 @@ export interface SetupOptions {
   /** Called with each intermediate state (copying, then each install command). */
   onUpdate?: (s: SetupState) => void;
   now?: () => number;
+  /** Custom steps from perzian.json `setup`, run after the built-in ones. */
+  steps?: { name: string; run: string; timeoutSec?: number }[];
 }
 
 /** Copies local files from `source` into the worktree `dest`, then runs the installs. Never throws. */
@@ -213,7 +215,7 @@ export async function readyWorktree(source: string, dest: string, opts: SetupOpt
     st.notes = [`Couldn't copy local files: ${(e as Error).message ?? e}`];
   }
   const { steps, notes } = detectInstall(dest, source, env);
-  set({ install: steps.map((s) => s.label), notes: [...(st.notes ?? []), ...notes] });
+  set({ install: [...steps.map((s) => s.label), ...(opts.steps ?? []).map((c) => c.name)], notes: [...(st.notes ?? []), ...notes] });
   for (const step of steps) {
     set({ current: step.label });
     let r = await runCommand(step.argv, dest, env, timeoutMs);
@@ -228,6 +230,14 @@ export async function readyWorktree(source: string, dest: string, opts: SetupOpt
     }
     if (r.code !== 0) {
       set({ state: "failed", current: undefined, error: { command: label, tail: tail(r.output) || `exited with code ${r.code}` } });
+      return clean(st);
+    }
+  }
+  for (const c of opts.steps ?? []) {
+    set({ current: c.name });
+    const r = await runCommand(["/bin/sh", "-c", c.run], dest, env, c.timeoutSec ? c.timeoutSec * 1000 : timeoutMs);
+    if (r.code !== 0) {
+      set({ state: "failed", current: undefined, error: { command: c.name, tail: tail(r.output) || `exited with code ${r.code}` } });
       return clean(st);
     }
   }

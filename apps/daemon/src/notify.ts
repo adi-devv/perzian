@@ -5,6 +5,8 @@
 // Loop guards: only turns the lead itself started (spawn_session / send_to_session) are reported, never
 // work the developer drove directly in a child; and after MAX_AUTO_TURNS lead turns triggered by these
 // updates with no developer message in between, delivery pauses until the developer speaks.
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Outcome, PauseInfo, Proof, SessionInfo } from "@perzian/protocol";
 
 export const NOTIFY_PREFIX = "[perzian]";
@@ -99,8 +101,34 @@ export interface NotifierDeps {
   notice(leadId: string, text: string): void;
   /** Who the recipient is; default "lead". */
   audience?(leadId: string): "lead" | "worker";
+  /** Persistence of pending updates across restarts (see `filePersistence`); both optional. */
+  load?(): PendingUpdates;
+  save?(data: PendingUpdates): void;
   debounceMs?: number;
   maxAutoTurns?: number;
+}
+
+/** Pending updates as plain data: leadId -> child id -> event. */
+export type PendingUpdates = Record<string, Record<string, ChildEvent>>;
+
+/** Keeps pending updates in a small JSON file so a daemon restart doesn't lose them. Never throws. */
+export function filePersistence(path: string): Pick<NotifierDeps, "load" | "save"> {
+  return {
+    load: () => {
+      try {
+        const raw = JSON.parse(readFileSync(path, "utf8")) as PendingUpdates;
+        return raw && typeof raw === "object" ? raw : {};
+      } catch {
+        return {};
+      }
+    },
+    save: (data) => {
+      try {
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, JSON.stringify(data));
+      } catch {}
+    },
+  };
 }
 
 export class LeadNotifier {
@@ -147,6 +175,7 @@ export class LeadNotifier {
     if (!set) this.pending.set(leadId, (set = new Map()));
     // Latest wins, except that a finish isn't replaced by a pause/resume note.
     if (set.get(childId) !== "finished" || event === "finished") set.set(childId, event);
+    this.persist();
     this.ready.delete(leadId);
     clearTimeout(this.timers.get(leadId));
     this.timers.set(
@@ -157,6 +186,24 @@ export class LeadNotifier {
         this.flush(leadId);
       }, this.deps.debounceMs ?? 1500),
     );
+  }
+
+  private persist(): void {
+    if (!this.deps.save) return;
+    const data: PendingUpdates = {};
+    for (const [lead, ids] of this.pending) if (ids.size) data[lead] = Object.fromEntries(ids);
+    this.deps.save(data);
+  }
+
+  /** After a restart: take back the updates saved before it and deliver them as soon as each lead is idle. */
+  restore(): void {
+    for (const [leadId, ids] of Object.entries(this.deps.load?.() ?? {})) {
+      let set = this.pending.get(leadId);
+      if (!set) this.pending.set(leadId, (set = new Map()));
+      for (const [id, event] of Object.entries(ids)) if (!set.has(id)) set.set(id, event);
+      this.ready.add(leadId);
+      this.flush(leadId);
+    }
   }
 
   /** The lead's turn ended; deliver anything that was held. */
@@ -193,6 +240,7 @@ export class LeadNotifier {
     }
     this.pending.delete(leadId);
     this.ready.delete(leadId);
+    this.persist();
     if (!reports.length) return;
     this.autoTurns.set(leadId, n + 1);
     this.deps.deliver(leadId, formatChildFinished(reports, Date.now(), undefined, this.deps.audience?.(leadId)));

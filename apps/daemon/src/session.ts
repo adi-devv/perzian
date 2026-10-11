@@ -157,7 +157,7 @@ export class AgentSession {
   }
 
   static create(
-    opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; baseBranch?: string; id?: string; checks?: string[]; declaredChecks?: DeclaredCheck[]; checksError?: string; extraDirs?: string[] },
+    opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; baseBranch?: string; id?: string; checks?: string[]; declaredChecks?: DeclaredCheck[]; declaredSetup?: DeclaredCheck[]; checksError?: string; extraDirs?: string[] },
     deps: SessionDeps,
   ): AgentSession {
     const now = Date.now();
@@ -177,6 +177,7 @@ export class AgentSession {
       mode: opts.mode ?? "ask",
       ...(opts.checks?.length ? { checks: opts.checks } : {}),
       ...(opts.declaredChecks?.length ? { declaredChecks: opts.declaredChecks } : {}),
+      ...(opts.declaredSetup?.length ? { declaredSetup: opts.declaredSetup } : {}),
       ...(opts.checksError ? { checksError: opts.checksError } : {}),
       ...(opts.extraDirs?.length ? { extraDirs: opts.extraDirs } : {}),
       status: "idle",
@@ -509,7 +510,7 @@ export class AgentSession {
     this.update({ setup: { state: "running", copied: [], install: [], at: Date.now() } });
     if (this.gate.waiting) this.setStatus("working");
     const run = this.deps.setup ?? readyWorktree;
-    return run(this.info.project, this.info.cwd, { onUpdate: (setup) => this.info.setup?.state === "running" && this.update({ setup }) })
+    return run(this.info.project, this.info.cwd, { steps: this.info.declaredSetup, onUpdate: (setup) => this.info.setup?.state === "running" && this.update({ setup }) })
       .catch((e): NonNullable<SessionInfo["setup"]> => ({ state: "failed", copied: [], install: [], error: { command: "setup", tail: String((e as Error).message ?? e) }, at: Date.now() }))
       .then((setup) => {
         this.settingUp = false;
