@@ -1,9 +1,9 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { isUnseen, type Command, type Decision, type SessionInfo, type SessionStatus, type State } from "@perzian/protocol";
+import { isUnseen, needsYou, shownStatus, type Command, type Decision, type SessionInfo, type SessionStatus, type State } from "@perzian/protocol";
 import { explainFailure, isFailureNotice } from "./onboarding.tsx";
 import { PhoneButton } from "./phone.tsx";
 import { useFlip } from "./motion.tsx";
-import { Chips, OutsideTag, StatusGlyph, cost, denyOption, statusText, useFocusOnMount } from "./bits.tsx";
+import { Chips, OutsideTag, StatusGlyph, cost, denyOption, retryTarget, statusText, useFocusOnMount } from "./bits.tsx";
 import { isDemo, isDesktop } from "./daemon.ts";
 
 type Send = (c: Command) => void;
@@ -13,7 +13,7 @@ type Send = (c: Command) => void;
 
 // Needs you first, then failed, then what's running, then what's finished.
 const RANK: Record<SessionStatus, number> = { needs_you: 0, failed: 1, working: 2, paused: 2, idle: 3, done: 4 };
-const cmp = (a: SessionInfo, b: SessionInfo) => RANK[a.status] - RANK[b.status] || b.updatedAt - a.updatedAt;
+const cmp = (a: SessionInfo, b: SessionInfo) => RANK[shownStatus(a)] - RANK[shownStatus(b)] || b.updatedAt - a.updatedAt;
 
 /** All sessions in display order: projects with the most urgent session first, then each project's tiles by urgency. */
 export function crewOrder(workers: SessionInfo[]): SessionInfo[] {
@@ -30,6 +30,7 @@ const base = (p: string) => p.split("/").filter(Boolean).slice(-1)[0] ?? p;
 export function tileLine(s: SessionInfo, state: State, pending: Decision[]): string {
   const items = state.transcripts[s.id] ?? [];
   if (s.status === "needs_you") return pending[0] ? pending[0].question : "Needs you";
+  if (s.interrupted) return INTERRUPTED_LINE[s.interrupted.during];
   if (s.status === "failed") {
     if (s.setup?.state === "failed") return "Setup failed";
     const bad = s.checkRun?.results.find((r) => r.state === "failed");
@@ -69,10 +70,30 @@ export function tileLine(s: SessionInfo, state: State, pending: Decision[]): str
   if (run?.state === "passed" || o?.proof.length) {
     const proof = o?.proof ?? [];
     const failed = proof.some((p) => !p.passed);
-    return failed ? "Checks failed" : "Checks pass · ready to ship";
+    return failed ? "Checks failed" : "Ready to ship";
   }
   if (o?.status === "unverified") return "Done · not verified";
   return "Ready to review";
+}
+
+const INTERRUPTED_LINE: Record<NonNullable<SessionInfo["interrupted"]>["during"], string> = {
+  turn: "Daemon restarted mid-turn",
+  decision: "Daemon restarted before you answered",
+  ship: "Daemon restarted while shipping · open to retry",
+  setup: "Daemon restarted during setup",
+};
+
+/** Retry on the tile after a restart cut a turn or setup short: re-send the last message, or rerun the setup. */
+function TileRetry({ s, state, send }: { s: SessionInfo; state: State; send: Send }) {
+  const during = s.interrupted?.during;
+  const retry = during === "turn" || during === "decision" ? retryTarget(state.transcripts[s.id] ?? [], s.status) : null;
+  const run = during === "setup" ? () => send({ type: "session.setup", sessionId: s.id, action: "retry" }) : retry ? () => send({ type: "session.prompt", sessionId: s.id, prompt: retry.prompt }) : null;
+  if (!run) return null;
+  return (
+    <div className="t-ans row" onClick={(e) => e.stopPropagation()}>
+      <button className="btn small primary" onClick={run}>{during === "decision" ? "Retry · ask again" : "Retry"}</button>
+    </div>
+  );
 }
 
 /** Answer on the tile. Permission requests show the actual command or path first; a destructive one makes Deny the default. */
@@ -106,14 +127,14 @@ function TileAnswer({ d, send }: { d: Decision; send: Send }) {
 /** A sub-session inside its parent's card: one line, no card of its own; the rail and elbow come from the parent. */
 function Kid({ s, state, selected, onOpen }: { s: SessionInfo; state: State; selected: boolean; onOpen: (id: string) => void }) {
   const pending = Object.values(state.decisions).filter((d) => d.sessionId === s.id).sort((a, b) => a.createdAt - b.createdAt);
-  const word = s.status === "needs_you" ? "Needs you" : s.status === "failed" ? "Failed" : s.status === "paused" ? "Paused" : s.status === "working" ? tileLine(s, state, pending) : "";
+  const word = s.interrupted ? "Interrupted" : s.status === "needs_you" ? "Needs you" : s.status === "failed" ? "Failed" : s.status === "paused" ? "Paused" : s.status === "working" ? tileLine(s, state, pending) : "";
   const open = (e: React.SyntheticEvent) => {
     e.stopPropagation();
     onOpen(s.id);
   };
   return (
     <div
-      className={`kid s-${s.status} ${selected ? "sel" : ""}`}
+      className={`kid s-${shownStatus(s)} ${selected ? "sel" : ""}`}
       role="button"
       tabIndex={0}
       data-tile={s.id}
@@ -141,13 +162,14 @@ function Tile({ s, state, send, selected, onOpen, kids = [], selectedId }: { s: 
     .filter((d) => d.sessionId === s.id)
     .sort((a, b) => a.createdAt - b.createdAt);
   const line = tileLine(s, state, pending);
-  const done = s.status === "done" || s.status === "idle";
+  const status = shownStatus(s);
+  const done = status === "done" || status === "idle";
   const first = pending[0];
   const [kidsOpen, setKidsOpen] = useState(false);
   const fold = kids.length > KIDS_FOLD && !kidsOpen;
   // A child that needs you (or is open) stays visible even when the list is folded.
-  const shownKids = fold ? kids.filter((k) => k.status === "needs_you" || k.id === selectedId) : kids;
-  const kidNeeds = kids.some((k) => k.status === "needs_you");
+  const shownKids = fold ? kids.filter((k) => needsYou(k) || k.id === selectedId) : kids;
+  const kidNeeds = kids.some(needsYou);
   const card = useRef<HTMLDivElement>(null);
   // The rail starts under the parent's status dot, so measure how far down the kids list begins.
   useLayoutEffect(() => {
@@ -166,7 +188,7 @@ function Tile({ s, state, send, selected, onOpen, kids = [], selectedId }: { s: 
   return (
     <div
       ref={card}
-      className={`ctile s-${s.status} ${kids.length ? "has-kids" : ""} ${kidNeeds && s.status !== "needs_you" ? "kid-needs" : ""} ${selected ? "sel" : ""} ${done ? "compact" : ""} ${isUnseen(s) ? "unseen-row" : ""} ${first?.destructive ? "destructive" : ""}`}
+      className={`ctile s-${status} ${kids.length ? "has-kids" : ""} ${kidNeeds && status !== "needs_you" ? "kid-needs" : ""} ${selected ? "sel" : ""} ${done ? "compact" : ""} ${isUnseen(s) ? "unseen-row" : ""} ${first?.destructive ? "destructive" : ""}`}
       role="button"
       tabIndex={0}
       data-tile={s.id}
@@ -192,6 +214,7 @@ function Tile({ s, state, send, selected, onOpen, kids = [], selectedId }: { s: 
         </div>
       )}
       {!done && <Chips s={s} quietOutside={!!first?.outside?.length} />}
+      {s.interrupted && !first && <TileRetry s={s} state={state} send={send} />}
       {s.status === "needs_you" && first && (
         <div onClick={(e) => e.stopPropagation()}>
           <TileAnswer d={first} send={send} />
@@ -213,8 +236,9 @@ function Tile({ s, state, send, selected, onOpen, kids = [], selectedId }: { s: 
 }
 
 function Summary({ workers }: { workers: SessionInfo[] }) {
-  const n = (st: SessionStatus) => workers.filter((w) => w.status === st).length;
-  const needs = n("needs_you"), failed = n("failed"), working = n("working"), paused = n("paused"), done = n("done");
+  // Interrupted sessions count as needing you (needsYou), not under the status they were left in.
+  const n = (st: SessionStatus) => workers.filter((w) => !w.interrupted && w.status === st).length;
+  const needs = workers.filter(needsYou).length, failed = n("failed"), working = n("working"), paused = n("paused"), done = n("done");
   const parts: React.ReactNode[] = [];
   if (needs) parts.push(<span key="n" className="n-needs">{needs} need{needs === 1 ? "s" : ""} you</span>);
   if (failed) parts.push(<span key="f" className="n-failed">{failed} failed</span>);
@@ -270,8 +294,8 @@ export function Crew({ state, workers, selected, onOpen, send, connected, onAddP
           const parentOf = (x: SessionInfo) => (x.parentId && x.parentId !== "main" ? list.find((p) => p.id === x.parentId) : undefined);
           const kidsOf = (id: string): SessionInfo[] => list.filter((c) => c.parentId === id).flatMap((c) => [c, ...kidsOf(c.id)]);
           const top = list.filter((x) => !parentOf(x));
-          const active = top.filter((x) => x.status !== "done");
-          const done = top.filter((x) => x.status === "done");
+          const active = top.filter((x) => shownStatus(x) !== "done");
+          const done = top.filter((x) => shownStatus(x) === "done");
           const fold = done.length > DONE_FOLD && !open.has(project);
           const row = (x: SessionInfo) => <Tile key={x.id} s={x} state={state} send={send} selected={selected === x.id} selectedId={selected} onOpen={onOpen} kids={kidsOf(x.id)} />;
           return (

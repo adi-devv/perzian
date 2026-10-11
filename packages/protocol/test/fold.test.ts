@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { byAttention, checkPlan, crewMatch, crewStatus, emptyState, fold, isUnseen, recentProjects, reduce } from "../src/index.ts";
+import { byAttention, checkPlan, crewMatch, crewStatus, emptyState, fold, isUnseen, needsYou, recentProjects, reduce, shownPrompt, shownStatus, withProject } from "../src/index.ts";
 import type { Decision, Outcome, PerzianEvent, SessionInfo, SessionStatus } from "../src/index.ts";
 
 const session = (id: string, over: Partial<SessionInfo> = {}): SessionInfo => ({
@@ -228,4 +228,36 @@ test("recentProjects: added folders first, then worker projects, never the lead'
     c: session("c", { project: "/code/api" }),
   };
   assert.deepEqual(recentProjects({ sessions, settings: { projects: ["/code/docs"] } }), ["/code/docs", "/code/api", "/code/web"]);
+});
+
+test("an interrupted session needs you: counted and sorted as needs_you, not under its own status", () => {
+  const sessions = [
+    session("a", { status: "idle", interrupted: { during: "turn", at: 2 } }),
+    session("b", { status: "done", updatedAt: 5, interrupted: { during: "ship", at: 2 } }),
+    session("c", { status: "working", updatedAt: 9 }),
+  ];
+  assert.deepEqual(crewStatus(sessions), [{ key: "needs_you", count: 2 }, { key: "working", count: 1 }]);
+  assert.equal(shownStatus(sessions[1]), "needs_you");
+  assert.ok(needsYou(sessions[0]) && !needsYou(sessions[2]));
+  assert.deepEqual([...sessions].sort(byAttention).map((s) => s.id), ["b", "a", "c"]);
+});
+
+test("interrupted clears once the session runs again or its ship/setup is retried", () => {
+  const mark: PerzianEvent = { type: "session.updated", sessionId: "a", patch: { interrupted: { during: "turn", at: 2 } } };
+  const base = [created(session("a")), mark];
+  assert.ok(fold(base).sessions.a.interrupted);
+  assert.ok(fold([...base, { type: "session.status", sessionId: "a", status: "idle", at: 3 }]).sessions.a.interrupted);
+  assert.equal(fold([...base, { type: "session.status", sessionId: "a", status: "working", at: 3 }]).sessions.a.interrupted, undefined);
+  assert.equal(fold([...base, { type: "session.updated", sessionId: "a", patch: { ship: { state: "shipping", how: "merge", at: 3 } } }]).sessions.a.interrupted, undefined);
+  assert.equal(fold([...base, { type: "session.updated", sessionId: "a", patch: { setup: { state: "skipped", copied: [], install: [], at: 3 } } }]).sessions.a.interrupted, undefined);
+  assert.ok(fold([...base, { type: "session.updated", sessionId: "a", patch: { title: "x" } }]).sessions.a.interrupted);
+});
+
+test("shownPrompt hides the project-folder line withProject adds, and nothing else", () => {
+  assert.equal(shownPrompt(withProject("add a login page", "/Users/me/app")), "add a login page");
+  assert.equal(shownPrompt(withProject("two\nlines", "/x")), "two\nlines");
+  assert.equal(shownPrompt("plain"), "plain");
+  // Mentioned mid-message, it is the developer's own text.
+  assert.equal(shownPrompt("Project folder: /x\n\nmore"), "Project folder: /x\n\nmore");
+  assert.equal(shownPrompt("a\n\nProject folder: /x\nthen more"), "a\n\nProject folder: /x\nthen more");
 });

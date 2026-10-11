@@ -96,3 +96,12 @@ test("a failure says why in one line", () => {
   assert.equal(why.checks, "Checks failed: unit (2 failed)");
   assert.equal(why.notice, "Agent exited (code 1).");
 });
+
+test("an interrupted session is in the inbox until it runs again", () => {
+  const s = session("a", { status: "idle", interrupted: { during: "turn", at: 4 } });
+  const items = inbox(fold([created(s)]));
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "failed");
+  assert.match((items[0] as { why: string }).why, /Interrupted/);
+  assert.equal(inbox(fold([created({ ...s, interrupted: undefined })])).length, 0);
+});

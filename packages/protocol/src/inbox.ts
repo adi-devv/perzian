@@ -50,6 +50,8 @@ export function inbox(state: State): InboxItem[] {
     }
     if (s.status === "failed" && seen < s.updatedAt) {
       out.push({ kind: "failed", key: `f:${s.id}`, sessionId: s.id, at: s.updatedAt, why: failureLine(state, s) });
+    } else if (s.interrupted) {
+      out.push({ kind: "failed", key: `i:${s.id}`, sessionId: s.id, at: s.interrupted.at, why: "Interrupted: Perzian restarted. Retry to continue." });
     }
   }
   return out.sort((a, b) => RANK(a) - RANK(b) || a.at - b.at);

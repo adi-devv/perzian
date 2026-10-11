@@ -22,6 +22,8 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ Permission asks and agent decisions are one-click cards on the session tile (keys 1-9 answer the top one); phones get a queue.
 - ✅ Subtle motion shows what changed: answered cards collapse, crew tiles slide (FLIP), status dots cross-fade, expanders animate; off with reduced-motion.
 - ✅ Destructive-command and permission rules enforced by the daemon (Claude); Codex is best-effort.
+- ✅ Each closed card leaves one transcript line with the answer; with the composer empty, 1-9 still answer.
+- ✅ A daemon restart mid-turn, mid-decision, mid-ship or mid-setup marks the session Interrupted (counts as needs you, Retry on the tile); open cards close with "not answered" since the agent's waiting call died with it.
 
 ## Proof and checks
 - ✅ Outcome cards with observed proof: the daemon records the tests, builds, typechecks and lints the agent really ran, with real exit codes.

@@ -1,7 +1,7 @@
 import { closeSync, copyFileSync, existsSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_PERMISSION_MODE, reduce, type PerzianEvent, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
+import { clearsInterrupted, DEFAULT_PERMISSION_MODE, reduce, type PerzianEvent, type SessionInfo, type State, type TranscriptItem } from "@perzian/protocol";
 
 export const TRANSCRIPT_KEEP = 400;
 export const ARCHIVED_TTL_MS = 7 * 24 * 3600_000;
@@ -124,6 +124,7 @@ export function replay(events: PerzianEvent[]): State {
         void unhandled;
       }
     }
+    if (clearsInterrupted(e) && "sessionId" in e && sessions[e.sessionId]) delete sessions[e.sessionId].interrupted;
   }
   return st;
 }

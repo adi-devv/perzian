@@ -68,8 +68,8 @@ export function FolderPicker({ id, project, setProject, recent, onPicked, autoFo
   );
 }
 
-/** The lead agent works from its own folder; tell it which repo the task is about. */
-export const withProject = (prompt: string, path: string) => `${prompt}\n\nProject folder: ${path}`;
+/** The lead agent works from its own folder; tell it which repo the task is about (hidden in the transcript, see shownPrompt). */
+export { withProject } from "@perzian/protocol";
 
 /* ───────────── First run ───────────── */
 
@@ -415,7 +415,9 @@ export function explainFailure(text: string): { title: string; reason: string; f
           : /ECONNREFUSED|ETIMEDOUT|ENOTFOUND|network|fetch failed|socket/i.test(text)
             ? "Couldn't reach the model. Check your connection, then Retry."
             : title === "Interrupted"
-              ? "The daemon restarted mid-turn. Retry to send the last message again."
+              ? /waiting for your answer/.test(text)
+                ? "Its question closed when the daemon restarted. Retry so it asks again."
+                : "The daemon restarted mid-turn. Retry to send the last message again."
               : "Retry, or open the transcript for the full log.";
   return { title, reason, fix };
 }

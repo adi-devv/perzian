@@ -58,8 +58,16 @@ export interface SessionInfo {
   git?: GitState;
   /** Commands the agent left running in the background (dev servers, watchers). */
   background?: BackgroundProc[];
+  /** The daemon restarted while this session was busy; it needs you (Retry) until it runs again (see clearsInterrupted). */
+  interrupted?: Interrupted;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface Interrupted {
+  /** turn: mid-turn · decision: waiting for your answer · ship: merging or opening the PR · setup: readying the worktree. */
+  during: "turn" | "decision" | "ship" | "setup";
+  at: number;
 }
 
 export interface ExtraWorktree {
@@ -281,7 +289,11 @@ export type TranscriptItem =
   // path: the file it targets, relative to the session's folder (set only inside it); places the session's dot on the Map.
   | { kind: "tool"; toolCallId: string; title: string; status: string; toolKind?: string; parentToolCallId?: string; path?: string; at: number }
   | { kind: "spawn"; childId: string; title: string; at: number }
-  | { kind: "notice"; text: string; at: number };
+  | { kind: "notice"; text: string; at: number }
+  // A permission or ask_decision card that closed: the chosen option's label, or null when nobody answered
+  // (the turn ended or was stopped; `restarted`: the daemon restarted while it was open).
+  // `detail`: the command or path a permission asked about.
+  | { kind: "decision"; decisionId: string; source: Decision["source"]; question: string; detail?: string; answer: string | null; restarted?: true; at: number };
 
 export type PerzianEvent =
   | { type: "session.created"; session: SessionInfo }
@@ -377,10 +389,15 @@ export const MODE_LABEL: Record<PermissionMode, string> = {
   auto: "Full auto",
 };
 
+/** Waiting on the developer: an open decision, or a turn, ship or setup the daemon's restart cut short. */
+export const needsYou = (s: SessionInfo): boolean => s.status === "needs_you" || !!s.interrupted;
+/** The status to draw and sort by: an interrupted session shows as needing you. */
+export const shownStatus = (s: SessionInfo): SessionStatus => (s.interrupted ? "needs_you" : s.status);
+
 // Attention ordering: what needs the dev first.
 const STATUS_RANK: Record<SessionStatus, number> = { needs_you: 0, failed: 1, done: 2, working: 3, paused: 4, idle: 5 };
 export function byAttention(a: SessionInfo, b: SessionInfo): number {
-  return STATUS_RANK[a.status] - STATUS_RANK[b.status] || b.updatedAt - a.updatedAt;
+  return STATUS_RANK[shownStatus(a)] - STATUS_RANK[shownStatus(b)] || b.updatedAt - a.updatedAt;
 }
 
 export function isUnseen(s: SessionInfo): boolean {
@@ -399,6 +416,8 @@ export type CrewKey = "needs_you" | "failed" | "working" | "paused" | "done";
 export const CREW_KEYS: CrewKey[] = ["needs_you", "failed", "working", "paused", "done"];
 export function crewMatch(key: CrewKey, s: SessionInfo): boolean {
   if (s.role !== "worker" || s.archived) return false;
+  if (key === "needs_you") return needsYou(s);
+  if (s.interrupted) return false;
   return key === "done" ? s.status === "done" && isUnseen(s) : s.status === key;
 }
 /** Counts per group, folded from session state alone. Empty groups are omitted. */
@@ -458,6 +477,15 @@ Talk in signals
 - After spawning, one line: what is running ("2 sessions: subtract, capitalize.").
 - Results: status, proof, what needs the developer. "Rename done, tests pass (12)." "Fix partial: 1 test fails, spec conflict needs your call."
 - Say plainly when something failed or wasn't verified.`;
+
+// The UI adds the folder it picked for the lead as a last line; the agent needs it, the transcript doesn't show it.
+const PROJECT_LINE = "\n\nProject folder: ";
+export const withProject = (prompt: string, path: string): string => `${prompt}${PROJECT_LINE}${path}`;
+/** A prompt as the developer typed it: without the "Project folder: …" line withProject added. */
+export function shownPrompt(text: string): string {
+  const i = text.lastIndexOf(PROJECT_LINE);
+  return i >= 0 && !text.slice(i + PROJECT_LINE.length).includes("\n") ? text.slice(0, i) : text;
+}
 
 export * from "./fold.ts";
 export * from "./onboarding.ts";
