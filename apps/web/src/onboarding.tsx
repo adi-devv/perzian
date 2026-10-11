@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { AgentCheck, ApiKeyProvider, CredentialStatus, DoctorReport } from "@perzian/protocol";
+import type { AgentCheck, ApiKeyProvider, CredentialStatus, DoctorReport, State } from "@perzian/protocol";
 import { DAEMON_ADDR, installAgent, isDesktop, useCredentials, useDoctor } from "./daemon.ts";
 
 /* ───────────── Project folder memory (shared with New session) ───────────── */
@@ -17,6 +17,58 @@ export function saveProject(p: string) {
     localStorage.setItem(PROJECT_KEY, p);
   } catch {}
 }
+declare global {
+  interface Window {
+    perzian?: { pickFolder?: () => Promise<string | null> };
+  }
+}
+
+/** The last 5 distinct project folders across sessions, newest first (sessions fold in creation order). */
+export function recentProjects(state: State): string[] {
+  const out: string[] = [];
+  for (const s of Object.values(state.sessions).reverse()) if (s.project && !out.includes(s.project)) out.push(s.project);
+  return out.slice(0, 5);
+}
+
+/** Folder choice: native picker button (desktop), recent-project chips, typed path as the small fallback. */
+export function FolderPicker({ id, project, setProject, recent, onPicked, autoFocus, inputClass }: { id: string; project: string; setProject: (p: string) => void; recent: string[]; onPicked: () => void; autoFocus?: boolean; inputClass?: string }) {
+  const pick = window.perzian?.pickFolder;
+  const choose = (p: string) => {
+    setProject(p);
+    onPicked();
+  };
+  return (
+    <div className="folder-pick">
+      {pick && (
+        <button type="button" className="btn" onClick={() => void pick().then((p) => p && choose(p)).catch(() => {})}>
+          Choose folder…
+        </button>
+      )}
+      {recent.length > 0 && (
+        <div className="folder-recent">
+          {recent.map((p) => (
+            <button key={p} type="button" className={`btn small${p === project.trim() ? " on" : ""}`} title={p} onClick={() => choose(p)}>
+              {p.split("/").filter(Boolean).slice(-1)[0] ?? p}
+            </button>
+          ))}
+        </div>
+      )}
+      <input
+        id={id}
+        className={inputClass}
+        required
+        value={project}
+        onChange={(e) => setProject(e.target.value)}
+        placeholder={pick ? "or type a path" : "Project folder, e.g. ~/code/app"}
+        spellCheck={false}
+        autoComplete="off"
+        autoFocus={autoFocus}
+        aria-label="Project folder"
+      />
+    </div>
+  );
+}
+
 /** The lead agent works from its own folder; tell it which repo the task is about. */
 export const withProject = (prompt: string, path: string) => `${prompt}\n\nProject folder: ${path}`;
 
@@ -94,7 +146,7 @@ export function readiness(report: DoctorReport | null, project: string): { ready
 }
 
 /** First run shows the folder and whatever is actually broken, each with one fix. Nothing when all is well. */
-export function Onboarding({ doctor, project, setProject }: { doctor: Doctor; project: string; setProject: (p: string) => void }) {
+export function Onboarding({ doctor, project, setProject, recent }: { doctor: Doctor; project: string; setProject: (p: string) => void; recent: string[] }) {
   const { report, loading, failed, recheck } = doctor;
   const creds = useCredentials(true);
   const claude = report?.agents.find((a) => a.kind === "claude-code");
@@ -109,16 +161,14 @@ export function Onboarding({ doctor, project, setProject }: { doctor: Doctor; pr
   return (
     <div className="onboard">
       <div className="welcome-mark" aria-hidden />
-      <input
+      <FolderPicker
         id="onboard-project"
-        className="step-input"
-        value={project}
-        onChange={(e) => setProject(e.target.value)}
-        placeholder="Project folder, e.g. ~/code/app"
-        spellCheck={false}
-        autoComplete="off"
+        inputClass="step-input"
+        project={project}
+        setProject={setProject}
+        recent={recent}
+        onPicked={() => setTimeout(() => document.getElementById("main-composer")?.focus(), 0)}
         autoFocus={!project}
-        aria-label="Project folder"
       />
       {proj && !proj.exists && <p className="step-note bad">Folder not found</p>}
 

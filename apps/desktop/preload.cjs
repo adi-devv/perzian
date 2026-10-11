@@ -3,7 +3,10 @@
 // fetch calls there instead, so the window never talks to a different daemon that owns 4317.
 // (Chromium's webRequest can't redirect WebSocket handshakes, hence the main-world shim.)
 // CommonJS because sandboxed preloads can't be ES modules.
-const { contextBridge } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
+
+// Native folder picker for the UI; resolves to a path or null when cancelled.
+contextBridge.exposeInMainWorld("perzian", { pickFolder: () => ipcRenderer.invoke("perzian:pick-folder") });
 
 const port = new URLSearchParams(location.search).get("port");
 if (location.protocol === "file:" && port && port !== "4317") {

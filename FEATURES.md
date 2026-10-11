@@ -41,6 +41,7 @@ What Perzian does today. Upcoming work: [NEXT_STEPS.md](NEXT_STEPS.md). Why and 
 - ✅ Electron shell starts the daemon and loads the UI; desktop notifications when a session needs you.
 - ✅ First-run checks and one-click install for a missing agent CLI; API keys kept in the macOS Keychain.
 - ✅ Easy start: first run is folder + task + Enter and shows only what is broken (one fix each); New session is folder + task, with name, agent, model, permissions and worktree behind "Options"; last folder remembered.
+- ✅ Native "Choose folder…" picker (desktop) with the last 5 projects as one-click chips; typed path stays as the small fallback and the only option in the browser; picking jumps to the task box.
 - ✅ Daemon only accepts the desktop app and the local UI (origin and token checks).
 - ⚠️ Packaged macOS build (`npm run dist`, unsigned, Apple Silicon); no release published yet.
 

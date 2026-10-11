@@ -471,3 +471,8 @@ code.chip { font-size: 11px; }
 .side-filter { margin: 6px 10px; }
 .checks + .btn { margin: 0 8px 8px 0; }
 @media (max-width: 760px) { .crew { padding-inline: 16px; } }
+
+.folder-pick { display: flex; flex-direction: column; gap: 8px; align-items: stretch; }
+.folder-recent { display: flex; flex-wrap: wrap; gap: 6px; }
+.btn.on { border-color: var(--fg-3); background: var(--hover); }
+.folder-pick > input { font-size: 12px; padding: 5px 9px; }

@@ -17,7 +17,7 @@ import {
   type TranscriptItem,
 } from "@perzian/protocol";
 import { fetchText, isDemo, useDaemon, useDoctor, type Link } from "./daemon.ts";
-import { Accounts, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, readiness, saveProject, withProject } from "./onboarding.tsx";
+import { Accounts, FolderPicker, recentProjects, DaemonOffline, DaemonRefused, FailureNotice, OfflineBanner, Onboarding, ShortcutHelp, friendlyError, isFailureNotice, loadProject, readiness, saveProject, withProject } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import type { ThemedToken } from "shiki/core";
 import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, Usage, ago, churn, cost, pauseTitle, resumeTime, statusText, useTick } from "./bits.tsx";
@@ -39,6 +39,7 @@ export function App() {
   const main = all.find((s) => s.role === "main");
   // First run: connected, nothing started yet. The demo always has sessions, so it never lands here.
   const firstRun = !isDemo && link === "online" && all.length === 0;
+  const recent = useMemo(() => recentProjects(state), [state.sessions]);
   const doctor = useDoctor(project, firstRun);
   const checked = doctor.report?.project;
   const projectPath = checked?.exists && checked.input === project.trim() ? checked.path : undefined;
@@ -137,13 +138,14 @@ export function App() {
         onStart={startLead}
         blocked={gate.ready ? undefined : gate.blocker}
         focus={firstRun && !!project.trim()}
-        firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} /> : null}
+        firstRun={firstRun ? <Onboarding doctor={doctor} project={project} setProject={setProject} recent={recent} /> : null}
       />
 
       {sel && <Drawer key={sel.id} s={sel} state={state} send={send} onClose={() => setSelected(null)} onFile={(path) => setViewing({ session: sel.id, path })} onOpen={open} />}
 
       {creating && (
         <NewSession
+          recent={recent}
           pending={!!pendingCreate}
           error={createError}
           onClose={closeCreate}
@@ -952,7 +954,7 @@ function FileViewer({ session, path, onClose }: { session: string; path: string;
 
 /* ───────────── New session ───────────── */
 
-function NewSession({ onClose, onCreate, pending, error }: { onClose: () => void; onCreate: (c: Command) => void; pending: boolean; error: string | null }) {
+function NewSession({ recent, onClose, onCreate, pending, error }: { recent: string[]; onClose: () => void; onCreate: (c: Command) => void; pending: boolean; error: string | null }) {
   const remembered = loadProject();
   const [project, setProject] = useState(remembered);
   const [prompt, setPrompt] = useState("");
@@ -977,7 +979,7 @@ function NewSession({ onClose, onCreate, pending, error }: { onClose: () => void
           onCreate({ type: "session.create", project, prompt, title: title || undefined, agent, model: model || undefined, mode, worktree });
         }}
       >
-        <input id="ns-project" required value={project} onChange={(e) => setProject(e.target.value)} placeholder="Project folder, e.g. ~/code/app" aria-label="Project folder" autoFocus={!project} />
+        <FolderPicker id="ns-project" project={project} setProject={setProject} recent={recent} onPicked={() => setTimeout(() => document.getElementById("ns-prompt")?.focus(), 0)} autoFocus={!project} />
         <textarea
           id="ns-prompt"
           required

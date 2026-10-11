@@ -1,7 +1,7 @@
 // Perzian desktop shell: owns the daemon process, shows the UI in a native window, and turns daemon
 // state into native cues (dock badge, window title, notifications) so you know what needs you
 // without looking at the window.
-import { app, BrowserWindow, Menu, Notification, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell } from "electron";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createConnection } from "node:net";
@@ -340,6 +340,14 @@ async function createWindow() {
 
 
 app.setName("Perzian");
+// Native folder picker for the UI's "Choose folder…" button; null when cancelled.
+ipcMain.handle("perzian:pick-folder", async (event) => {
+  const parent = BrowserWindow.fromWebContents(event.sender) ?? win;
+  const opts = { properties: ["openDirectory", "createDirectory"] };
+  const r = parent ? await dialog.showOpenDialog(parent, opts) : await dialog.showOpenDialog(opts);
+  return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
+});
+
 app.whenReady().then(() => {
   buildMenu();
   // Packaged builds carry the same mark as the bundle's .icns; dev runs inside Electron.app and need it set.
