@@ -18,6 +18,12 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 0b. **Declared checks, always run.** A per-repo `perzian.json` lists custom checks (e.g. a team test CLI) next to the
    auto-detected ones. The daemon runs them itself when an agent says it's done, records ✓/✕ with real exit codes,
    sends failures back to the agent to fix, and allows them without a permission card. Site card: "Your checks run every time."
+   Built: `perzian.json` is validated (clear error in the drawer and transcript), read once at spawn, named in the worker's
+   brief and in `list_sessions`/`get_session`; after a worker turn that changed files or reported an outcome the daemon
+   runs each check in the worktree (timeout, output tail), adds them to the outcome as observed proof, sends failures back
+   (2 fix rounds, then the session fails: "needs you"), and allows exactly those commands without a card. Drawer shows
+   ✓/✕ per check. Tested with temp repos and a scripted fake ACP agent; not yet run with a real agent.
+   Next: the site card; a "Run checks" button; ready worktrees will make first runs pass.
 1. **Ship it: try it for real.** Built: "Merge into <base>" / "Open PR" in the session drawer, conflicts listed with
    "Ask the agent to resolve", worktree removed after a merge. Unit-tested on temp repos; not yet run from the app on a real project.
 2. **Crew summary.** Ask the lead "what's going on?" and get a short digest of what's done, blocked and needs you,

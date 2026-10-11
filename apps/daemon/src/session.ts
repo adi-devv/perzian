@@ -25,6 +25,8 @@ import type { Credentials } from "./credentials.ts";
 import { permissionPolicy } from "./permissions.ts";
 import { UsageMeter } from "./usage.ts";
 import { SetupGate, readyWorktree } from "./setup.ts";
+import { MAX_FIX_ATTEMPTS, declaredBrief, declaredProofs, fixPrompt, runDeclaredChecks } from "./checks.ts";
+import type { CheckResult, CheckRun, DeclaredCheck } from "@perzian/protocol";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const reportMcpEntry = join(here, "../../../packages/report-mcp/src/index.ts");
@@ -71,6 +73,10 @@ export interface SessionDeps {
   creds?: Credentials;
   /** Readies a fresh worktree (tests swap this out). */
   setup?: typeof readyWorktree;
+  /** Runs this instead of the agent's ACP adapter (tests use a scripted fake agent). */
+  adapter?: { command: string; args: string[] };
+  /** Overrides each declared check's timeout, in ms (tests). */
+  checkTimeoutMs?: number;
 }
 
 // One agent session = one adapter process + one ACP connection. Can be dormant (restored from the log)
@@ -97,6 +103,12 @@ export class AgentSession {
   // Prompts wait here while a fresh worktree is being set up (see runSetup).
   private gate = new SetupGate();
   private settingUp = false;
+  // Declared checks: fix rounds sent back to the agent for the current task, whether this turn is one,
+  // and the run in progress (aborted on cancel).
+  private fixAttempts = 0;
+  private fixTurn = false;
+  private checksAbort?: AbortController;
+  private downgraded?: number; // createdAt of the outcome our failing checks turned from success to partial
 
   constructor(public info: SessionInfo, private deps: SessionDeps) {
     // A restored session starts from what the log already has, so reattaching doesn't re-emit it.
@@ -108,7 +120,7 @@ export class AgentSession {
   }
 
   static create(
-    opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; baseBranch?: string; id?: string; checks?: string[] },
+    opts: { project: string; cwd: string; title: string; agent: AgentKind; model?: string; mode?: PermissionMode; role?: "main" | "worker"; parentId?: string; branch?: string; worktree?: boolean; baseSha?: string; baseBranch?: string; id?: string; checks?: string[]; declaredChecks?: DeclaredCheck[]; checksError?: string },
     deps: SessionDeps,
   ): AgentSession {
     const now = Date.now();
@@ -127,6 +139,8 @@ export class AgentSession {
       model: opts.model || undefined,
       mode: opts.mode ?? "ask",
       ...(opts.checks?.length ? { checks: opts.checks } : {}),
+      ...(opts.declaredChecks?.length ? { declaredChecks: opts.declaredChecks } : {}),
+      ...(opts.checksError ? { checksError: opts.checksError } : {}),
       status: "idle",
       createdAt: now,
       updatedAt: now,
@@ -183,13 +197,16 @@ export class AgentSession {
 
   private async start(): Promise<void> {
     // The user's installed agent CLI when there is one, else the binary bundled with the adapter.
-    const agent = agentEnv(this.info.agent);
-    console.log(`[${this.info.id.slice(0, 6)}] ${this.info.agent} executable (${agent.resolved.source}): ${agent.resolved.path}`);
-    const env: NodeJS.ProcessEnv = { ...process.env, ...agent.env, ...this.deps.creds?.envFor(this.info.agent) };
+    const override = this.deps.adapter;
+    const agent = override ? undefined : agentEnv(this.info.agent);
+    if (agent) console.log(`[${this.info.id.slice(0, 6)}] ${this.info.agent} executable (${agent.resolved.source}): ${agent.resolved.path}`);
+    const env: NodeJS.ProcessEnv = { ...process.env, ...agent?.env, ...this.deps.creds?.envFor(this.info.agent) };
     if (this.info.agent === "claude-code" && this.info.model) env.ANTHROPIC_MODEL = this.info.model;
     this.meter ??= new UsageMeter(this.info.usage);
     this.meter.restart();
-    const proc = spawn(process.execPath, [adapterEntry(this.info.agent)], { cwd: this.info.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+    const proc = override
+      ? spawn(override.command, override.args, { cwd: this.info.cwd, env, stdio: ["pipe", "pipe", "pipe"] })
+      : spawn(process.execPath, [adapterEntry(this.info.agent)], { cwd: this.info.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
     this.proc = proc;
     let stderr = "";
     proc.stderr!.on("data", (d) => {
@@ -367,8 +384,10 @@ export class AgentSession {
   /**
    * `system`: sent by the daemon, not typed by the developer (marked in the transcript). `resend`: the text
    * is already in the transcript (the first prompt, held back by a setup that didn't finish).
+   * `checkFix`: the daemon sending failed declared checks back; any other prompt starts a new task, so
+   * the fix-attempt count starts over.
    */
-  async prompt(text: string, opts: { system?: boolean; resend?: boolean } = {}): Promise<void> {
+  async prompt(text: string, opts: { system?: boolean; resend?: boolean; checkFix?: boolean } = {}): Promise<void> {
     if (!opts.resend) this.store.emit({ type: "session.transcript", sessionId: this.info.id, item: { kind: "user", text, at: Date.now(), ...(opts.system ? { system: true as const } : {}) } });
     // A prompt sent while a turn is running is queued by the agent; the session stays "working" until
     // the last one returns.
@@ -376,8 +395,11 @@ export class AgentSession {
     if (first) {
       this.outcomeThisTurn = false;
       this.proofs.reset();
+      this.fixTurn = !!opts.checkFix;
     }
+    if (!opts.checkFix) this.fixAttempts = 0;
     this.setStatus("working");
+    let next: string | undefined;
     try {
       if (!(await this.setupDone())) {
         // Cancelled while the worktree was still being set up.
@@ -393,7 +415,7 @@ export class AgentSession {
       // Close the cancelled turn's tools now, even if a newer prompt is already queued behind it;
       // otherwise that prompt's end_turn would close them as "completed".
       if (res.stopReason === "cancelled") this.closeOpenTools("cancelled");
-      if (this.inflight === 1) await this.finishTurn(text, res.stopReason);
+      if (this.inflight === 1) next = await this.finishTurn(text, res.stopReason);
     } catch (err) {
       this.flushAgentText();
       this.notice(this.describeError(err));
@@ -405,6 +427,8 @@ export class AgentSession {
     } finally {
       this.inflight--;
     }
+    // Failed declared checks go back to the agent as its next message; the session stays working.
+    if (next) await this.prompt(next, { system: true, checkFix: true });
   }
 
   // True once the worktree is ready (or the developer chose to start anyway); false if the prompt was
@@ -472,7 +496,8 @@ export class AgentSession {
     if (this.info.role === "main") return first ? `${MAIN_INSTRUCTIONS}\n\n---\n\n${text}` : text;
     if (!first) return `${FOLLOWUP_REMINDER}\n\n${text}`;
     const checks = this.info.checks?.length ? `\n\nChecks available: ${this.info.checks.join(", ")}` : "";
-    return `${REPORT_INSTRUCTIONS}\n\n---\n\n${text}${checks}`;
+    const required = declaredBrief(this.info.declaredChecks);
+    return `${REPORT_INSTRUCTIONS}\n\n---\n\n${text}${checks}${required ? `\n${required}` : ""}`;
   }
 
   // Tool calls the agent never closed (cancelled turn, crash) would spin forever in the UI.
@@ -484,7 +509,8 @@ export class AgentSession {
     }
   }
 
-  private async finishTurn(prompt: string, stopReason: acp.StopReason): Promise<void> {
+  /** Settles a turn. Returns a prompt to send next when declared checks failed and the agent gets another try. */
+  private async finishTurn(prompt: string, stopReason: acp.StopReason): Promise<string | undefined> {
     this.dropDecisions();
     this.closeOpenTools(stopReason === "cancelled" ? "cancelled" : "completed");
     const files = await this.refreshChanges();
@@ -504,22 +530,90 @@ export class AgentSession {
       }
     }
     if (this.info.role === "worker" && !this.outcomeThisTurn && (changedThisTurn || observed.length > 0) && stopReason === "end_turn") {
+      // A fix round answers the daemon's message, not a new task: keep the task's intent.
+      const previous = this.fixTurn ? this.store.state().outcomes[this.info.id] : undefined;
       this.store.emit({
         type: "outcome.reported",
         outcome: {
           sessionId: this.info.id,
-          intent: prompt.split("\n")[0].slice(0, 140),
+          intent: previous?.intent ?? prompt.split("\n")[0].slice(0, 140),
           status: failedCheck ? "partial" : "success",
           changed: files.map((f) => ({ path: f.path, kind: f.kind })),
           proof: observed,
-          risks: [],
-          followups: [],
+          risks: previous?.risks ?? [],
+          followups: previous?.followups ?? [],
           derived: true,
           createdAt: Date.now(),
         },
       });
     }
+    // The agent says it's done: run the repo's declared checks ourselves. A fix round always re-runs them,
+    // even when the agent changed nothing, so the loop can't stall.
+    const declared = this.info.role === "worker" && stopReason === "end_turn" && !!this.info.declaredChecks?.length;
+    if (declared && (changedThisTurn || this.outcomeThisTurn || this.fixTurn)) {
+      const verdict = await this.runChecks();
+      // A newer prompt arrived while the checks ran; that turn owns the status now.
+      if (this.inflight > 1) return undefined;
+      if (verdict.next) return verdict.next;
+      if (verdict.cancelled) return void this.setStatus("idle");
+      if (verdict.gaveUp) return void this.setStatus("failed");
+    }
     this.setStatus(stopReason === "cancelled" ? "idle" : stopReason === "refusal" ? "failed" : "done");
+    return undefined;
+  }
+
+  /** Runs the declared checks in the session's worktree and decides what follows. */
+  private async runChecks(): Promise<{ next?: string; gaveUp?: boolean; cancelled?: boolean }> {
+    const checks = this.info.declaredChecks ?? [];
+    const publish = (state: CheckRun["state"], results: CheckResult[], attempt = this.fixAttempts) =>
+      this.update({ checkRun: { state, attempt, maxAttempts: MAX_FIX_ATTEMPTS, results, at: Date.now() } });
+    const abort = new AbortController();
+    this.checksAbort = abort;
+    let results: CheckResult[];
+    try {
+      results = await runDeclaredChecks(checks, this.info.cwd, (r) => publish("running", r), { signal: abort.signal, timeoutMs: this.deps.checkTimeoutMs });
+    } finally {
+      if (this.checksAbort === abort) this.checksAbort = undefined;
+    }
+    if (abort.signal.aborted) {
+      publish("cancelled", results);
+      return { cancelled: true };
+    }
+    this.attachCheckProofs(results);
+    const failed = results.filter((r) => r.state === "failed");
+    if (!failed.length) {
+      publish("passed", results);
+      return {};
+    }
+    if (this.fixAttempts >= MAX_FIX_ATTEMPTS) {
+      publish("failed", results);
+      const names = failed.map((r) => r.name).join(", ");
+      this.notice(`Checks still failing after ${MAX_FIX_ATTEMPTS} fix attempts: ${names}. Needs you.`);
+      return { gaveUp: true };
+    }
+    this.fixAttempts++;
+    publish("fixing", results);
+    return { next: fixPrompt(failed, this.fixAttempts, MAX_FIX_ATTEMPTS) };
+  }
+
+  // Declared-check results join the session's latest outcome as observed proof, replacing earlier runs.
+  private attachCheckProofs(results: CheckResult[]): void {
+    const current = this.store.state().outcomes[this.info.id];
+    if (!current) return;
+    const proofs = declaredProofs(results);
+    const names = new Set(proofs.map((p) => p.label));
+    const runs = new Set(results.map((r) => r.run));
+    const rest = current.proof.filter((p) => !names.has(p.label) && !(p.command && runs.has(p.command.trim())));
+    const proof = [...proofs, ...rest];
+    let status = current.status;
+    if (status === "success" && proofs.some((p) => !p.passed)) {
+      status = "partial";
+      this.downgraded = current.createdAt;
+    } else if (status === "partial" && this.downgraded === current.createdAt && proof.every((p) => p.passed || !p.observed)) {
+      status = "success"; // only our checks made it partial, and they pass now
+    }
+    if (JSON.stringify(proof) === JSON.stringify(current.proof) && status === current.status) return;
+    this.store.emit({ type: "outcome.reported", outcome: { ...current, proof, status } });
   }
 
   async refreshChanges() {
@@ -548,6 +642,7 @@ export class AgentSession {
     // Everything still running belongs to the turn being cancelled; a late "completed" from the agent
     // won't reopen it (terminal tool states are sticky, see tool_call_update).
     this.closeOpenTools("cancelled");
+    this.checksAbort?.abort(); // Stop while the daemon runs the declared checks: kill them, no fix round
     if (this.conn && this.info.acpSessionId) await this.conn.cancel({ sessionId: this.info.acpSessionId });
   }
 
@@ -617,6 +712,7 @@ export class AgentSession {
           command,
           title,
           own: OWN_TOOL.test(title) || OWN_TOOL.test(toolName(params.toolCall) ?? "") || !!known?.own,
+          declared: this.info.declaredChecks?.map((c) => c.run),
         });
         const pick = (...kinds: acp.PermissionOptionKind[]) => kinds.map((k) => params.options.find((o) => o.kind === k)).find(Boolean);
         if (DEBUG) console.error(`[perm ${this.info.id.slice(0, 6)}] ${kind} ${JSON.stringify(command ?? title).slice(0, 120)} -> ${JSON.stringify(verdict)}`);

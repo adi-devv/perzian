@@ -1,7 +1,8 @@
 // Daemon-side permission policy: what the daemon answers on its own and what goes to the developer.
 //
 // - The lead ("main") never edits: edit/delete/move/execute requests are rejected without a card.
-// - Workers run verification commands (tests, typecheck, lint, build) without a card.
+// - Workers run verification commands (tests, typecheck, lint, build), and the exact commands the repo
+//   declares as checks in perzian.json, without a card.
 // - Destructive commands (rm -rf, force pushes, hard resets, dropping databases...) always get a card,
 //   in every mode. Our "edits" and "auto" modes are enforced here rather than by the agent's own
 //   accept-edits/bypass modes, because an agent in those modes doesn't ask before running rm -rf.
@@ -18,10 +19,12 @@ export interface PermissionRequest {
   title?: string;
   /** Our own report/orchestration MCP tools. */
   own?: boolean;
+  /** Commands the repo declares as checks (perzian.json `run`); a worker runs exactly these without a card. */
+  declared?: string[];
 }
 
 export type PermissionVerdict =
-  | { action: "allow"; why: "own" | "read" | "check" | "edits" | "auto" }
+  | { action: "allow"; why: "own" | "read" | "check" | "declared" | "edits" | "auto" }
   | { action: "deny"; why: "lead-edit" | "lead-exec" }
   | { action: "ask"; destructive?: string };
 
@@ -43,6 +46,8 @@ export function permissionPolicy(req: PermissionRequest): PermissionVerdict {
   const destructive = (req.command !== undefined ? destructiveReason(req.command) : null) ?? (req.toolKind === "execute" && req.title ? destructiveReason(req.title) : null);
   if (destructive) return { action: "ask", destructive };
   if (req.toolKind === "execute" && req.command !== undefined && isVerificationCommand(req.command)) return { action: "allow", why: "check" };
+  // Exactly a declared check's command (surrounding whitespace aside); anything added to it asks as usual.
+  if (req.toolKind === "execute" && req.command !== undefined && req.declared?.includes(req.command.trim())) return { action: "allow", why: "declared" };
   if (req.mode === "auto") return { action: "allow", why: "auto" };
   if (req.mode === "edits" && req.toolKind && WORKER_EDITS.has(req.toolKind)) return { action: "allow", why: "edits" };
   return { action: "ask" };

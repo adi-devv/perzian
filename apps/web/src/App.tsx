@@ -5,6 +5,7 @@ import {
   byAttention,
   isUnseen,
   type AgentKind,
+  type CheckRun,
   type Command,
   type PermissionMode,
   type SessionInfo,
@@ -546,6 +547,64 @@ function SetupBar({ s, send }: { s: SessionInfo; send: Send }) {
   );
 }
 
+/* ───────────── Declared checks (perzian.json): the daemon runs them when the agent finishes ───────────── */
+
+const RUN_LABEL: Record<CheckRun["state"], (r: CheckRun) => string> = {
+  running: () => "Running",
+  fixing: (r) => `Sent back to the agent · fix ${r.attempt} of ${r.maxAttempts}`,
+  passed: () => "All pass",
+  failed: (r) => `Still failing after ${r.maxAttempts} fixes · needs you`,
+  cancelled: () => "Stopped",
+};
+
+function DeclaredChecks({ s, send }: { s: SessionInfo; send: Send }) {
+  const declared = s.declaredChecks ?? [];
+  if (s.checksError) {
+    return (
+      <section>
+        <h3 className="eyebrow">Checks</h3>
+        <p className="checks-error">✕ {s.checksError}</p>
+      </section>
+    );
+  }
+  if (!declared.length) return null;
+  const run = s.checkRun;
+  const byName = new Map((run?.results ?? []).map((r) => [r.name, r]));
+  const failed = (run?.results ?? []).filter((r) => r.state === "failed");
+  return (
+    <section>
+      <h3 className="eyebrow">
+        Checks <b>{declared.length}</b>
+        {run && <span className={`checks-state cr-${run.state}`}>{RUN_LABEL[run.state](run)}</span>}
+      </h3>
+      <ul className="checks">
+        {declared.map((c) => {
+          const r = byName.get(c.name);
+          const state = r?.state ?? "pending";
+          const meta = r && (r.state === "passed" || r.state === "failed") ? [r.summary ?? (r.exitCode !== undefined ? `exit ${r.exitCode}` : undefined), r.durationMs !== undefined ? `${(r.durationMs / 1000).toFixed(1)}s` : undefined].filter(Boolean).join(" · ") : "";
+          return (
+            <li key={c.name} className={`check ck-${state}`} title={[`$ ${c.run}`, r?.exitCode !== undefined && `exit ${r.exitCode}`, r?.timedOut && "timed out"].filter(Boolean).join("\n")}>
+              <span className="check-mark">{state === "passed" ? "✓" : state === "failed" ? "✕" : state === "running" ? "◌" : "·"}</span>
+              <span className="check-name">{c.name}</span>
+              <code className="check-run">{c.run}</code>
+              {meta && <span className="check-meta">{meta}</span>}
+              {state === "failed" && r?.tail && <pre className="check-tail">{r.tail}</pre>}
+            </li>
+          );
+        })}
+      </ul>
+      {run?.state === "failed" && failed.length > 0 && (
+        <button
+          className="btn small"
+          onClick={() => send({ type: "session.prompt", sessionId: s.id, prompt: `These required checks fail: ${failed.map((r) => `${r.name} (\`${r.run}\`)`).join(", ")}. Find the cause and fix it, then run them again.` })}
+        >
+          Ask the agent to fix
+        </button>
+      )}
+    </section>
+  );
+}
+
 /* ───────────── Drawer: deep dive into one session ───────────── */
 
 function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; state: State; send: Send; onClose: () => void; onFile: (path: string) => void; onOpen: (id: string) => void }) {
@@ -630,6 +689,8 @@ function Drawer({ s, state, send, onClose, onFile, onOpen }: { s: SessionInfo; s
             <p className="quiet">{s.status === "working" || s.status === "needs_you" ? "Lands here when the agent finishes, with proof." : s.status === "failed" ? "None. The agent stopped before reporting one." : "No outcome yet. Send a task to get one."}</p>
           </section>
         )}
+
+        <DeclaredChecks s={s} send={send} />
 
         <section>
           <h3 className="eyebrow">

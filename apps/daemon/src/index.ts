@@ -13,7 +13,7 @@ import { ship } from "./ship.ts";
 import { doctor, doctorHeaders, installCommand, resetDoctorCache } from "./doctor.ts";
 import { Credentials, PROVIDERS } from "./credentials.ts";
 import { exec } from "node:child_process";
-import { detectChecks } from "./checks.ts";
+import { allChecks, detectChecks, loadDeclaredChecks } from "./checks.ts";
 import { LeadNotifier, type ChildReport } from "./notify.ts";
 import type { AgentKind, ApiKeyProvider, InstallResult } from "@perzian/protocol";
 
@@ -65,6 +65,12 @@ const OPEN_TOOL = (status: string) => status !== "completed" && status !== "fail
     for (const t of state.transcripts[info.id] ?? []) {
       if (t.kind === "tool" && OPEN_TOOL(t.status)) store.emit({ type: "session.transcript", sessionId: info.id, item: { ...t, status: "cancelled", at } });
     }
+    const run = info.checkRun;
+    if (run && (run.state === "running" || run.state === "fixing")) {
+      const results = run.results.map((r) => (r.state === "running" ? { ...r, state: "pending" as const } : r));
+      s.info.checkRun = { ...run, state: "cancelled", results, at };
+      store.emit({ type: "session.updated", sessionId: info.id, patch: { checkRun: s.info.checkRun } });
+    }
     if (info.status === "working" || info.status === "needs_you") {
       s.notice("Interrupted: the daemon restarted during this turn");
       s.setStatus("idle");
@@ -115,11 +121,14 @@ async function createSession(args: CreateSessionArgs, extra: { role?: "main" | "
   const id = crypto.randomUUID();
   const title = args.title?.trim() || args.prompt.split("\n")[0].slice(0, 48) || basename(project);
   const ws = await prepareWorkspace(project, home, title, id, !!args.worktree);
-  const checks = detectChecks(ws.cwd);
+  // perzian.json from the worktree (committed), else the checkout (not committed yet). Read once, here.
+  const declared = loadDeclaredChecks(ws.cwd, project);
+  const checks = allChecks(detectChecks(ws.cwd), declared.checks);
   const s = AgentSession.create(
-    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode, checks, ...extra },
+    { id, project, cwd: ws.cwd, branch: ws.branch, worktree: ws.worktree, baseSha: ws.baseSha, baseBranch: "baseBranch" in ws ? ws.baseBranch : undefined, title, agent: args.agent ?? "claude-code", model: args.model, mode: args.mode, checks, declaredChecks: declared.checks, checksError: declared.error, ...extra },
     deps,
   );
+  if (declared.error) s.notice(`${declared.error}. Declared checks won't run until it's fixed.`);
   notifier.childPrompted(s.info.id, !!extra.parentId);
   sessions.set(s.info.id, s);
   // A fresh worktree gets the checkout's local files and its dependencies before the first prompt goes out.
@@ -227,6 +236,10 @@ function brief(info: SessionInfo) {
     status: info.status,
     progress: info.progress,
     checks: info.checks,
+    // perzian.json checks the daemon runs itself when the worker finishes, and how the last run went.
+    requiredChecks: info.declaredChecks?.map((c) => `${c.name}: ${c.run}`),
+    requiredChecksResult: info.checkRun && { state: info.checkRun.state, failed: info.checkRun.results.filter((r) => r.state === "failed").map((r) => r.name) },
+    checksError: info.checksError,
     changedFiles: (state.changes[info.id] ?? []).map((f) => `${f.kind[0].toUpperCase()} ${f.path} +${f.additions}/-${f.deletions}`),
     outcome: outcome && { status: outcome.status, intent: outcome.intent, proof: outcome.proof, risks: outcome.risks },
     lastMessage: lastAgent && lastAgent.kind === "agent" ? lastAgent.text.slice(0, 500) : undefined,

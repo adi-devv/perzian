@@ -25,6 +25,29 @@ export const demoEvents: PerzianEvent[] = [
   { type: "session.updated", sessionId: "a", patch: { usage: { costUsd: 0.41, contextUsed: 38_000, contextSize: 200_000 } } },
   { type: "session.updated", sessionId: "d", patch: { usage: { costUsd: 0.87, contextUsed: 168_000, contextSize: 200_000 } } },
   { type: "session.updated", sessionId: "e", patch: { usage: { contextUsed: 61_000, contextSize: 258_000 } } },
+  // Checks declared in perzian.json, run by the daemon when the agent finished.
+  {
+    type: "session.updated",
+    sessionId: "d",
+    patch: {
+      declaredChecks: [{ name: "unit", run: "npm test" }, { name: "visual", run: "npm run test:visual", timeoutSec: 600 }],
+      checkRun: { state: "passed", attempt: 0, maxAttempts: 2, at: t - 1_000_000, results: [
+        { name: "unit", run: "npm test", state: "passed", exitCode: 0, durationMs: 8_400, summary: "212 passed" },
+        { name: "visual", run: "npm run test:visual", state: "passed", exitCode: 0, durationMs: 41_200, summary: "38 passed" },
+      ] },
+    },
+  },
+  {
+    type: "session.updated",
+    sessionId: "c",
+    patch: {
+      declaredChecks: [{ name: "unit", run: "npm test" }, { name: "e2e", run: "npx playwright test checkout" }],
+      checkRun: { state: "failed", attempt: 2, maxAttempts: 2, at: t - 800_000, results: [
+        { name: "unit", run: "npm test", state: "passed", exitCode: 0, durationMs: 9_100, summary: "188 passed" },
+        { name: "e2e", run: "npx playwright test checkout", state: "failed", exitCode: 1, durationMs: 63_500, summary: "1 failed, 11 passed", tail: "  1) checkout.spec.ts:42:5 › pays with a saved card\n    Error: Timed out 5000ms waiting for expect(locator).toBeVisible()\n    Locator: getByText('Order confirmed')\n  1 failed\n  11 passed (1.1m)" },
+      ] },
+    },
+  },
 
   { type: "session.progress", sessionId: "b", progress: { phase: "Implement", step: 3, of: 5, note: "middleware" } },
   { type: "session.progress", sessionId: "e", progress: { phase: "Implement", step: 2, of: 4 } },

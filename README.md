@@ -64,6 +64,26 @@ or set `CLAUDE_CODE_EXECUTABLE` / `CODEX_PATH`. In a source checkout it falls ba
 `npm run dist` builds the macOS app (~116 MB download). It doesn't bundle the agent CLIs: if one is missing,
 onboarding installs it with the official installer in one click.
 
+## Required checks: `perzian.json`
+
+Put a `perzian.json` at the repo root to name checks that must pass, next to the ones Perzian detects
+(`npm test`, `pytest`, `cargo test`…):
+
+```json
+{
+  "checks": [
+    { "name": "unit", "run": "npm test" },
+    { "name": "kodo tests", "run": "kodo test --all", "timeoutSec": 600 }
+  ]
+}
+```
+
+When an agent finishes, Perzian runs each `run` command itself in the session's worktree (default timeout 300 s)
+and shows ✓/✕ with the real exit code in the session drawer. Failures go back to the agent to fix, up to 2 times;
+then the session is marked failed for you to look at. Agents see the checks in their brief and can run exactly
+these commands without a permission card. The file is read when a session starts; a malformed one shows an error
+and its checks don't run.
+
 ## How it works
 
 ```
