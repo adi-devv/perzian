@@ -17,7 +17,7 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 
 ## Features
 1. **Phone access, try phases 1 and 2 on a real phone** (`Open on phone` in the sidebar): Tailscale and the Cloudflare quick tunnel, then Web Push on an iPhone (Home Screen app) and Android.
-   Confirm a real push arrives and tapping opens the session. Not done: a push for the account usage card (there is no account-level event yet; a session pausing at a limit doesn't push).
+   Confirm a real push arrives and tapping opens the session. The account usage card pushes too (while unanswered).
    Same Wi-Fi without Tailscale is a view-only fallback (no HTTPS, so no push), only if people ask.
 2. **Branches for teams.** Teams don't ship straight to main. PR is already the default ship action. Next: base picker on New session (lead can pass `base`),
    fetch and branch from `origin/<base>` (offline falls back to local with a note), then "Base moved" (N behind, one-click update) and stacking on another session's branch.

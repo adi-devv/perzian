@@ -78,6 +78,9 @@ export interface PushPayload {
   urgent: boolean;
 }
 
+/** Stands in for a session id on the account usage card's push. */
+export const USAGE_ID = "usage-card";
+
 const WORD: Record<PushKind, string> = { needs_you: "Needs you", failed: "Failed", done: "Done" };
 const URGENCY: Record<PushKind, number> = { needs_you: 0, failed: 1, done: 2 };
 
@@ -99,7 +102,7 @@ export function buildPayload(items: PushItem[]): PushPayload {
   if (list.length === 1) {
     const i = list[0];
     const id = i.sessionId.replace(/[^\w-]/g, "");
-    return { title: WORD[i.kind], body: oneLine(i.title, 80) || "A session", tag: "perzian", url: `/#session=${id}`, urgent };
+    return { title: WORD[i.kind], body: oneLine(i.title, 80) || "A session", tag: "perzian", url: i.sessionId === USAGE_ID ? "/" : `/#session=${id}`, urgent };
   }
   const n = (k: PushKind) => list.filter((i) => i.kind === k).length;
   const parts = [n("needs_you") && `${n("needs_you")} need you`, n("failed") && `${n("failed")} failed`, n("done") && `${n("done")} done`].filter(Boolean);
@@ -108,6 +111,8 @@ export function buildPayload(items: PushItem[]): PushPayload {
 
 /** The push-worthy moment in an event, if it is one: a session that needs you, failed or is done. */
 export function itemForEvent(e: PerzianEvent, sessions: Record<string, SessionInfo>): PushItem | undefined {
+  // The account usage card, while unanswered: it pauses everything if nobody answers in time.
+  if (e.type === "usage.card") return e.card.answer ? undefined : { sessionId: USAGE_ID, kind: "needs_you", title: `Usage ${Math.round(e.card.utilization * 100)}%` };
   if (e.type !== "session.status") return undefined;
   if (e.status !== "needs_you" && e.status !== "failed" && e.status !== "done") return undefined;
   const s = sessions[e.sessionId];

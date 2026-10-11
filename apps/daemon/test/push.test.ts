@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PerzianEvent, SessionInfo } from "@perzian/protocol";
 import { Devices, PairingCodes, createPhoneServer } from "../src/phone.ts";
-import { Coalescer, Presence, PushSender, buildPayload, itemForEvent, loadVapid, validateSubscription, type PushItem, type PushSubscriptionJSON } from "../src/push.ts";
+import { Coalescer, Presence, PushSender, USAGE_ID, buildPayload, itemForEvent, loadVapid, validateSubscription, type PushItem, type PushSubscriptionJSON } from "../src/push.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "pz-push-"));
 const sub = (n: string): PushSubscriptionJSON => ({ endpoint: `https://fcm.googleapis.com/fcm/send/${n}`, keys: { p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM", auth: "tBHItJI5svbpez7KI4CCXg" } });
@@ -273,5 +273,19 @@ describe("when pushes are skipped or dropped", () => {
     p.report(true);
     p.report(false);
     assert.equal(p.active(), false);
+  });
+});
+
+describe("usage card push", () => {
+  const card = { key: "five_hour:1", resetsAt: 0, utilization: 0.95, at: 0, autoAt: 0 };
+  test("an unanswered card pushes as needs-you and opens the app root", () => {
+    const item = itemForEvent({ type: "usage.card", card } as PerzianEvent, {});
+    assert.deepEqual(item, { sessionId: USAGE_ID, kind: "needs_you", title: "Usage 95%" });
+    const p = buildPayload([item!]);
+    assert.equal(p.url, "/");
+    assert.equal(p.body, "Usage 95%");
+  });
+  test("an answered card doesn't push", () => {
+    assert.equal(itemForEvent({ type: "usage.card", card: { ...card, answer: { choice: "pause", at: 1 } } } as PerzianEvent, {}), undefined);
   });
 });
