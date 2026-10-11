@@ -26,8 +26,14 @@ export interface SessionInfo {
   acpSessionId?: string;
   archived?: boolean;
   seenAt?: number;
-  /** Check commands detected in the project (e.g. "npm test", "npm run typecheck"); named in the worker's brief. */
+  /** Check commands for the project (detected, e.g. "npm test", plus declared ones); named in the worker's brief. */
   checks?: string[];
+  /** Checks declared in the repo's perzian.json, read once at spawn. The daemon runs them when the agent finishes. */
+  declaredChecks?: DeclaredCheck[];
+  /** Why perzian.json couldn't be used (malformed JSON, a bad field); its checks don't run until fixed. */
+  checksError?: string;
+  /** The latest run of the declared checks. */
+  checkRun?: CheckRun;
   /** What the agent reports it has spent and how full its context is. Codex may report only context. */
   usage?: SessionUsage;
   /** The branch a worktree session was cut from; "Merge" lands the work back here. */
@@ -36,6 +42,36 @@ export interface SessionInfo {
   ship?: ShipState;
   createdAt: number;
   updatedAt: number;
+}
+
+/** One entry of perzian.json `checks`: `{ "name": "unit", "run": "npm test", "timeoutSec": 600 }`. */
+export interface DeclaredCheck {
+  name: string;
+  run: string;
+  timeoutSec?: number;
+}
+
+export interface CheckResult {
+  name: string;
+  run: string;
+  state: "pending" | "running" | "passed" | "failed";
+  exitCode?: number;
+  timedOut?: boolean;
+  durationMs?: number;
+  /** Last lines of output, for failures. */
+  tail?: string;
+  /** Parsed from the output when the runner is recognized, e.g. "3 failed, 42 passed". */
+  summary?: string;
+}
+
+export interface CheckRun {
+  /** running: in progress · fixing: failures went back to the agent · passed · failed: out of fix attempts, needs you · cancelled: stopped. */
+  state: "running" | "fixing" | "passed" | "failed" | "cancelled";
+  /** Fix rounds the agent has had for this task so far, and the cap. */
+  attempt: number;
+  maxAttempts: number;
+  results: CheckResult[];
+  at: number;
 }
 
 export interface ShipState {

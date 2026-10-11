@@ -60,6 +60,7 @@ passes through one policy:
 | lead: read/search | allowed |
 | worker: destructive command (`rm -rf`, force push, `reset --hard`, `clean -f`, dropping a database…) | always a card, flagged `destructive`, no "always allow" option |
 | worker: one plain check command (`npm test`, `npm run typecheck`, `tsc --noEmit`, `pytest`, `cargo test`, `go test`…; no `;` `&&` `\|` `$(` redirects) | allowed once |
+| worker: exactly a `run` command declared in `perzian.json` (read at spawn) | allowed once |
 | worker in `edits`: edits and reads | allowed once |
 | worker in `auto`: anything else | allowed once |
 | otherwise | a card |
@@ -83,6 +84,14 @@ test/typecheck/lint/build with the lockfile's package manager, pytest/mypy/ruff,
 `test` target) into `SessionInfo.checks`, appends `Checks available: …` to the worker's first prompt, and
 returns them from `list_sessions`/`get_session`. Later worker prompts get a one-line rules reminder
 (`FOLLOWUP_REMINDER`).
+
+**Declared checks:** a repo's `perzian.json` (`{ "checks": [{ name, run, timeoutSec? }] }`) is validated and read
+once at spawn (worktree first, then the checkout) into `SessionInfo.declaredChecks`, or `checksError` when
+malformed. The brief adds a `Required checks: …` line. When a worker turn ends (`end_turn`) having changed files
+or reported an outcome, the daemon runs each check through the shell in the session's cwd (own process group,
+timeout, output tail), publishes `SessionInfo.checkRun` as it goes, and merges the results into the outcome as
+observed proof. Failures go back to the agent as a system prompt; after `MAX_FIX_ATTEMPTS` (2) rounds the session
+is set `failed` with a notice. A fix round always re-runs the checks. Stop kills a running check.
 
 ## Change map
 
