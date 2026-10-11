@@ -14,6 +14,7 @@
     "build": "npm run build --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "e2e": "tsx scripts/e2e.ts",
+    "eval": "node evals/run.mjs",
     "test": "tsx --test packages/*/test/*.test.ts apps/*/test/*.test.ts",
     "bundle": "node scripts/build-bundle.mjs",
     "dist": "node scripts/build-app.mjs",

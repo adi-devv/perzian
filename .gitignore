@@ -7,3 +7,4 @@ dist/
 release/
 dist-site/
 .claude/worktrees/
+evals/results/*/
