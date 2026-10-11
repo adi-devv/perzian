@@ -22,7 +22,7 @@ import { PairScreen, PhoneButton, PhoneHome, useNarrow } from "./phone.tsx";
 import { tokenize } from "./highlight.ts";
 import type { ThemedToken } from "shiki/core";
 import { Count, Slot, useExiting, useFlip, useLinger } from "./motion.tsx";
-import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, STATUS_LABEL, StatusGlyph, Usage, ago, churn, cost, pauseTitle, resumeTime, statusText, useTick } from "./bits.tsx";
+import { ChangeMap, ChurnBar, DecisionCard, ProofPills, Ring, StatusGlyph, Usage, ago, churn, cost, pauseTitle, resumeTime, statusText, useTick } from "./bits.tsx";
 
 type Send = (c: Command) => void;
 
@@ -35,6 +35,7 @@ export function App() {
   const [accounts, setAccounts] = useState(false);
   const [project, setProject] = useState(loadProject);
   const [crewFilter, setCrewFilter] = useState<CrewKey | null>(null);
+  const [decIdx, setDecIdx] = useState(0);
   const narrow = useNarrow();
   useTick();
 
@@ -114,14 +115,15 @@ export function App() {
       } else if (e.key === "/") {
         e.preventDefault();
         document.getElementById("main-composer")?.focus();
-      } else if (/^[1-9]$/.test(e.key) && decisions[0]) {
-        const opt = decisions[0].options[Number(e.key) - 1];
-        if (opt) send({ type: "decision.answer", decisionId: decisions[0].id, optionId: opt.id });
+      } else if (/^[1-9]$/.test(e.key) && decisions.length) {
+        const shown = decisions[Math.min(decIdx, decisions.length - 1)];
+        const opt = shown.options[Number(e.key) - 1];
+        if (opt) send({ type: "decision.answer", decisionId: shown.id, optionId: opt.id });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [decisions, viewing, creating, help]);
+  }, [decisions, decIdx, viewing, creating, help]);
 
   const sel = selected ? state.sessions[selected] : null;
   // The drawer stays mounted briefly after closing so it can slide out.
@@ -148,6 +150,8 @@ export function App() {
         send={send}
         onOpen={open}
         decisions={decisions}
+        decIdx={decIdx}
+        onDecIdx={setDecIdx}
         link={link}
         onStart={startLead}
         blocked={gate.ready ? undefined : gate.blocker}
@@ -216,8 +220,6 @@ function retryTarget(items: TranscriptItem[], status: SessionInfo["status"]): { 
 /* ───────────── Sidebar: every session at a glance ───────────── */
 
 function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, onHelp, onAccounts, connected, filter, onClearFilter }: { state: State; main?: SessionInfo; workers: SessionInfo[]; selected: string | null; onSelect: (id: string | null) => void; onNew: () => void; onImport: () => void; onHelp: () => void; onAccounts: () => void; connected: boolean; filter: CrewKey | null; onClearFilter: () => void }) {
-  const counts = { needs_you: 0, working: 0, failed: 0, done: 0, idle: 0, paused: 0 };
-  for (const s of workers) counts[s.status]++;
   const spent = [main, ...workers].reduce((n, s) => n + (s?.usage?.costUsd ?? 0), 0);
   const groups = new Map<string, SessionInfo[]>();
   for (const s of workers.filter((w) => !filter || crewMatch(filter, w))) groups.set(s.project, [...(groups.get(s.project) ?? []), s]);
@@ -235,15 +237,6 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
         <span className={`conn ${connected ? "on" : "off"}`} title={connected ? "Daemon connected" : "Daemon offline"} />
       </div>
 
-      <div className="glance" aria-label="Status summary">
-        {(["needs_you", "working", "failed", "done"] as const).map((k) => (
-          <div key={k} className={`glance-cell s-${k} ${counts[k] ? "" : "zero"}`} title={STATUS_LABEL[k]}>
-            <Count n={counts[k]} />
-            <span>{STATUS_LABEL[k]}</span>
-          </div>
-        ))}
-      </div>
-
       <button className={`row main-row ${selected === null ? "active" : ""} ${main ? `s-${main.status}` : ""}`} onClick={() => onSelect(null)}>
         <span className="mark small" aria-hidden />
         <span className="row-title">Perzian</span>
@@ -256,11 +249,10 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
           <section key={project} className="side-group">
             <h3 className="eyebrow">{project.split("/").slice(-1)[0]}</h3>
             {list.map((s) => (
-              <button key={s.id} data-flip={s.id} className={`row s-${s.status} ${selected === s.id ? "active" : ""} ${s.live === false ? "dormant" : ""}`} onClick={() => onSelect(selected === s.id ? null : s.id)} title={`${statusText(s)} · ${s.branch ?? s.project}`}>
+              <button key={s.id} data-flip={s.id} className={`row s-${s.status} ${selected === s.id ? "active" : ""} ${s.live === false ? "dormant" : ""} ${isUnseen(s) ? "unseen-row" : ""}`} onClick={() => onSelect(selected === s.id ? null : s.id)} title={`${statusText(s)} · ${s.branch ?? s.project}${isUnseen(s) ? " · new result" : ""}`}>
                 <StatusGlyph s={s} />
                 <span className="row-title">{s.title}</span>
                 {s.status === "paused" && s.pause && <span className="row-note">{resumeTime(s.pause)}</span>}
-                {isUnseen(s) && <span className="unseen" aria-label="New result" />}
                 <ChurnBar files={state.changes[s.id] ?? []} />
               </button>
             ))}
@@ -298,26 +290,37 @@ function Sidebar({ state, main, workers, selected, onSelect, onNew, onImport, on
 
 /* ───────────── Thread: the main agent conversation, made of cards ───────────── */
 
-function Thread({ crewFilter, onCrewFilter, state, main, send, onOpen, decisions, link, onStart, blocked, focus, firstRun }: { crewFilter: CrewKey | null; onCrewFilter: (k: CrewKey | null) => void; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode }) {
+function Thread({ crewFilter, onCrewFilter, state, main, send, onOpen, decisions, decIdx, onDecIdx, link, onStart, blocked, focus, firstRun }: { crewFilter: CrewKey | null; onCrewFilter: (k: CrewKey | null) => void; state: State; main?: SessionInfo; send: Send; onOpen: (id: string) => void; decisions: State["decisions"][string][]; decIdx: number; onDecIdx: (i: number) => void; link: Link; onStart: (prompt: string) => void; blocked?: string; focus?: boolean; firstRun: React.ReactNode }) {
   const items = main ? (state.transcripts[main.id] ?? []) : [];
   const empty = Object.keys(state.sessions).length === 0;
   const retry = main ? retryTarget(items, main.status) : null;
   const end = useRef<HTMLDivElement>(null);
   // An answered card collapses out instead of vanishing; the ones after it slide up.
   const cards = useExiting(decisions, (d) => d.id);
-  const needsList = useFlip<HTMLDivElement>(cards.map((c) => c.item.id).join());
+  const cur = Math.min(decIdx, Math.max(0, cards.length - 1));
+  const shown = cards[cur];
+  // The demo's "this is scripted" notices are a dismissible hint above the composer, not a line in the stream.
+  const demoNote = isDemo ? [...items].reverse().find((i) => i.kind === "notice" && i.text.startsWith("Demo:")) : undefined;
+  const [hintGone, setHintGone] = useState(() => {
+    try {
+      return localStorage.getItem("perzian.demoHint") === "1";
+    } catch {
+      return false;
+    }
+  });
   useEffect(() => {
     end.current?.scrollIntoView({ block: "end" });
   }, [items.length, decisions.length]);
 
   return (
     <main className="thread">
-      <CrewStrip state={state} filter={crewFilter} onFilter={onCrewFilter} onOpen={onOpen} />
       <div className="thread-head drag">
-        <h1>{main ? "Perzian" : "Talk to Perzian"}</h1>
-        {main && <ModelPicker s={main} state={state} send={send} />}
+        <h1 className="sr">Perzian</h1>
+        <CrewStrip state={state} filter={crewFilter} onFilter={onCrewFilter} onOpen={onOpen} />
+        <span className="grow" />
         {main?.status === "working" && <span className="thinking">thinking</span>}
         {main?.status === "paused" && <Paused s={main} send={send} />}
+        {main && <ModelPicker s={main} state={state} send={send} />}
       </div>
 
       <div className="thread-scroll">
@@ -331,20 +334,43 @@ function Thread({ crewFilter, onCrewFilter, state, main, send, onOpen, decisions
       </div>
 
       <div className="dock">
-        {cards.length > 0 && (
+        {shown && (
           <div className="needs" aria-label="Needs you">
-            <h2 className="eyebrow s-needs_you">
-              <span className="dot" /> Needs you <Count n={decisions.length} />
-            </h2>
-            <div className="needs-list" ref={needsList}>
-              {cards.map(({ item: d, leaving }) => (
-                <Slot key={d.id} id={d.id} leaving={leaving}>
-                  <DecisionCard d={d} session={state.sessions[d.sessionId]} onOpen={() => onOpen(d.sessionId)} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: d.id, optionId })} />
-                </Slot>
-              ))}
+            <div className="needs-head">
+              <span className="eyebrow s-needs_you">
+                <span className="dot" /> Needs you
+              </span>
+              {decisions.length > 1 && (
+                <span className="stepper" role="group" aria-label="Pending decisions">
+                  <button className="icon" aria-label="Previous" disabled={cur === 0} onClick={() => onDecIdx(cur - 1)}>‹</button>
+                  <span><Count n={cur + 1} /> of {decisions.length}</span>
+                  <button className="icon" aria-label="Next" disabled={cur >= cards.length - 1} onClick={() => onDecIdx(cur + 1)}>›</button>
+                </span>
+              )}
             </div>
-            {decisions.length > 0 && <p className="hint">Press 1–{Math.min(9, decisions[0].options.length)} to answer the first card</p>}
+            <Slot key={shown.item.id} id={shown.item.id} leaving={shown.leaving}>
+              <DecisionCard d={shown.item} session={state.sessions[shown.item.sessionId]} onOpen={() => onOpen(shown.item.sessionId)} onAnswer={(optionId) => send({ type: "decision.answer", decisionId: shown.item.id, optionId })} />
+            </Slot>
+            <p className="hint">Press 1–{Math.min(9, shown.item.options.length)} to answer</p>
           </div>
+        )}
+        {demoNote && demoNote.kind === "notice" && !hintGone && (
+          <p className="hint demo-hint">
+            {demoNote.text}{" "}
+            <button
+              className="text-link"
+              onClick={() => {
+                setHintGone(true);
+                try {
+                  localStorage.setItem("perzian.demoHint", "1");
+                } catch {
+                  /* private mode */
+                }
+              }}
+            >
+              Dismiss
+            </button>
+          </p>
         )}
         <Composer
           id="main-composer"
@@ -440,6 +466,7 @@ function ThreadItems({ items, state, onOpen, retry }: { items: TranscriptItem[];
           case "agent":
             return <div key={i} className="msg agent">{b.text}</div>;
           case "notice":
+            if (isDemo && b.text.startsWith("Demo:")) return null;
             return isFailureNotice(b.text) ? (
               <FailureNotice key={i} text={b.text} onRetry={b === retryItem ? retry?.run : undefined} />
             ) : (
@@ -468,10 +495,12 @@ function SystemUpdate({ text }: { text: string }) {
 }
 
 function ToolStrip({ tools }: { tools: TranscriptItem[] }) {
+  const failed = tools.filter((t) => t.kind === "tool" && t.status === "failed").length;
+  const titles = tools.map((t) => (t.kind === "tool" ? t.title : "")).filter(Boolean).join("\n");
   return (
-    <div className="toolstrip">
-      {tools.map((t) => t.kind === "tool" && <span key={t.toolCallId} className={`act k-${t.toolKind ?? "other"} st-${t.status}`} title={t.title} />)}
-      <span className="toolstrip-n">{tools.length} action{tools.length === 1 ? "" : "s"}</span>
+    <div className="toolstrip" title={titles}>
+      {tools.length} action{tools.length === 1 ? "" : "s"}
+      {failed > 0 && <span className="toolstrip-fail"> · {failed} failed</span>}
     </div>
   );
 }
@@ -487,42 +516,19 @@ function Paused({ s, send }: { s: SessionInfo; send: Send }) {
   );
 }
 
-// A spawned session, inline in the conversation, updating live.
+// A spawned session, inline in the conversation as one line, updating live. Branch, files and
+// proof live in the drawer one click away.
 function LiveCard({ s, state, onOpen }: { s: SessionInfo; state: State; onOpen: () => void }) {
-  const files = state.changes[s.id] ?? [];
-  const outcome = state.outcomes[s.id];
-  const { add, del } = churn(files);
   const pending = Object.values(state.decisions).filter((d) => d.sessionId === s.id).length;
+  const files = state.changes[s.id] ?? [];
+  const { add, del } = churn(files);
+  const detail = [s.branch, AGENTS[s.agent].label, files.length ? `${files.length} files +${add} −${del}` : ""].filter(Boolean).join(" · ");
   return (
-    <button className={`live s-${s.status}`} onClick={onOpen}>
-      <div className="live-top">
-        <StatusGlyph s={s} />
-        <span className="live-title">{s.title}</span>
-        <span key={statusText(s)} className="live-status" title={pauseTitle(s)}>{statusText(s)}{pending > 1 ? ` · ${pending}` : ""}</span>
-        <span className="age">{ago(s.updatedAt)}</span>
-      </div>
-      <div className="live-meta">
-        {s.branch && <code>{s.branch}</code>}
-        <span className="agent-badge">{AGENTS[s.agent].label}</span>
-        {s.usage?.costUsd !== undefined && <span className="agent-badge">{cost(s.usage.costUsd)}</span>}
-        {s.status === "working" && s.setup?.state === "running" && s.setup.current && <span className="live-phase">{s.setup.current}</span>}
-        {s.progress && s.status === "working" && (
-          <span className="live-phase">
-            {s.progress.phase} · {s.progress.step}/{s.progress.of}
-          </span>
-        )}
-        {files.length > 0 && (
-          <span className="live-churn">
-            {files.length} files <em className="a">+{add}</em> <em className="d">−{del}</em>
-          </span>
-        )}
-      </div>
-      {outcome && (s.status === "done" || s.status === "failed") && (
-        <div className="live-outcome">
-          <ProofPills o={outcome} />
-          {outcome.risks[0] && <span className="risk">⚠ {outcome.risks[0]}</span>}
-        </div>
-      )}
+    <button className={`live s-${s.status}`} onClick={onOpen} title={detail}>
+      <span className="live-arrow" aria-hidden>↳</span>
+      <StatusGlyph s={s} />
+      <span className="live-title">{s.title}</span>
+      <span key={statusText(s)} className="live-status" title={pauseTitle(s)}>{statusText(s)}{pending > 1 ? ` · ${pending}` : ""}</span>
     </button>
   );
 }
