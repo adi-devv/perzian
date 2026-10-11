@@ -113,6 +113,7 @@ server.tool(
     mode: z.enum(["ask", "edits", "plan", "auto"]).optional().describe("Omit for the developer's default. plan = analysis only, no edits; auto = only if the developer asked for hands-off"),
     worktree: z.boolean().optional().describe("Omit: every session gets its own git worktree and branch by default. false only when the developer asks to work directly on their branch"),
     extraDirs: z.array(z.string()).optional().describe("Absolute paths of extra folders (besides project) the session may edit without asking, e.g. a sibling package"),
+    attachments: z.array(z.string()).optional().describe("Attachment ids (shown as \"attachment id ...\" in the developer's message) to hand this worker, e.g. a screenshot of the bug; it gets the image or its file path"),
     base: z
       .string()
       .optional()

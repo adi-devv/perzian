@@ -6,7 +6,8 @@ import { FailureNotice } from "./onboarding.tsx";
 import { tokenize } from "./highlight.ts";
 import { Slot, useExiting } from "./motion.tsx";
 import { RepoMap } from "./repomap.tsx";
-import { Composer, DecisionCard, DecisionLine, gitChip, ModePicker, ModelPicker, StatusGlyph, Usage, ago, churn, prSummary, retryTarget, stackedOn, statusText } from "./bits.tsx";
+import { Attached, Composer, ContextRing, UsageLine } from "./composer.tsx";
+import { DecisionCard, DecisionLine, gitChip, ModePicker, ModelPicker, StatusGlyph, Usage, ago, churn, prSummary, retryTarget, stackedOn, statusText } from "./bits.tsx";
 
 type Send = (c: Command) => void;
 type Tab = "changes" | "map" | "checks" | "transcript";
@@ -96,8 +97,6 @@ export function SessionDetail({ s, state, send, onBack, onOpen, leadNew }: { s: 
         </h2>
         <div className="d-sub">
           <span title={AGENTS[s.agent].experimental ? "Experimental: less tested than Claude Code" : undefined}>{AGENTS[s.agent].label}</span>
-          <ModelPicker s={s} state={state} send={send} />
-          <ModePicker value={s.mode ?? "ask"} onChange={(mode) => send({ type: "session.setMode", sessionId: s.id, mode })} />
           <Usage s={s} />
           <span className="sp" />
           <ArchiveButton s={s} files={files.length} send={send} onDone={onBack} />
@@ -138,7 +137,19 @@ export function SessionDetail({ s, state, send, onBack, onOpen, leadNew }: { s: 
         {closed ? (
           <p className="closed-note">This session is closed. Ask Perzian to start a new one to keep going.</p>
         ) : (
-          <Composer id="session-composer" to={s.title} placeholder={`Tell ${s.title}…`} busy={s.status === "working"} onSubmit={(text) => send({ type: "session.prompt", sessionId: s.id, prompt: text })} onStop={() => send({ type: "session.cancel", sessionId: s.id })} />
+          <Composer
+            id="session-composer"
+            to={s.title}
+            placeholder={`Tell ${s.title}…`}
+            busy={s.status === "working"}
+            commands={s.commands}
+            above={<UsageLine state={state} send={send} />}
+            left={<ModePicker value={s.mode ?? "ask"} onChange={(mode) => send({ type: "session.setMode", sessionId: s.id, mode })} />}
+            right={<ModelPicker s={s} state={state} send={send} />}
+            ring={<ContextRing s={s} state={state} send={send} />}
+            onSubmit={(text, attachments) => send({ type: "session.prompt", sessionId: s.id, prompt: text, ...(attachments.length ? { attachments } : {}) })}
+            onStop={() => send({ type: "session.cancel", sessionId: s.id })}
+          />
         )}
       </div>
     </section>
@@ -450,7 +461,7 @@ function TranscriptTab({ items, state, subagents }: { items: TranscriptItem[]; s
         const at = new Date(b.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
         switch (b.kind) {
           case "user":
-            return <li key={i} className={`tr-item tr-user ${b.system ? "sys" : ""}`} title={at}><div className="bub">{shownPrompt(b.text)}</div></li>;
+            return <li key={i} className={`tr-item tr-user ${b.system ? "sys" : ""}`} title={at}><div className="bub"><Attached items={b.attachments} />{shownPrompt(b.text)}</div></li>;
           case "agent":
             return <li key={i} className="tr-item tr-agent" title={at}>{b.text}</li>;
           case "spawn":

@@ -31,6 +31,8 @@ export function compact(state: State, opts: CompactOptions = {}): PerzianEvent[]
   if (state.settings.defaultMode !== DEFAULT_PERMISSION_MODE) out.push({ type: "settings.defaultMode", mode: state.settings.defaultMode, at: now });
   if (state.settings.usageCard !== "ask") out.push({ type: "settings.usageCard", mode: state.settings.usageCard, at: now });
   if (!state.settings.splash) out.push({ type: "settings.splash", show: false, at: now });
+  for (const reading of Object.values(state.usage.windows)) if (reading.resetsAt > now) out.push({ type: "usage.reading", reading });
+  for (const key of state.usage.dismissed) out.push({ type: "usage.dismissed", key, at: now });
   for (const path of state.settings.projects) out.push({ type: "settings.projectAdded", path, at: now });
   // Usage cards still in their window (the answer decides whether a second near-limit reading re-asks).
   for (const card of Object.values(state.usageCards)) {
@@ -64,7 +66,7 @@ export function replay(events: PerzianEvent[]): State {
   const sessions: Record<string, SessionInfo> = {};
   const transcripts: Record<string, TranscriptItem[]> = {};
   const toolIndex = new Map<string, Map<string, number>>(); // sessionId -> toolCallId -> index
-  const st: State = { sessions, transcripts, decisions: {}, outcomes: {}, changes: {}, configs: {}, usageCards: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [], usageCard: "ask", splash: true } };
+  const st: State = { sessions, transcripts, decisions: {}, outcomes: {}, changes: {}, configs: {}, usageCards: {}, usage: { windows: {}, dismissed: [] }, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [], usageCard: "ask", splash: true } };
   const patch = (id: string, p: Partial<SessionInfo>) => {
     if (sessions[id]) Object.assign(sessions[id], p);
   };
@@ -135,6 +137,12 @@ export function replay(events: PerzianEvent[]): State {
       }
       case "settings.usageCard":
         st.settings = { ...st.settings, usageCard: e.mode };
+        break;
+      case "usage.reading":
+        st.usage = { ...st.usage, windows: { ...st.usage.windows, [e.reading.window]: e.reading } };
+        break;
+      case "usage.dismissed":
+        if (!st.usage.dismissed.includes(e.key)) st.usage = { ...st.usage, dismissed: [...st.usage.dismissed, e.key].slice(-8) };
         break;
       case "settings.splash":
         st.settings = { ...st.settings, splash: e.show };

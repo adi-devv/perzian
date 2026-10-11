@@ -68,6 +68,8 @@ export function useDaemon() {
   const [state, dispatch] = useReducer(reducer, emptyState);
   const [link, setLink] = useState<Link>(isDemo ? "online" : isPhone && !deviceToken ? "unpaired" : "connecting");
   const [error, setError] = useState<string | null>(null);
+  // The first snapshot has arrived: settings and sessions are known (the demo is born synced).
+  const [synced, setSynced] = useState(isDemo);
   const ws = useRef<WebSocket | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -102,7 +104,10 @@ export function useDaemon() {
       };
       sock.onmessage = (m) => {
         const msg = JSON.parse(m.data) as ServerMessage;
-        if (msg.type === "snapshot") dispatch({ kind: "reset", events: msg.events });
+        if (msg.type === "snapshot") {
+          dispatch({ kind: "reset", events: msg.events });
+          setSynced(true);
+        }
         else if (msg.type === "event") dispatch({ kind: "event", event: msg.event });
         else setError(msg.message);
       };
@@ -143,7 +148,23 @@ export function useDaemon() {
     else setError("Not connected to the Perzian daemon");
   };
 
-  return { state, send, link, connected: link === "online", error, clearError: () => setError(null) };
+  return { state, send, link, connected: link === "online", error, clearError: () => setError(null), synced };
+}
+
+/** The developer's name from git config (for the greeting), once the daemon has answered. */
+export function useMe(): string | undefined {
+  const [name, setName] = useState<string>();
+  useEffect(() => {
+    if (isDemo) return;
+    let off = false;
+    fetch(api("/api/me"))
+      .then((r) => (r.ok ? (r.json() as Promise<{ name?: string }>) : undefined))
+      .then((m) => !off && setName(m?.name), () => {});
+    return () => {
+      off = true;
+    };
+  }, []);
+  return name;
 }
 
 // First-run checks. Agent probes are cached on the daemon; `recheck` bypasses that.

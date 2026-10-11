@@ -90,6 +90,7 @@ function expected(state: State, keep = TRANSCRIPT_KEEP): State {
     changes: pick(state.changes),
     configs: pick(state.configs),
     usageCards: Object.fromEntries(Object.entries(state.usageCards).filter(([, c]) => c.resetsAt >= NOW)),
+    usage: { windows: Object.fromEntries(Object.entries(state.usage.windows).filter(([, r]) => r.resetsAt > NOW)), dismissed: state.usage.dismissed },
     settings: state.settings,
   };
 }
