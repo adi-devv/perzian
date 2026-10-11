@@ -242,6 +242,36 @@ function worktreeFacts(path: string): { branch?: string; project?: string } {
   }
 }
 
+/**
+ * Removes one leftover worktree (a path from `leftoverWorktrees`) with plain `git worktree remove`: no --force,
+ * so git itself also refuses on locked or dirty trees. Refuses first when there are uncommitted changes
+ * (untracked files included). Never touches branches. Throws with a short reason when it refuses.
+ */
+export async function removeLeftoverWorktree(home: string, sessions: Parameters<typeof leftoverWorktrees>[1], path: string): Promise<void> {
+  const target = realish(path);
+  const w = leftoverWorktrees(home, sessions).find((l) => realish(l.path) === target);
+  if (!w) throw new Error("Not a leftover worktree (it may be in use, or already gone)");
+  if (!w.project) throw new Error("Can't tell which repository it belongs to");
+  let dirty = "";
+  try {
+    dirty = await git(w.path, ["status", "--porcelain", "--untracked-files=all"]);
+  } catch (e) {
+    throw new Error(`Can't read its status: ${gitMessage(e)}`);
+  }
+  const files = dirty.split("\n").filter((l) => l.trim()).length;
+  if (files) throw new Error(`Has uncommitted changes (${files} file${files === 1 ? "" : "s"}): kept. Commit or discard them first.`);
+  try {
+    await git(w.project, ["worktree", "remove", w.path]);
+  } catch (e) {
+    throw new Error(gitMessage(e));
+  }
+}
+
+function gitMessage(e: unknown): string {
+  const err = e as { stderr?: string; message?: string };
+  return (err.stderr || err.message || String(e)).trim().split("\n").filter(Boolean).slice(-2).join(" ").slice(0, 300);
+}
+
 /** Folders under $PERZIAN_HOME/worktrees (<repo>/<name>) no live session works in: archived or merged sessions leave them behind. */
 export function leftoverWorktrees(home: string, sessions: Pick<SessionInfo, "id" | "cwd" | "worktree" | "archived" | "ship">[]): LeftoverWorktree[] {
   const root = join(home, "worktrees");

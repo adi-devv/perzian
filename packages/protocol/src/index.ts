@@ -186,6 +186,26 @@ export interface PauseInfo {
   at: number;
 }
 
+/** What to do when the account's usage nears its limit: ask (the card), or always one answer. */
+export type UsageCardMode = "ask" | "keep_going" | "pause";
+export const USAGE_CARD_MODES: readonly UsageCardMode[] = ["ask", "keep_going", "pause"];
+
+/** One account-level "usage is nearly used up" question, per plan window and reset (key = `${window}:${resetsAt}`). */
+export interface UsageCard {
+  key: string;
+  window?: LimitWindow;
+  /** When the window resets (ms since epoch). */
+  resetsAt: number;
+  /** 0..1 */
+  utilization: number;
+  /** Extra (paid) usage is on or allowed: keeping going may cost money. */
+  overage?: boolean;
+  at: number;
+  /** Unanswered by then (ms since epoch), the daemon pauses. */
+  autoAt: number;
+  answer?: { choice: "pause" | "keep_going"; at: number; /** nobody answered in time */ auto?: boolean };
+}
+
 export interface SessionUsage {
   /** Total spent by this session across adapter restarts, in USD. */
   costUsd?: number;
@@ -320,6 +340,11 @@ export type PerzianEvent =
   | { type: "outcome.reported"; outcome: Outcome }
   // The global default permission mode: what a new session starts in when its creator doesn't say.
   | { type: "settings.defaultMode"; mode: PermissionMode; at: number }
+  // The account usage card (see UsageCard): raised once per window, then answered by the developer or, unanswered, by the timeout (auto).
+  | { type: "usage.card"; card: UsageCard }
+  | { type: "usage.answered"; key: string; choice: "pause" | "keep_going"; at: number; auto?: true }
+  // What the usage card does from now on ("Don't ask again").
+  | { type: "settings.usageCard"; mode: UsageCardMode; at: number }
   // A project folder the developer added in the UI before any session exists in it; shown in the crew column.
   | { type: "settings.projectAdded"; path: string; at: number };
 
@@ -350,6 +375,9 @@ export type Command =
   | { type: "session.runChecks"; sessionId: string }
   | { type: "settings.setDefaultMode"; mode: PermissionMode }
   | { type: "settings.addProject"; path: string }
+  | { type: "settings.setUsageCard"; mode: UsageCardMode }
+  // Answer the usage card; `dontAsk` also saves the choice as the setting.
+  | { type: "usage.answer"; key: string; choice: "pause" | "keep_going"; dontAsk?: boolean }
   // After a failed worktree setup: run it again, or start the agent without it.
   | { type: "session.setup"; sessionId: string; action: "retry" | "skip" }
   | { type: "main.start"; model?: string; agent?: AgentKind; prompt?: string }

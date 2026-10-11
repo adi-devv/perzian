@@ -29,7 +29,15 @@ export function compact(state: State, opts: CompactOptions = {}): PerzianEvent[]
 
   const out: PerzianEvent[] = [];
   if (state.settings.defaultMode !== DEFAULT_PERMISSION_MODE) out.push({ type: "settings.defaultMode", mode: state.settings.defaultMode, at: now });
+  if (state.settings.usageCard !== "ask") out.push({ type: "settings.usageCard", mode: state.settings.usageCard, at: now });
   for (const path of state.settings.projects) out.push({ type: "settings.projectAdded", path, at: now });
+  // Usage cards still in their window (the answer decides whether a second near-limit reading re-asks).
+  for (const card of Object.values(state.usageCards)) {
+    if (card.resetsAt < now) continue;
+    const { answer, ...open } = card;
+    out.push({ type: "usage.card", card: open });
+    if (answer) out.push({ type: "usage.answered", key: card.key, choice: answer.choice, at: answer.at, ...(answer.auto ? { auto: true as const } : {}) });
+  }
   for (const id of kept) {
     const session = state.sessions[id];
     const sessionId = id;
@@ -55,7 +63,7 @@ export function replay(events: PerzianEvent[]): State {
   const sessions: Record<string, SessionInfo> = {};
   const transcripts: Record<string, TranscriptItem[]> = {};
   const toolIndex = new Map<string, Map<string, number>>(); // sessionId -> toolCallId -> index
-  const st: State = { sessions, transcripts, decisions: {}, outcomes: {}, changes: {}, configs: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [] } };
+  const st: State = { sessions, transcripts, decisions: {}, outcomes: {}, changes: {}, configs: {}, usageCards: {}, settings: { defaultMode: DEFAULT_PERMISSION_MODE, projects: [], usageCard: "ask" } };
   const patch = (id: string, p: Partial<SessionInfo>) => {
     if (sessions[id]) Object.assign(sessions[id], p);
   };
@@ -115,6 +123,17 @@ export function replay(events: PerzianEvent[]): State {
         break;
       case "settings.defaultMode":
         st.settings = { ...st.settings, defaultMode: e.mode };
+        break;
+      case "usage.card":
+        if (!st.usageCards[e.card.key]) st.usageCards[e.card.key] = { ...e.card };
+        break;
+      case "usage.answered": {
+        const c = st.usageCards[e.key];
+        if (c && !c.answer) c.answer = { choice: e.choice, at: e.at, ...(e.auto ? { auto: true } : {}) };
+        break;
+      }
+      case "settings.usageCard":
+        st.settings = { ...st.settings, usageCard: e.mode };
         break;
       case "settings.projectAdded":
         if (!st.settings.projects.includes(e.path)) st.settings = { ...st.settings, projects: [...st.settings.projects, e.path] };

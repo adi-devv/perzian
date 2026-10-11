@@ -20,6 +20,10 @@ export interface LimitHit {
   window?: LimitWindow;
   /** A short-term rate limit (429) rather than a plan window: retried sooner when no reset is given. */
   transient?: boolean;
+  /** Already decided (shared with other sessions): resume exactly then, whatever `resetAt` says. */
+  resumeAt?: number;
+  /** With `resumeAt`: it is a retry guess, not a told reset time. */
+  estimated?: boolean;
 }
 
 export interface ParseOptions {
@@ -240,6 +244,8 @@ export interface RateLimitReading {
   window?: LimitWindow;
   /** 0..1 */
   utilization?: number;
+  /** Extra (paid) usage is in use or allowed on this account: running past the plan limit may cost money. */
+  overage?: true;
 }
 
 const RATE_WINDOW: Record<string, LimitWindow> = {
@@ -272,9 +278,9 @@ export function readRateLimit(info: unknown, threshold = NEAR_LIMIT): RateLimitR
   const utilization = raw === undefined ? undefined : raw > 1 ? raw / 100 : raw;
   // Past the plan limit but drawing on paid extra usage: not blocked, and the developer chose to pay.
   const overage = i.isUsingOverage === true || i.overageInUse === true || i.overageStatus === "allowed" || i.overageStatus === "allowed_warning";
-  const base = { ...(resetAt !== undefined ? { resetAt } : {}), ...(window ? { window } : {}), ...(utilization !== undefined ? { utilization } : {}) };
-  if (status === "rejected" && !overage) return { state: "rejected", ...base };
-  if (!overage && threshold > 0 && threshold <= 1 && utilization !== undefined && utilization >= threshold) return { state: "near", ...base };
+  const base = { ...(resetAt !== undefined ? { resetAt } : {}), ...(window ? { window } : {}), ...(utilization !== undefined ? { utilization } : {}), ...(overage ? { overage: true as const } : {}) };
+  if (status === "rejected") return { state: overage ? "ok" : "rejected", ...base };
+  if (threshold > 0 && threshold <= 1 && utilization !== undefined && utilization >= threshold) return { state: "near", ...base };
   return { state: "ok", ...base };
 }
 
@@ -310,6 +316,7 @@ export function limitFromError(err: unknown, opts: ParseOptions, extra = ""): Li
 
 /** When to resume after `hit`: its reset time (never sooner than MIN_WAIT_MS), else a retry guess. */
 export function resumeTime(hit: LimitHit, now: number): { resumeAt: number; estimated?: true } {
+  if (hit.resumeAt !== undefined) return { resumeAt: hit.resumeAt, ...(hit.estimated ? { estimated: true as const } : {}) };
   if (hit.resetAt !== undefined && hit.resetAt > now - DAY && hit.resetAt < now + 31 * DAY) return { resumeAt: Math.max(hit.resetAt, now + MIN_WAIT_MS) };
   return { resumeAt: now + (hit.transient ? TRANSIENT_RETRY_MS : FALLBACK_RETRY_MS), estimated: true };
 }

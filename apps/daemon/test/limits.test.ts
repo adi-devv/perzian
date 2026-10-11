@@ -185,9 +185,10 @@ describe("readRateLimit (Claude's _claude/rateLimit)", () => {
     assert.equal(readRateLimit({ status: "allowed", resetsAt, utilization: 0.5 })?.state, "ok");
   });
 
-  test("extra usage in play: not blocked, no early pause", () => {
+  test("extra usage in play: not blocked; near still asks, flagged so the card can warn about cost", () => {
     assert.equal(readRateLimit({ status: "rejected", resetsAt, overageStatus: "allowed", isUsingOverage: true })?.state, "ok");
-    assert.equal(readRateLimit({ status: "allowed_warning", resetsAt, utilization: 0.99, isUsingOverage: true })?.state, "ok");
+    const near = readRateLimit({ status: "allowed_warning", resetsAt, utilization: 0.99, isUsingOverage: true });
+    assert.deepEqual([near?.state, near?.overage], ["near", true]);
   });
 
   test("threshold off, and junk", () => {

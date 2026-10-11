@@ -27,14 +27,7 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    fetch and branch from `origin/<base>` (offline falls back to local with a note), then "Base moved" (N behind, one-click update) and stacking on another session's branch.
 3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
 5. **Observation UI, leftovers (the rest is drawn: chips and facts on tiles and the session header, outside-project tag on cards, nested subagent calls, default-mode picker, persisted projects).**
-   Leftover worktrees (Accounts) are list-and-copy-command only; a Remove button needs a safe daemon removal.
-   Not done: `createSession`'s default-mode fallback in `apps/daemon/src/index.ts` has no test (it is a script); Codex gets no `additionalDirectories`.
-- **Usage card at 95%, one per account (not per session):** "Usage 95% · resets 10:15 pm · [Pause sessions] [Keep going]".
-  - Keep going: run to the real limit, then auto-pause and auto-resume at reset (already built).
-  - No answer: pause.
-  - If extra usage is on, the card warns that it costs money.
-  - Add a "don't ask again" option.
-  - When one session hits the limit, pause every session together, since they share one account limit.
+   Not done: Codex gets no `additionalDirectories`. The usage card is unit-tested only: try it against a real account near its limit; the phone inbox doesn't show it yet.
 
 ## Brand
 - **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).
