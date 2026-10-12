@@ -21,7 +21,9 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    Same Wi-Fi without Tailscale is a view-only fallback (no HTTPS, so no push), only if people ask.
 3. **Calm visuals, follow-through.** Review the app with real sessions for leftover noise.
 5. **Observation UI, leftovers (the rest is drawn: chips and facts on tiles and the session header, outside-project tag on cards, nested subagent calls, default-mode picker, persisted projects).**
-   Not done: Codex gets no `additionalDirectories`. The usage card is unit-tested only: try it against a real account near its limit; the phone inbox doesn't show it yet.
+6. **Built-in browser.** A browser pane per session, like Claude Code's: the agent can open, read and click pages (dev server previews, docs, staging), and the developer sees the same tab and can take over.
+7. **Built-in terminal.** A real terminal (pty) per session in its worktree, like Claude Code's: the developer runs their own commands, and the agent can read what's on screen ("the error I just got").
+   Not done (item 5): Codex gets no `additionalDirectories`. The usage card is unit-tested only: try it against a real account near its limit; the phone inbox doesn't show it yet.
 
 ## Brand
 - **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).
