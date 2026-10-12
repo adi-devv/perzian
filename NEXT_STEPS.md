@@ -24,6 +24,7 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
    Not done: Codex gets no `additionalDirectories`. The usage card is unit-tested only: try it against a real account near its limit; the phone inbox doesn't show it yet.
 6. **Built-in browser.** A browser pane per session, like Claude Code's: the agent can open, read and click pages (dev server previews, docs, staging), and the developer sees the same tab and can take over.
 7. **Built-in terminal.** A real terminal (pty) per session in its worktree, like Claude Code's: the developer runs their own commands, and the agent can read what's on screen ("the error I just got").
+   Both open like Claude Code's: in a side panel beside the session (a resizable half of the window), as tabs, closed by default and opened on demand by the developer or the agent.
 
 ## Brand
 - **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).
