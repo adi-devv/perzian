@@ -35,6 +35,8 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 15. **Smart model allocation (saves usage and context).** Never switch a running chat's model: that drops the prompt cache and costs more. Instead pick the model when work starts:
    - a fresh chat gets a model matched to the ask (hard planning or debugging on Opus, simple asks on Sonnet);
    - a new, separable task that comes up mid-chat goes to its own sub-session with the right model and a fresh, small context (searches, reads, mechanical edits on Sonnet/Haiku), and the lead keeps its model and its cache.
+   Suggest, don't force: a small inline card ("Sonnet can do this · saves ~X% usage") with [Use Sonnet] [Keep Opus]. Calm, one line, never blocks sending.
+   Auto mode (a toggle, per session or global): Perzian picks without asking and just shows the chosen model on the tile; one click changes it.
    Show the model on each tile and the saving in the usage popover. The developer can pin a model to override.
 
 ## Brand
