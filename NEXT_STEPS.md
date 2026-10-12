@@ -25,6 +25,13 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 6. **Built-in browser.** A browser pane per session, like Claude Code's: the agent can open, read and click pages (dev server previews, docs, staging), and the developer sees the same tab and can take over.
 7. **Built-in terminal.** A real terminal (pty) per session in its worktree, like Claude Code's: the developer runs their own commands, and the agent can read what's on screen ("the error I just got").
    Both open like Claude Code's: in a side panel beside the session (a resizable half of the window), as tabs, closed by default and opened on demand by the developer or the agent.
+8. **Rewind.** Each turn is a checkpoint on the timeline. Click one to roll the session back (worktree and conversation) to that point.
+9. **Plan approval card.** In plan mode the agent's plan shows as a card (steps as a list) with Approve / Edit. No code changes until approved.
+10. **Comment on the diff.** Click a line in the diff, leave a note, send the notes to the agent as one message. The code view stays read-only.
+11. **Live todo list.** The agent's checklist (TodoWrite) as progress on the tile and in the session header: 3/7 with the current step.
+12. **Fork from a turn.** "Try another way" from any turn: a sibling session in its own worktree, starting from that checkpoint.
+13. **Effort and fast mode per session**, next to the model picker.
+14. **Open in editor.** One button opens the session's worktree in VS Code / Cursor / Zed.
 
 ## Brand
 - **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).
@@ -51,6 +58,7 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 - Cost per session hasn't been checked against a real paid run yet; Codex may report only context.
 
 ## Later
+- **Search across sessions** (transcripts, decisions, outcomes): "where did we fix X".
 - Codex end-to-end test (needs an OpenAI account), notarized builds + auto-update ($99 Apple account),
   Linux/Windows builds, team/cloud layer.
 - Phone relay, if people want zero setup with guarantees: our own Cloudflare Durable Objects relay with end-to-end
