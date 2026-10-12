@@ -32,6 +32,7 @@ Short, ordered list of what's next. Longer-term plan: [docs/ROADMAP.md](docs/ROA
 12. **Fork from a turn.** "Try another way" from any turn: a sibling session in its own worktree, starting from that checkpoint.
 13. **Effort and fast mode per session**, next to the model picker.
 14. **Open in editor.** One button opens the session's worktree in VS Code / Cursor / Zed.
+15. **Smart model switching.** Don't run everything on the biggest model. Pick the model per task and per turn (planning and hard bugs on Opus; reads, searches, mechanical edits and sub-sessions on Sonnet/Haiku), within one chat and across chats. Show the model on each turn and the saving in the usage popover. The developer can pin a model to override.
 
 ## Brand
 - **Color:** Persian turquoise (`#3ec6cf` dark, `#0b7a84` light) with a little gold (`#e0b25a`). Blue/purple dropped (overused).
