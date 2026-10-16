@@ -40,13 +40,11 @@
 
   <main id="top">
     <section class="stage">
-      <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
       <canvas id="fleet" aria-hidden="true"></canvas>
-      <div class="veil" aria-hidden="true"></div>
       <div class="stage-copy">
         <span class="big-mark" aria-hidden="true"></span>
-        <h1><span>Perzian</span></h1>
-        <p class="tag"><span>Talk to one.</span> <span class="muted">Command them all.</span></p>
+        <h1>Perzian</h1>
+        <p class="tag">Talk to one. <span class="muted">Command them all.</span></p>
         <div class="cta-row center">
           <a class="btn btn-primary" href="https://github.com/perzianhq/perzian#quick-start" target="_blank" rel="noopener">Get Perzian for macOS</a>
           <a class="btn" href="demo/?demo" target="_blank" rel="noopener">Try the live demo <span aria-hidden="true">→</span></a>
@@ -99,162 +97,149 @@
   </footer>
 
   <script>
-    /* Fleet: the lead agent at the centre, sessions in orbit. Radar pings dispatch out from the centre and light each
-       session as they pass; working sessions stream comets along their line; the cursor is a spotlight that pulls
-       nearby sessions in and opens a tile on the one under it. Colors follow the page's status palette. */
+    /* Flow: work travels left to right. Your repos feed Perzian, Perzian fans tasks out to agents, each agent's work
+       passes a checks gate, and the passing work merges. Hairlines only; small packets carry the work. */
     (() => {
       const cv = document.getElementById("fleet");
       const ctx = cv.getContext("2d");
       const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-      const NAMES = ["Migrate billing", "Dark mode tokens", "Webhook retries", "Checkout retries", "Auth refactor", "Docs sweep", "Flaky e2e", "Bump deps", "Search index", "Lint pass", "Rate limit /search", "Redis session store", "API reference", "Add a login page", "Stripe retries", "Snapshot tests", "Cache warmup", "Rename tokens", "CI speedup", "Typecheck", "Onboarding copy", "Export CSV", "Mobile layout", "Audit log"];
-      const STATES = ["working", "done", "needs you", "failed", "working", "done", "working", "working", "done", "needs you"];
-      const RINGS = [[0.46, 5, 0.06], [0.74, 7, -0.04], [1.02, 6, 0.028], [1.3, 6, -0.02]];
-      const KEY = { working: "--working", done: "--done", "needs you": "--needs", failed: "--failed" };
-      let col = {}, dark = true, w = 0, h = 0, cx = 0, cy = 0, R = 0, dpr = 1, px = -1e4, py = -1e4, raf = 0, stars = [];
-      const nodes = [];
-      let k = 0;
-      RINGS.forEach(([ring, count, sp], ri) => {
-        for (let j = 0; j < count; j++, k++) nodes.push({ name: NAMES[k % NAMES.length], state: STATES[(k * 7 + ri) % STATES.length], ring, a: (j / count) * 6.2832 + ri * 0.7, sp, i: k, x: 0, y: 0, pull: 0, glow: 0, pkt: Math.random() });
-      });
-      const PING = 3200; // ms between radar pings
+      // node: [u, v, label]. u runs along the flow (-1 .. 1), v across it.
+      const N = {
+        r1: [-0.96, -0.52, "web"], r2: [-0.96, 0, "api"], r3: [-0.96, 0.52, "billing"],
+        hl: [-0.42, 0], hr: [0.42, 0],
+        a1: [0.62, -0.6, "claude code"], a2: [0.62, -0.2, "claude code"], a3: [0.62, 0.2, "codex"], a4: [0.62, 0.6, "claude code"],
+        c1: [0.8, -0.6, "checks"], c2: [0.8, -0.2, "checks"], c3: [0.8, 0.2, "checks"], c4: [0.8, 0.6, "checks"],
+        pr: [0.97, 0, "merge"]
+      };
+      // edge: [from, to, elbow u]. An elbow routes the line as a right-angled step.
+      const EDGES = [
+        ["r1", "hl", -0.72], ["r2", "hl", -0.72], ["r3", "hl", -0.72], ["hl", "hr"],
+        ["hr", "a1", 0.52], ["hr", "a2", 0.52], ["hr", "a3", 0.52], ["hr", "a4", 0.52],
+        ["a1", "c1"], ["a2", "c2"], ["a3", "c3"], ["a4", "c4"],
+        ["c1", "pr", 0.9], ["c2", "pr", 0.9], ["c3", "pr", 0.9], ["c4", "pr", 0.9]
+      ];
+      let col = {}, w = 0, h = 0, dpr = 1, vert = false, P = {}, edges = [], routes = [], packets = [], pulses = {}, state = {}, raf = 0, last = 0, nextSpawn = 0;
 
       function colors() {
         const s = getComputedStyle(document.documentElement);
-        for (const key of ["--fg", "--fg-2", "--line", "--bg", "--raised", "--accent", "--working", "--done", "--needs", "--failed"]) col[key] = s.getPropertyValue(key).trim();
-        const m = col["--bg"].match(/^#([0-9a-f]{2})/i);
-        dark = m ? parseInt(m[1], 16) < 128 : true;
-      }
-      function size() {
-        const r = cv.getBoundingClientRect();
-        dpr = Math.min(devicePixelRatio || 1, 2);
-        w = r.width; h = r.height;
-        cv.width = w * dpr; cv.height = h * dpr;
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        R = Math.min(w * 0.22, h * 0.40, 340);
-        cx = w / 2; cy = h * 0.5;
-        stars = Array.from({ length: Math.round((w * h) / 9000) }, () => ({ x: Math.random() * w, y: Math.random() * h, r: 0.4 + Math.random() * 1.1, p: Math.random() * 6.28, s: 0.5 + Math.random() * 1.5, z: Math.random() }));
-        colors();
+        for (const k of ["--fg", "--fg-2", "--fg-3", "--line", "--bg", "--accent", "--working", "--done", "--needs"]) col[k] = s.getPropertyValue(k).trim();
       }
       const mix = (c, a) => `color-mix(in srgb, ${c} ${Math.round(a * 100)}%, transparent)`;
 
-      function draw(t) {
-        ctx.clearRect(0, 0, w, h);
-        ctx.globalCompositeOperation = "source-over";
-        const mx = cx, my = cy;
-        const ex = R * 1.5, ey = R * 0.88; // orbit ellipse per unit ring
-        const parX = Math.max(-1, Math.min(1, (px - cx) / w)), parY = Math.max(-1, Math.min(1, (py - cy) / h));
-
-        // stars drift a little with the cursor
-        for (const s of stars) {
-          const tw = still ? 0.7 : 0.35 + 0.65 * Math.abs(Math.sin(t / 1000 * s.s + s.p));
-          ctx.globalAlpha = tw * (dark ? 0.7 : 0.35) * (0.4 + s.z * 0.6);
-          ctx.fillStyle = col["--fg"];
-          ctx.beginPath(); ctx.arc(s.x - parX * 14 * s.z, s.y - parY * 10 * s.z, s.r, 0, 6.2832); ctx.fill();
+      // sample a right-angled polyline with softly rounded corners into dense points + cumulative lengths
+      function rounded(pts, r) {
+        const out = [pts[0]];
+        for (let i = 1; i < pts.length - 1; i++) {
+          const a = pts[i - 1], b = pts[i], c = pts[i + 1];
+          const l1 = Math.hypot(b[0] - a[0], b[1] - a[1]), l2 = Math.hypot(c[0] - b[0], c[1] - b[1]);
+          const rr = Math.min(r, l1 / 2, l2 / 2);
+          const p1 = [b[0] + (a[0] - b[0]) / l1 * rr, b[1] + (a[1] - b[1]) / l1 * rr];
+          const p2 = [b[0] + (c[0] - b[0]) / l2 * rr, b[1] + (c[1] - b[1]) / l2 * rr];
+          out.push(p1);
+          for (let s = 1; s < 8; s++) { const k = s / 8, q = 1 - k; out.push([q * q * p1[0] + 2 * q * k * b[0] + k * k * p2[0], q * q * p1[1] + 2 * q * k * b[1] + k * k * p2[1]]); }
+          out.push(p2);
         }
-        ctx.globalAlpha = 1;
-        if (dark) ctx.globalCompositeOperation = "lighter";
-
-        // central bloom + cursor spotlight
-        let g = ctx.createRadialGradient(mx, my, 0, mx, my, R * 1.9);
-        g.addColorStop(0, mix(col["--accent"], dark ? 0.30 : 0.16)); g.addColorStop(0.45, mix(col["--accent"], dark ? 0.09 : 0.05)); g.addColorStop(1, mix(col["--accent"], 0));
-        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
-        if (px > -1e3) {
-          g = ctx.createRadialGradient(px, py, 0, px, py, 190);
-          g.addColorStop(0, mix(col["--accent"], dark ? 0.2 : 0.1)); g.addColorStop(1, mix(col["--accent"], 0));
-          ctx.fillStyle = g; ctx.fillRect(px - 190, py - 190, 380, 380);
-        }
-
-        // node positions
-        let hover = null, best = 28;
-        for (const n of nodes) {
-          const ang = n.a + (still ? 0 : (t / 1000) * n.sp);
-          let x = cx + Math.cos(ang) * ex * n.ring, y = cy + Math.sin(ang) * ey * n.ring;
-          const d = Math.hypot(px - x, py - y), reach = d < 200 ? 1 - d / 200 : 0;
-          n.pull += (reach - n.pull) * 0.12;
-          x += (px - x) * n.pull * 0.2; y += (py - y) * n.pull * 0.2;
-          n.x = x; n.y = y; n.d = Math.hypot(x - cx, y - cy);
-          if (d < best) { best = d; hover = n; }
-        }
-
-        // orbit guides
-        ctx.lineWidth = 1;
-        for (const [ring] of RINGS) { ctx.strokeStyle = mix(col["--accent"], dark ? 0.16 : 0.12); ctx.beginPath(); ctx.ellipse(mx, my, ex * ring, ey * ring, 0, 0, 6.2832); ctx.stroke(); }
-
-        // radar pings: expanding rings that flash each session they sweep over
-        const phase = (t % PING) / PING, front = phase * ex * 1.62;
-        if (!still) {
-          for (let q = 0; q < 2; q++) {
-            const ph = ((t + q * PING * 0.5) % PING) / PING, rr = ph * ex * 1.62;
-            ctx.strokeStyle = mix(col["--accent"], (1 - ph) * (dark ? 0.55 : 0.4)); ctx.lineWidth = 1.5;
-            ctx.beginPath(); ctx.ellipse(mx, my, rr, rr * (ey / ex), 0, 0, 6.2832); ctx.stroke();
-          }
-          for (const n of nodes) {
-            const rn = Math.hypot((n.x - mx) / ex, (n.y - my) / ey) * ex;
-            for (let q = 0; q < 2; q++) {
-              const rr = (((t + q * PING * 0.5) % PING) / PING) * ex * 1.62;
-              if (Math.abs(rr - rn) < 9) n.glow = 1;
-            }
-          }
-        }
-
-        // lines to the lead agent, with comets on working sessions
-        for (const n of nodes) {
-          n.glow *= 0.94;
-          const c = col[KEY[n.state]], hot = Math.max(n.pull, n.glow);
-          const lg = ctx.createLinearGradient(mx, my, n.x, n.y);
-          lg.addColorStop(0, mix(col["--accent"], 0.05 + hot * 0.5)); lg.addColorStop(1, mix(c, 0.1 + hot * 0.7));
-          ctx.strokeStyle = lg; ctx.lineWidth = 1 + hot * 0.8;
-          ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(n.x, n.y); ctx.stroke();
-          if (n.state === "working" && !still) {
-            const p = ((t / 2300) + n.pkt) % 1;
-            for (let s = 0; s < 7; s++) {
-              const pp = Math.max(0, p - s * 0.018);
-              ctx.fillStyle = mix(col["--working"], (1 - s / 7) * Math.sin(p * Math.PI) * 0.95);
-              ctx.beginPath(); ctx.arc(mx + (n.x - mx) * pp, my + (n.y - my) * pp, 2.4 - s * 0.25, 0, 6.2832); ctx.fill();
-            }
-          }
-        }
-        // nearest sessions reach for the cursor
-        if (px > -1e3) {
-          for (const n of nodes) if (n.pull > 0.25) {
-            ctx.strokeStyle = mix(col["--accent"], n.pull * 0.6); ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.lineTo(px, py); ctx.stroke();
-          }
-        }
-
-        // sessions, with glow
-        for (const n of nodes) {
-          const c = col[KEY[n.state]], pulse = still ? 0 : (Math.sin(t / 650 + n.i) + 1) / 2, hot = Math.max(n.pull, n.glow);
-          const r = 3.6 + hot * 3 + (n === hover ? 1.6 : 0);
-          const hg = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r * 6);
-          hg.addColorStop(0, mix(c, dark ? 0.45 + hot * 0.4 : 0.25)); hg.addColorStop(1, mix(c, 0));
-          ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(n.x, n.y, r * 6, 0, 6.2832); ctx.fill();
-          if (n.state === "needs you") { ctx.strokeStyle = mix(c, 0.7 * (1 - pulse)); ctx.lineWidth = 1.3; ctx.beginPath(); ctx.arc(n.x, n.y, r + 3 + pulse * 10, 0, 6.2832); ctx.stroke(); }
-          ctx.fillStyle = c; ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 6.2832); ctx.fill();
-        }
-        ctx.globalCompositeOperation = "source-over";
-
-        // hover tile
-        if (hover) {
-          const label = hover.name, st = hover.state;
-          ctx.font = "500 13px Geist, system-ui, sans-serif";
-          const tw = Math.max(ctx.measureText(label).width, ctx.measureText(st).width + 14) + 24, th = 46;
-          let bx = hover.x + 16, by = hover.y - th - 10;
-          if (bx + tw > w - 8) bx = hover.x - tw - 16;
-          if (by < 8) by = hover.y + 14;
-          ctx.fillStyle = col["--raised"]; ctx.strokeStyle = mix(col[KEY[st]], 0.6); ctx.lineWidth = 1;
-          ctx.beginPath(); ctx.roundRect(bx, by, tw, th, 9); ctx.fill(); ctx.stroke();
-          ctx.fillStyle = col["--fg"]; ctx.fillText(label, bx + 12, by + 19);
-          ctx.fillStyle = col[KEY[st]]; ctx.beginPath(); ctx.arc(bx + 15, by + 32, 3, 0, 6.2832); ctx.fill();
-          ctx.font = "400 12px Geist, system-ui, sans-serif"; ctx.fillStyle = col["--fg-2"]; ctx.fillText(st, bx + 24, by + 36);
-        }
-        raf = still ? 0 : requestAnimationFrame(draw);
+        out.push(pts[pts.length - 1]);
+        return out;
+      }
+      function measure(pts) { const cum = [0]; for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])); return cum; }
+      function at(pts, cum, d) {
+        let i = 1; while (i < cum.length - 1 && cum[i] < d) i++;
+        const k = (d - cum[i - 1]) / (cum[i] - cum[i - 1] || 1);
+        return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * k, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * k];
       }
 
-      const kick = () => { if (!raf) raf = requestAnimationFrame(draw); };
-      addEventListener("pointermove", (e) => { const r = cv.getBoundingClientRect(); px = e.clientX - r.left; py = e.clientY - r.top; if (still) kick(); });
-      document.addEventListener("pointerleave", () => { px = py = -1e4; if (still) kick(); });
-      const restart = () => { cancelAnimationFrame(raf); raf = 0; size(); raf = requestAnimationFrame(draw); };
+      function layout() {
+        const cx = w / 2, cy = h / 2;
+        // wide screens flow left to right; narrow ones flow top to bottom
+        const map = vert ? (u, v) => [cx + v * w * 0.4, cy + u * h * 0.47] : (u, v) => [cx + u * w * 0.47, cy + v * Math.min(h * 0.36, 270)];
+        P = {}; for (const id in N) P[id] = map(N[id][0], N[id][1]);
+        edges = EDGES.map(([a, b, eu]) => {
+          const [u0, v0] = N[a], [u1, v1] = N[b];
+          const raw = eu === undefined ? [map(u0, v0), map(u1, v1)] : [map(u0, v0), map(eu, v0), map(eu, v1), map(u1, v1)];
+          const pts = rounded(raw, 12);
+          return { a, b, pts, cum: measure(pts) };
+        });
+        const E = (a, b) => edges.find((e) => e.a === a && e.b === b);
+        routes = [];
+        for (const r of ["r1", "r2", "r3"]) for (const k of [1, 2, 3, 4]) {
+          const seq = [E(r, "hl"), E("hl", "hr"), E("hr", "a" + k), E("a" + k, "c" + k), E("c" + k, "pr")];
+          const pts = [], marks = []; let d = 0;
+          seq.forEach((e, idx) => {
+            const base = d;
+            e.pts.forEach((p, i) => { if (idx && !i) return; pts.push(p); });
+            d = base + e.cum[e.cum.length - 1];
+            marks.push({ id: e.b, d });
+          });
+          routes.push({ pts, cum: measure(pts), marks, agent: "a" + k });
+        }
+      }
+
+      function size() {
+        const r = cv.getBoundingClientRect();
+        dpr = Math.min(devicePixelRatio || 1, 2);
+        w = r.width; h = r.height; vert = w < 760;
+        cv.width = w * dpr; cv.height = h * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        colors(); layout();
+      }
+
+      function spawn(t) {
+        const route = routes[Math.floor(Math.random() * routes.length)];
+        const needs = Math.random() < 0.18;
+        packets.push({ route, d: 0, speed: (vert ? 150 : 190) * (0.85 + Math.random() * 0.3), needs, stallUntil: 0, stalled: false, done: false, passed: new Set() });
+      }
+
+      function frame(t) {
+        const dt = Math.min(0.05, (t - (last || t)) / 1000); last = t;
+        ctx.clearRect(0, 0, w, h);
+        if (!still && t >= nextSpawn && packets.length < 9) { spawn(t); nextSpawn = t + 650 + Math.random() * 650; }
+
+        // lines
+        ctx.lineWidth = 1; ctx.lineJoin = "round"; ctx.strokeStyle = mix(col["--fg-3"], 0.38);
+        for (const e of edges) { ctx.beginPath(); e.pts.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.stroke(); }
+
+        // packets
+        for (const p of packets) {
+          const R = p.route;
+          if (p.stalled && t >= p.stallUntil) { p.stalled = false; state[R.agent] = null; }
+          if (!p.stalled) p.d += p.speed * dt;
+          for (const m of R.marks) {
+            if (p.d >= m.d && !p.passed.has(m.id)) {
+              p.passed.add(m.id);
+              if (m.id[0] === "a" || m.id[0] === "c" || m.id === "pr") pulses[m.id] = { t, kind: m.id[0] === "c" ? "done" : m.id === "pr" ? "done" : "go" };
+              if (m.id[0] === "a" && p.needs) { p.stalled = true; p.stallUntil = t + 1700; state[m.id] = "needs"; pulses[m.id] = { t, kind: "needs" }; p.d = m.d; }
+            }
+          }
+          if (p.d >= R.cum[R.cum.length - 1]) { p.done = true; continue; }
+          // soft tail
+          for (let s = 0; s < 9; s++) {
+            const dd = Math.max(0, p.d - s * 5), q = at(R.pts, R.cum, dd), f = 1 - s / 9;
+            ctx.fillStyle = mix(p.needs && p.stalled ? col["--needs"] : col["--accent"], f * 0.9);
+            ctx.beginPath(); ctx.arc(q[0], q[1], 2.3 * (0.5 + f * 0.5), 0, 6.2832); ctx.fill();
+          }
+        }
+        packets = packets.filter((p) => !p.done);
+
+        // nodes
+        ctx.font = "400 11px 'Geist Mono', ui-monospace, monospace"; ctx.textAlign = "center";
+        for (const id in N) {
+          const [x, y] = P[id], hub = id === "hl" || id === "hr", pl = pulses[id];
+          const age = pl ? (t - pl.t) / 1000 : 9, c = pl ? col[pl.kind === "done" ? "--done" : pl.kind === "needs" ? "--needs" : "--accent"] : col["--fg-3"];
+          if (pl && age < 1.2) { ctx.strokeStyle = mix(c, (1 - age / 1.2) * 0.7); ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(x, y, 5 + age * 12, 0, 6.2832); ctx.stroke(); }
+          const keep = state[id] === "needs" ? col["--needs"] : age < 0.7 ? c : col["--fg-3"];
+          ctx.fillStyle = col["--bg"]; ctx.strokeStyle = keep; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(x, y, hub ? 2.5 : 4.2, 0, 6.2832); ctx.fill(); ctx.stroke();
+          if (!hub) {
+            ctx.fillStyle = state[id] === "needs" ? col["--needs"] : col["--fg-3"];
+            const label = state[id] === "needs" ? "needs you" : vert && N[id][2] === "claude code" ? "claude" : N[id][2];
+            vert ? (ctx.textAlign = id[0] === "r" || id[0] === "a" || id[0] === "c" || id === "pr" ? "center" : "center", ctx.fillText(label, x, y - 11)) : ctx.fillText(label, x, y - 12);
+          }
+        }
+        raf = still ? 0 : requestAnimationFrame(frame);
+      }
+
+      const restart = () => { cancelAnimationFrame(raf); raf = 0; last = 0; packets = []; size(); raf = requestAnimationFrame(frame); };
       addEventListener("resize", restart);
       matchMedia("(prefers-color-scheme: light)").addEventListener("change", restart);
       if (document.fonts) document.fonts.ready.then(restart);
