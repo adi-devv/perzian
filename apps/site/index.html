@@ -251,7 +251,7 @@
       let n;
       try {
         const c = JSON.parse(localStorage.getItem("pz-stars") || "null");
-        if (c && Date.now() - c.t < 36e5) n = c.n;
+        if (c && Date.now() - c.t < 3e5) n = c.n;
       } catch {}
       if (n === undefined) {
         try {
