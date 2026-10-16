@@ -78,25 +78,56 @@
         }
       }
 
+      // The cursor drops "ripples" along its path. Each one spreads outward as a soft ring and fades, so dots
+      // rise and settle in a wave behind the cursor instead of lighting a circle around it.
+      const trail = [];
+      const SPEED = 230, WIDTH = 52, LIFE = 1900, CORE = 70;
+      let lastDrop = 0, lx = -1e4, ly = -1e4;
+
       function frame(t) {
         ctx.clearRect(0, 0, w, h);
+        while (trail.length && t - trail[0].t > LIFE) trail.shift();
         for (const d of dots) {
-          const dx = d.x - mx, dy = d.y - my;
-          const near = Math.max(0, 1 - Math.hypot(dx, dy) / REACH);
-          d.k += (near - d.k) * 0.14; // ease toward the cursor's influence
+          let target = 0;
+          if (still) {
+            target = Math.max(0, 1 - Math.hypot(d.x - mx, d.y - my) / REACH);
+          } else {
+            for (const p of trail) {
+              const age = t - p.t, dist = Math.hypot(d.x - p.x, d.y - p.y);
+              const fade = 1 - age / LIFE;
+              const ring = Math.exp(-(((dist - SPEED * age / 1000) / WIDTH) ** 2)) * 0.8 * fade * fade;
+              const core = Math.exp(-((dist / CORE) ** 2)) * 0.55 * Math.max(0, 1 - age / 650);
+              const v = ring + core;
+              if (v > target) target = v;
+            }
+          }
+          d.k += (target - d.k) * (target > d.k ? 0.09 : 0.045); // rise gently, settle slower
           const tw = still ? 1 : 0.8 + 0.2 * Math.sin(t / 1000 * d.s + d.p);
-          const r = R * (1 + d.k * 1.9);
-          ctx.globalAlpha = Math.min(1, d.a * tw + d.k * 0.6);
-          ctx.fillStyle = d.k > 0.04 ? "#a3e635" : base[d.col];
+          const r = R * (1 + d.k * 1.5);
+          ctx.globalAlpha = Math.min(1, d.a * tw + d.k * 0.35);
+          ctx.fillStyle = base[d.col];
           ctx.beginPath(); ctx.arc(d.x, d.y, r, 0, 6.2832); ctx.fill();
+          if (d.k > 0.02) { // blend toward lime as the wave passes
+            ctx.globalAlpha = Math.min(1, d.k * 1.25);
+            ctx.fillStyle = "#a3e635";
+            ctx.beginPath(); ctx.arc(d.x, d.y, r, 0, 6.2832); ctx.fill();
+          }
         }
         ctx.globalAlpha = 1;
         raf = still ? 0 : requestAnimationFrame(frame);
       }
 
       function start() { cancelAnimationFrame(raf); build(); raf = requestAnimationFrame(frame); }
-      addEventListener("pointermove", (e) => { mx = e.clientX; my = e.clientY; if (still && !raf) raf = requestAnimationFrame(frame); });
-      addEventListener("pointerleave", () => { mx = my = -1e4; });
+      addEventListener("pointermove", (e) => {
+        mx = e.clientX; my = e.clientY;
+        const now = performance.now();
+        if (!still && (Math.hypot(mx - lx, my - ly) > 14 || now - lastDrop > 120)) {
+          trail.push({ x: mx, y: my, t: now }); if (trail.length > 48) trail.shift();
+          lastDrop = now; lx = mx; ly = my;
+        }
+        if (still && !raf) raf = requestAnimationFrame(frame);
+      });
+      addEventListener("pointerleave", () => { mx = my = -1e4; lx = ly = -1e4; });
       addEventListener("resize", start);
       start();
 
