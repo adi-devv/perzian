@@ -28,7 +28,9 @@
     <div class="wrap nav-inner">
       <a class="brand" href="#top" aria-label="Perzian home"><span class="mark" aria-hidden="true"></span>Perzian</a>
       <nav class="nav-links" aria-label="Primary">
-        <a href="#features">Features</a>
+        <a href="#look">How it looks</a>
+        <a href="#why">Why</a>
+        <a href="mantis/">Mantis</a>
         <a href="demo/?demo" target="_blank" rel="noopener">Demo</a>
       </nav>
       <a class="btn btn-sm star" href="https://github.com/perzianhq/perzian" target="_blank" rel="noopener"><svg class="star-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l1.9 4 4.4.5-3.3 3 .9 4.3L8 11.1l-3.9 2.2.9-4.3-3.3-3 4.4-.5z"/></svg>Star<span class="star-n" data-stars hidden></span></a>
@@ -37,12 +39,15 @@
   </header>
 
   <main id="top">
-    <section class="hero">
-      <div class="wrap">
-        <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Open source · macOS · Claude Code, Codex</p>
-        <h1>Talk to one.<br /><span class="muted">Command them all.</span></h1>
-        <p class="lede">Perzian is your lead agent. Tell it what you want and it dispatches coding agents across your repos, keeps them in line, and comes back only when it needs your call.</p>
-        <div class="cta-row">
+    <section class="stage">
+      <div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+      <canvas id="fleet" aria-hidden="true"></canvas>
+      <div class="veil" aria-hidden="true"></div>
+      <div class="stage-copy">
+        <span class="big-mark" aria-hidden="true"></span>
+        <h1><span>Perzian</span></h1>
+        <p class="tag"><span>Talk to one.</span> <span class="muted">Command them all.</span></p>
+        <div class="cta-row center">
           <a class="btn btn-primary" href="https://github.com/perzianhq/perzian#quick-start" target="_blank" rel="noopener">Get Perzian for macOS</a>
           <a class="btn" href="demo/?demo" target="_blank" rel="noopener">Try the live demo <span aria-hidden="true">→</span></a>
         </div>
@@ -50,134 +55,32 @@
           <code id="install-cmd">git clone https://github.com/perzianhq/perzian && cd perzian && npm i && npm run app</code>
           <button class="copy" type="button" data-copy="install-cmd" aria-label="Copy install command">Copy</button>
         </div>
+        <p class="fine open">Open source · macOS · Claude Code, Codex</p>
       </div>
-      <figure class="shot wrap-wide">
-        <div class="window">
-          <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
-          <img src="assets/app.png" width="1440" height="900" alt="Perzian app: a column of live session tiles on the left, one asking for a permission with Allow, Always and Deny buttons, and Perzian's chat in the middle with one line per session." />
-        </div>
-      </figure>
+      <a class="cue" href="#look" aria-label="See how it looks"><span></span></a>
     </section>
 
-    <section class="strip">
-      <div class="wrap strip-inner">
-        <span class="strip-label">Works with</span>
-        <ul class="agents">
-          <li>Claude Code</li>
-          <li>Codex <em>experimental</em></li>
-          <li>Any <a href="https://agentclientprotocol.com" target="_blank" rel="noopener">ACP</a> agent</li>
-        </ul>
+    <section class="look" id="look">
+      <div class="wrap-wide">
+        <p class="kicker">How it looks</p>
+        <h2 class="head">Every session at a glance. One chat to steer them.</h2>
+        <figure class="shot">
+          <div class="window">
+            <div class="window-bar" aria-hidden="true"><i></i><i></i><i></i></div>
+            <img src="assets/app.png" width="1440" height="900" alt="Perzian app: a column of live session tiles on the left, one asking for a permission with Allow, Always and Deny buttons, and Perzian's chat in the middle with one line per session." />
+          </div>
+        </figure>
       </div>
     </section>
 
-    <section class="features" id="features">
-      <div class="wrap">
-        <article class="feature feature-lead">
-          <div class="feature-copy">
-            <p class="kicker">Never stuck waiting</p>
-            <h2>Hit your limit at 2 am? Perzian picks up when it resets.</h2>
-            <p>Sessions pause cleanly at a usage limit and resume on their own when it resets. No new prompt needed.</p>
-          </div>
-          <div class="feature-visual" aria-label="Example session paused at a usage limit, then resumed">
-            <div class="ui-card">
-              <div class="ui-row"><span class="dot"></span><b>Migrate billing</b><span class="ui-age">Paused</span></div>
-              <ul class="ui-proofs">
-                <li class="ok"><span>✓</span> Step 4 of 6 finished</li>
-                <li class="claimed"><span>·</span> Usage limit reached <em>resumes 02:00</em></li>
-                <li class="claimed"><span>·</span> Picks up at step 5 <em>no prompt</em></li>
-              </ul>
-            </div>
-          </div>
-        </article>
-
-        <article class="feature flip">
-          <div class="feature-copy">
-            <p class="kicker">Verified, not claimed</p>
-            <h2>Nothing ships on their word.</h2>
-            <p>Perzian checks the real exit code of every test, build and typecheck an agent runs. If an agent only claims it, you see that it's a claim.</p>
-          </div>
-          <div class="feature-visual" aria-label="Example outcome with verified and claimed checks">
-            <div class="ui-card">
-              <div class="ui-row"><span class="dot"></span><b>Dark mode tokens</b><span class="ui-age">Done</span></div>
-              <ul class="ui-proofs">
-                <li class="ok"><span>✓</span> npm test · 142 passed <em>exit 0</em></li>
-                <li class="ok"><span>✓</span> vite build <em>exit 0</em></li>
-                <li class="bad"><span>✕</span> playwright test checkout · 2 failed <em>exit 1</em></li>
-                <li class="claimed"><span>✓</span> Light and dark snapshots <em>claimed</em></li>
-              </ul>
-            </div>
-          </div>
-        </article>
-
-        <article class="feature">
-          <div class="feature-copy">
-            <p class="kicker">Your rules, enforced</p>
-            <h2>Your checks run every time.</h2>
-            <p>When an agent says it's done, Perzian runs the checks your repo declares in <code>perzian.json</code> itself. It records ✓ or ✕ with the real exit code and sends failures back to the agent to fix.</p>
-          </div>
-          <div class="feature-visual" aria-label="Example declared checks with exit codes">
-            <div class="ui-card">
-              <div class="ui-row"><span class="dot"></span><b>Checkout retries</b><span class="ui-age">Checking</span></div>
-              <ul class="ui-proofs">
-                <li class="ok"><span>✓</span> lint <em>exit 0</em></li>
-                <li class="ok"><span>✓</span> typecheck <em>exit 0</em></li>
-                <li class="bad"><span>✕</span> npm test · 2 failed <em>exit 1</em></li>
-                <li class="claimed"><span>·</span> Sent back to the agent to fix <em>round 1</em></li>
-              </ul>
-            </div>
-          </div>
-        </article>
-
-        <article class="feature flip">
-          <div class="feature-copy">
-            <p class="kicker">Every change, at a glance</p>
-            <h2>Read the change, not the code.</h2>
-            <p>See which functions were added, changed or removed in every file, straight from git and tree-sitter. Open the diff only when you want to.</p>
-          </div>
-          <div class="feature-visual" aria-label="Example change map">
-            <div class="ui-card mono">
-              <div class="ui-dir">src/auth/</div>
-              <div class="ui-file"><b class="a">+</b>session.ts<span class="ui-bar"><i style="width:56%" class="a"></i></span><span class="n"><em class="a">+48</em> <em class="d">−0</em></span></div>
-              <div class="ui-sym"><span class="a">+ issue()</span><span class="a">+ revoke()</span><span class="a">+ SessionStore</span></div>
-              <div class="ui-file"><b class="d">−</b>jwt.ts<span class="ui-bar"><i style="width:62%" class="d"></i></span><span class="n"><em class="a">+0</em> <em class="d">−61</em></span></div>
-              <div class="ui-sym"><span class="d">− sign()</span><span class="d">− verify()</span></div>
-            </div>
-          </div>
-        </article>
-
-        <article class="feature">
-          <div class="feature-copy">
-            <p class="kicker">You stay in charge</p>
-            <h2>Your call, one keystroke.</h2>
-            <p>When an agent hits a fork, it brings you the options and the tradeoff. Press 1, 2 or 3 and it moves on.</p>
-          </div>
-          <div class="feature-visual" aria-label="Example decision card">
-            <div class="ui-card">
-              <div class="ui-row"><span class="dot s-needs_you"></span><span class="ui-src">Webhook retries</span><span class="ui-age">5m</span></div>
-              <p class="ui-title">How should failed webhooks retry?</p>
-              <div class="ui-opt rec"><b>Exponential backoff</b><kbd>1</kbd><span>Standard, 6 tries over an hour</span></div>
-              <div class="ui-opt"><b>Dead-letter queue</b><kbd>2</kbd><span>Durable, needs a new table</span></div>
-            </div>
-          </div>
-        </article>
-
-        <div class="grid">
-          <div class="cell"><h3>Parallel by default</h3><p>Every agent in its own worktree. Your checkout stays clean.</p></div>
-          <div class="cell"><h3>Pick your crew</h3><p>Choose the agent, model and permissions for each job.</p></div>
-          <div class="cell"><h3>Never lose the thread</h3><p>Sessions survive restarts. Import your Claude Code work.</p></div>
+    <section class="why" id="why">
+      <div class="wrap-wide">
+        <div class="points">
+          <article class="point"><span class="dot s-done" aria-hidden="true"></span><h3>Verified, not claimed</h3><p>Perzian runs your declared checks itself and records the real exit code. A claim is marked as a claim.</p></article>
+          <article class="point"><span class="dot s-needs_you" aria-hidden="true"></span><h3>Your call, one keystroke</h3><p>At a fork, an agent brings you the options and the tradeoff. Press 1, 2 or 3 and it moves on.</p></article>
+          <article class="point"><span class="dot s-working" aria-hidden="true"></span><h3>Parallel by default</h3><p>Every agent works in its own worktree, so your checkout stays clean.</p></article>
+          <article class="point"><span class="dot s-accent" aria-hidden="true"></span><h3>Never lose the thread</h3><p>Sessions survive restarts. Bring your Claude Code history along.</p></article>
         </div>
-      </div>
-    </section>
-
-    <section class="final">
-      <div class="wrap">
-        <h2>You decide. They execute.</h2>
-        <div class="cta-row center">
-          <a class="btn btn-primary" href="https://github.com/perzianhq/perzian#quick-start" target="_blank" rel="noopener">Get Perzian for macOS</a>
-          <a class="btn star" href="https://github.com/perzianhq/perzian" target="_blank" rel="noopener"><svg class="star-ic" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5l1.9 4 4.4.5-3.3 3 .9 4.3L8 11.1l-3.9 2.2.9-4.3-3.3-3 4.4-.5z"/></svg>Star on GitHub<span class="star-n" data-stars hidden></span></a>
-        </div>
-        <p class="notify">Want to know when the signed Mac app ships? On <a href="https://github.com/perzianhq/perzian" target="_blank" rel="noopener">GitHub</a>, click <b>Watch → Custom → Releases</b>.</p>
-        <p class="fine">Free and open source (AGPL-3.0). macOS on Apple Silicon. Uses your own Claude Code login.</p>
       </div>
     </section>
   </main>
@@ -185,14 +88,179 @@
   <footer class="footer">
     <div class="wrap footer-inner">
       <span class="brand small"><span class="mark" aria-hidden="true"></span>Perzian</span>
+      <span class="fine">Free and open source (AGPL-3.0). Also: <a href="mantis/">Mantis</a></span>
       <nav aria-label="Footer">
         <a href="https://github.com/perzianhq/perzian" target="_blank" rel="noopener">GitHub</a>
         <a href="https://github.com/perzianhq/perzian/blob/main/docs/ROADMAP.md" target="_blank" rel="noopener">Roadmap</a>
-        <a href="https://github.com/perzianhq/perzian/blob/main/LICENSE" target="_blank" rel="noopener">AGPL-3.0 License</a>
+        <a href="https://github.com/perzianhq/perzian/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
       </nav>
       <span class="fine">© 2026 <a href="https://github.com/adi-devv" target="_blank" rel="noopener">Aadit Singal</a></span>
     </div>
   </footer>
+
+  <script>
+    /* Fleet: the lead agent at the centre, sessions in orbit. Radar pings dispatch out from the centre and light each
+       session as they pass; working sessions stream comets along their line; the cursor is a spotlight that pulls
+       nearby sessions in and opens a tile on the one under it. Colors follow the page's status palette. */
+    (() => {
+      const cv = document.getElementById("fleet");
+      const ctx = cv.getContext("2d");
+      const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const NAMES = ["Migrate billing", "Dark mode tokens", "Webhook retries", "Checkout retries", "Auth refactor", "Docs sweep", "Flaky e2e", "Bump deps", "Search index", "Lint pass", "Rate limit /search", "Redis session store", "API reference", "Add a login page", "Stripe retries", "Snapshot tests", "Cache warmup", "Rename tokens", "CI speedup", "Typecheck", "Onboarding copy", "Export CSV", "Mobile layout", "Audit log"];
+      const STATES = ["working", "done", "needs you", "failed", "working", "done", "working", "working", "done", "needs you"];
+      const RINGS = [[0.46, 5, 0.06], [0.74, 7, -0.04], [1.02, 6, 0.028], [1.3, 6, -0.02]];
+      const KEY = { working: "--working", done: "--done", "needs you": "--needs", failed: "--failed" };
+      let col = {}, dark = true, w = 0, h = 0, cx = 0, cy = 0, R = 0, dpr = 1, px = -1e4, py = -1e4, raf = 0, stars = [];
+      const nodes = [];
+      let k = 0;
+      RINGS.forEach(([ring, count, sp], ri) => {
+        for (let j = 0; j < count; j++, k++) nodes.push({ name: NAMES[k % NAMES.length], state: STATES[(k * 7 + ri) % STATES.length], ring, a: (j / count) * 6.2832 + ri * 0.7, sp, i: k, x: 0, y: 0, pull: 0, glow: 0, pkt: Math.random() });
+      });
+      const PING = 3200; // ms between radar pings
+
+      function colors() {
+        const s = getComputedStyle(document.documentElement);
+        for (const key of ["--fg", "--fg-2", "--line", "--bg", "--raised", "--accent", "--working", "--done", "--needs", "--failed"]) col[key] = s.getPropertyValue(key).trim();
+        const m = col["--bg"].match(/^#([0-9a-f]{2})/i);
+        dark = m ? parseInt(m[1], 16) < 128 : true;
+      }
+      function size() {
+        const r = cv.getBoundingClientRect();
+        dpr = Math.min(devicePixelRatio || 1, 2);
+        w = r.width; h = r.height;
+        cv.width = w * dpr; cv.height = h * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        R = Math.min(w * 0.22, h * 0.40, 340);
+        cx = w / 2; cy = h * 0.5;
+        stars = Array.from({ length: Math.round((w * h) / 9000) }, () => ({ x: Math.random() * w, y: Math.random() * h, r: 0.4 + Math.random() * 1.1, p: Math.random() * 6.28, s: 0.5 + Math.random() * 1.5, z: Math.random() }));
+        colors();
+      }
+      const mix = (c, a) => `color-mix(in srgb, ${c} ${Math.round(a * 100)}%, transparent)`;
+
+      function draw(t) {
+        ctx.clearRect(0, 0, w, h);
+        ctx.globalCompositeOperation = "source-over";
+        const mx = cx, my = cy;
+        const ex = R * 1.5, ey = R * 0.88; // orbit ellipse per unit ring
+        const parX = Math.max(-1, Math.min(1, (px - cx) / w)), parY = Math.max(-1, Math.min(1, (py - cy) / h));
+
+        // stars drift a little with the cursor
+        for (const s of stars) {
+          const tw = still ? 0.7 : 0.35 + 0.65 * Math.abs(Math.sin(t / 1000 * s.s + s.p));
+          ctx.globalAlpha = tw * (dark ? 0.7 : 0.35) * (0.4 + s.z * 0.6);
+          ctx.fillStyle = col["--fg"];
+          ctx.beginPath(); ctx.arc(s.x - parX * 14 * s.z, s.y - parY * 10 * s.z, s.r, 0, 6.2832); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        if (dark) ctx.globalCompositeOperation = "lighter";
+
+        // central bloom + cursor spotlight
+        let g = ctx.createRadialGradient(mx, my, 0, mx, my, R * 1.9);
+        g.addColorStop(0, mix(col["--accent"], dark ? 0.30 : 0.16)); g.addColorStop(0.45, mix(col["--accent"], dark ? 0.09 : 0.05)); g.addColorStop(1, mix(col["--accent"], 0));
+        ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
+        if (px > -1e3) {
+          g = ctx.createRadialGradient(px, py, 0, px, py, 190);
+          g.addColorStop(0, mix(col["--accent"], dark ? 0.2 : 0.1)); g.addColorStop(1, mix(col["--accent"], 0));
+          ctx.fillStyle = g; ctx.fillRect(px - 190, py - 190, 380, 380);
+        }
+
+        // node positions
+        let hover = null, best = 28;
+        for (const n of nodes) {
+          const ang = n.a + (still ? 0 : (t / 1000) * n.sp);
+          let x = cx + Math.cos(ang) * ex * n.ring, y = cy + Math.sin(ang) * ey * n.ring;
+          const d = Math.hypot(px - x, py - y), reach = d < 200 ? 1 - d / 200 : 0;
+          n.pull += (reach - n.pull) * 0.12;
+          x += (px - x) * n.pull * 0.2; y += (py - y) * n.pull * 0.2;
+          n.x = x; n.y = y; n.d = Math.hypot(x - cx, y - cy);
+          if (d < best) { best = d; hover = n; }
+        }
+
+        // orbit guides
+        ctx.lineWidth = 1;
+        for (const [ring] of RINGS) { ctx.strokeStyle = mix(col["--accent"], dark ? 0.16 : 0.12); ctx.beginPath(); ctx.ellipse(mx, my, ex * ring, ey * ring, 0, 0, 6.2832); ctx.stroke(); }
+
+        // radar pings: expanding rings that flash each session they sweep over
+        const phase = (t % PING) / PING, front = phase * ex * 1.62;
+        if (!still) {
+          for (let q = 0; q < 2; q++) {
+            const ph = ((t + q * PING * 0.5) % PING) / PING, rr = ph * ex * 1.62;
+            ctx.strokeStyle = mix(col["--accent"], (1 - ph) * (dark ? 0.55 : 0.4)); ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.ellipse(mx, my, rr, rr * (ey / ex), 0, 0, 6.2832); ctx.stroke();
+          }
+          for (const n of nodes) {
+            const rn = Math.hypot((n.x - mx) / ex, (n.y - my) / ey) * ex;
+            for (let q = 0; q < 2; q++) {
+              const rr = (((t + q * PING * 0.5) % PING) / PING) * ex * 1.62;
+              if (Math.abs(rr - rn) < 9) n.glow = 1;
+            }
+          }
+        }
+
+        // lines to the lead agent, with comets on working sessions
+        for (const n of nodes) {
+          n.glow *= 0.94;
+          const c = col[KEY[n.state]], hot = Math.max(n.pull, n.glow);
+          const lg = ctx.createLinearGradient(mx, my, n.x, n.y);
+          lg.addColorStop(0, mix(col["--accent"], 0.05 + hot * 0.5)); lg.addColorStop(1, mix(c, 0.1 + hot * 0.7));
+          ctx.strokeStyle = lg; ctx.lineWidth = 1 + hot * 0.8;
+          ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(n.x, n.y); ctx.stroke();
+          if (n.state === "working" && !still) {
+            const p = ((t / 2300) + n.pkt) % 1;
+            for (let s = 0; s < 7; s++) {
+              const pp = Math.max(0, p - s * 0.018);
+              ctx.fillStyle = mix(col["--working"], (1 - s / 7) * Math.sin(p * Math.PI) * 0.95);
+              ctx.beginPath(); ctx.arc(mx + (n.x - mx) * pp, my + (n.y - my) * pp, 2.4 - s * 0.25, 0, 6.2832); ctx.fill();
+            }
+          }
+        }
+        // nearest sessions reach for the cursor
+        if (px > -1e3) {
+          for (const n of nodes) if (n.pull > 0.25) {
+            ctx.strokeStyle = mix(col["--accent"], n.pull * 0.6); ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.lineTo(px, py); ctx.stroke();
+          }
+        }
+
+        // sessions, with glow
+        for (const n of nodes) {
+          const c = col[KEY[n.state]], pulse = still ? 0 : (Math.sin(t / 650 + n.i) + 1) / 2, hot = Math.max(n.pull, n.glow);
+          const r = 3.6 + hot * 3 + (n === hover ? 1.6 : 0);
+          const hg = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r * 6);
+          hg.addColorStop(0, mix(c, dark ? 0.45 + hot * 0.4 : 0.25)); hg.addColorStop(1, mix(c, 0));
+          ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(n.x, n.y, r * 6, 0, 6.2832); ctx.fill();
+          if (n.state === "needs you") { ctx.strokeStyle = mix(c, 0.7 * (1 - pulse)); ctx.lineWidth = 1.3; ctx.beginPath(); ctx.arc(n.x, n.y, r + 3 + pulse * 10, 0, 6.2832); ctx.stroke(); }
+          ctx.fillStyle = c; ctx.beginPath(); ctx.arc(n.x, n.y, r, 0, 6.2832); ctx.fill();
+        }
+        ctx.globalCompositeOperation = "source-over";
+
+        // hover tile
+        if (hover) {
+          const label = hover.name, st = hover.state;
+          ctx.font = "500 13px Geist, system-ui, sans-serif";
+          const tw = Math.max(ctx.measureText(label).width, ctx.measureText(st).width + 14) + 24, th = 46;
+          let bx = hover.x + 16, by = hover.y - th - 10;
+          if (bx + tw > w - 8) bx = hover.x - tw - 16;
+          if (by < 8) by = hover.y + 14;
+          ctx.fillStyle = col["--raised"]; ctx.strokeStyle = mix(col[KEY[st]], 0.6); ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.roundRect(bx, by, tw, th, 9); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = col["--fg"]; ctx.fillText(label, bx + 12, by + 19);
+          ctx.fillStyle = col[KEY[st]]; ctx.beginPath(); ctx.arc(bx + 15, by + 32, 3, 0, 6.2832); ctx.fill();
+          ctx.font = "400 12px Geist, system-ui, sans-serif"; ctx.fillStyle = col["--fg-2"]; ctx.fillText(st, bx + 24, by + 36);
+        }
+        raf = still ? 0 : requestAnimationFrame(draw);
+      }
+
+      const kick = () => { if (!raf) raf = requestAnimationFrame(draw); };
+      addEventListener("pointermove", (e) => { const r = cv.getBoundingClientRect(); px = e.clientX - r.left; py = e.clientY - r.top; if (still) kick(); });
+      document.addEventListener("pointerleave", () => { px = py = -1e4; if (still) kick(); });
+      const restart = () => { cancelAnimationFrame(raf); raf = 0; size(); raf = requestAnimationFrame(draw); };
+      addEventListener("resize", restart);
+      matchMedia("(prefers-color-scheme: light)").addEventListener("change", restart);
+      if (document.fonts) document.fonts.ready.then(restart);
+      restart();
+    })();
+  </script>
 
   <script>
     (async () => {
