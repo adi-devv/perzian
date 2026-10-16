@@ -8,16 +8,16 @@
 - Agents are wrapped over the Agent Client Protocol (ACP); Perzian never runs its own agent loop.
 
 ## Get started
-- [README and install](https://github.com/adi-devv/perzian#readme): `git clone https://github.com/adi-devv/perzian && cd perzian && npm install && npm run app`
+- [README and install](https://github.com/perzianhq/perzian#readme): `git clone https://github.com/perzianhq/perzian && cd perzian && npm install && npm run app`
 - [Live demo](https://perzian.dev/demo/)
-- [Releases](https://github.com/adi-devv/perzian/releases)
+- [Releases](https://github.com/perzianhq/perzian/releases)
 
 ## Docs
-- [Vision](https://github.com/adi-devv/perzian/blob/main/docs/VISION.md): why Perzian exists
-- [Architecture](https://github.com/adi-devv/perzian/blob/main/docs/ARCHITECTURE.md): daemon, ACP sessions, worktrees, events
-- [Features](https://github.com/adi-devv/perzian/blob/main/FEATURES.md): what's built
-- [Roadmap](https://github.com/adi-devv/perzian/blob/main/docs/ROADMAP.md)
+- [Vision](https://github.com/perzianhq/perzian/blob/main/docs/VISION.md): why Perzian exists
+- [Architecture](https://github.com/perzianhq/perzian/blob/main/docs/ARCHITECTURE.md): daemon, ACP sessions, worktrees, events
+- [Features](https://github.com/perzianhq/perzian/blob/main/FEATURES.md): what's built
+- [Roadmap](https://github.com/perzianhq/perzian/blob/main/docs/ROADMAP.md)
 
 ## Optional
-- [Contributing / CLA](https://github.com/adi-devv/perzian/blob/main/CLA.md)
-- [License (AGPL-3.0)](https://github.com/adi-devv/perzian/blob/main/LICENSE)
+- [Contributing / CLA](https://github.com/perzianhq/perzian/blob/main/CLA.md)
+- [License (AGPL-3.0)](https://github.com/perzianhq/perzian/blob/main/LICENSE)

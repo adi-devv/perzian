@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mantis by Perzian</title>
+  <meta name="description" content="Mantis lets AI agents browse the web as short, numbered text instead of screenshots. Open-source MCP server by Perzian." />
+  <meta property="og:title" content="Mantis by Perzian" />
+  <meta property="og:description" content="The web as short, numbered text for AI agents." />
+  <meta property="og:url" content="https://perzian.dev/mantis/" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="theme-color" content="#111312" />
+  <link rel="canonical" href="https://perzian.dev/mantis/" />
+  <link rel="icon" href="../assets/mark.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500&family=Geist+Mono:wght@400;500&display=swap" />
+  <style>
+    :root { --bg: #111312; --fg: #ecebe4; --fg-2: #8a8f87; --line: #2a2e2b; --lime: #a3e635; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--bg); color: var(--fg); font: 16px/1.5 "Outfit", ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; overflow: hidden; }
+    canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+    /* keeps the centre calm so the text reads over the dots */
+    .veil { position: fixed; inset: 0; pointer-events: none; background: radial-gradient(ellipse 42% 34% at 50% 50%, var(--bg) 0%, color-mix(in srgb, var(--bg) 70%, transparent) 55%, transparent 100%); }
+    main { position: fixed; inset: 0; display: grid; place-content: center; justify-items: center; gap: 18px; text-align: center; padding: 24px; pointer-events: none; }
+    main > * { pointer-events: auto; }
+    h1 { margin: 0; font-size: clamp(64px, 14vw, 132px); line-height: 1; font-weight: 500; letter-spacing: -0.04em; }
+    h1 span { color: var(--lime); font-weight: 400; animation: blink 1.2s steps(1) infinite; }
+    @keyframes blink { 50% { opacity: 0; } }
+    .by { margin: 0; font-size: clamp(18px, 2.4vw, 24px); color: var(--fg-2); }
+    .by a { color: var(--fg); text-decoration: none; border-bottom: 1px solid var(--line); }
+    .by a:hover { border-color: var(--lime); }
+    .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 10px; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 18px; border-radius: 9px; border: 1px solid var(--line); background: rgba(17, 19, 18, 0.7); color: var(--fg); font: 500 15px "Outfit", sans-serif; text-decoration: none; cursor: pointer; transition: border-color 0.15s, color 0.15s; }
+    .btn:hover { border-color: var(--lime); color: var(--lime); }
+    .btn svg { width: 16px; height: 16px; fill: currentColor; }
+    .cmd { font: 400 12.5px "Geist Mono", ui-monospace, monospace; color: var(--fg-2); max-width: 92vw; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+    .cmd b { color: var(--lime); font-weight: 400; }
+    :focus-visible { outline: 1.5px solid var(--lime); outline-offset: 3px; border-radius: 6px; }
+    @media (prefers-reduced-motion: reduce) { h1 span { animation: none; } }
+  </style>
+</head>
+<body>
+  <canvas id="dots" aria-hidden="true"></canvas>
+  <div class="veil" aria-hidden="true"></div>
+  <main>
+    <h1>mantis<span>_</span></h1>
+    <p class="by">by <a href="../">Perzian</a></p>
+    <div class="links">
+      <a class="btn" href="https://github.com/perzianhq/mantis" target="_blank" rel="noopener"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>perzianhq/mantis</a>
+      <button class="btn" type="button" id="copy" aria-label="Copy install command">Copy install command</button>
+    </div>
+    <code class="cmd" id="cmd"><b>$</b> claude mcp add mantis -- npx -y -p mantis-browser mantis-mcp</code>
+  </main>
+
+  <script>
+    (() => {
+      const cv = document.getElementById("dots");
+      const ctx = cv.getContext("2d");
+      const GAP = 22, R = 1.7, REACH = 150;
+      const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+      const base = ["#3a3f3b", "#565c57", "#a3e635"];
+      let dots = [], w = 0, h = 0, dpr = 1, mx = -1e4, my = -1e4, raf = 0;
+
+      function build() {
+        dpr = Math.min(devicePixelRatio || 1, 2);
+        w = innerWidth; h = innerHeight;
+        cv.width = w * dpr; cv.height = h * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        dots = [];
+        for (let y = GAP / 2; y < h; y += GAP) {
+          for (let x = GAP / 2; x < w; x += GAP) {
+            if (Math.random() < 0.18) continue; // gaps, like the banner
+            const c = Math.random();
+            dots.push({ x, y, col: c < 0.14 ? 2 : c < 0.5 ? 1 : 0, a: 0.45 + Math.random() * 0.5, p: Math.random() * 6.28, s: 0.4 + Math.random() * 0.8, k: 0 });
+          }
+        }
+      }
+
+      function frame(t) {
+        ctx.clearRect(0, 0, w, h);
+        for (const d of dots) {
+          const dx = d.x - mx, dy = d.y - my;
+          const near = Math.max(0, 1 - Math.hypot(dx, dy) / REACH);
+          d.k += (near - d.k) * 0.14; // ease toward the cursor's influence
+          const tw = still ? 1 : 0.8 + 0.2 * Math.sin(t / 1000 * d.s + d.p);
+          const r = R * (1 + d.k * 1.9);
+          ctx.globalAlpha = Math.min(1, d.a * tw + d.k * 0.6);
+          ctx.fillStyle = d.k > 0.04 ? "#a3e635" : base[d.col];
+          ctx.beginPath(); ctx.arc(d.x, d.y, r, 0, 6.2832); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        raf = still ? 0 : requestAnimationFrame(frame);
+      }
+
+      function start() { cancelAnimationFrame(raf); build(); raf = requestAnimationFrame(frame); }
+      addEventListener("pointermove", (e) => { mx = e.clientX; my = e.clientY; if (still && !raf) raf = requestAnimationFrame(frame); });
+      addEventListener("pointerleave", () => { mx = my = -1e4; });
+      addEventListener("resize", start);
+      start();
+
+      const btn = document.getElementById("copy");
+      btn.addEventListener("click", async () => {
+        const text = document.getElementById("cmd").textContent.replace(/^\$\s*/, "");
+        try { await navigator.clipboard.writeText(text); btn.textContent = "Copied"; } catch { btn.textContent = "Select it below"; }
+        setTimeout(() => (btn.textContent = "Copy install command"), 1600);
+      });
+    })();
+  </script>
+</body>
+</html>
